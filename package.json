@@ -1,0 +1,36 @@
+{
+  "name": "mission-control",
+  "version": "0.1.0",
+  "description": "Autonomous overnight coding orchestrator that drives the official Claude Code and Codex CLIs",
+  "type": "module",
+  "bin": {
+    "mc": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "prompts",
+    "stacks",
+    "templates"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "commander": "^15.0.0",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
