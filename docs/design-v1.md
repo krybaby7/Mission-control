@@ -87,7 +87,7 @@ claude -p "<prompt>" --model <m> --effort <e> --output-format stream-json --verb
 
 - **Limit signals:** `rate_limit_event` (carries `resetsAt`) and `system/api_retry` with `rate_limit`, plus the text form `You've hit your … limit · resets <time>`. Users report events appearing mid-line in the stream, so parse NDJSON defensively.
 
-**CodexRunner** maps the job to `codex exec --json --output-schema <file> -m <model> -c model_reasoning_effort=<e> --sandbox <read-only|workspace-write> …`. Exact flags are in §2.1. The richer alternative is `codex app-server` (JSON-RPC), which vibe-kanban uses.
+**CodexRunner** maps the job to `codex exec --json --output-schema <file> -m <model> -c model_reasoning_effort=<e> --sandbox <…>`. Exact flags and gotchas are in §2.1. A small `codex app-server` client polls rate limits. Moving the whole runner onto app-server (as vibe-kanban does) is a later option.
 
 **Pin both CLI versions** in the container image. Upgrade deliberately, re-running the smoke suite.
 
@@ -108,14 +108,14 @@ profiles:
     scout:     { provider: claude, model: haiku,  effort: low }      # one-shot functions
     reviewer:  { provider: claude, model: opus,   effort: high }
   codex:                        # everything on the ChatGPT subscription
-    architect: { provider: codex, model: <gpt-frontier>, effort: high }
-    engineer:  { provider: codex, model: <gpt-coder>,    effort: medium }
-    mechanic:  { provider: codex, model: <gpt-small>,    effort: medium }
-    scout:     { provider: codex, model: <gpt-small>,    effort: low }
-    reviewer:  { provider: codex, model: <gpt-frontier>, effort: high }
+    architect: { provider: codex, model: gpt-6-astra, effort: high }    # scarce on Plus (5–45 msgs/5h): few calls only
+    engineer:  { provider: codex, model: gpt-6.1-sol, effort: medium }
+    mechanic:  { provider: codex, model: gpt-6-luna,  effort: high }    # OpenAI suggests starting Luna at high
+    scout:     { provider: codex, model: gpt-6-luna,  effort: medium }
+    reviewer:  { provider: codex, model: gpt-6.1-sol, effort: high }    # Astra if on Pro
   mixed:                        # spread load over BOTH quota pools + cross-family review
     architect: { provider: claude, model: opus,   effort: high }
-    engineer:  { provider: codex,  model: <gpt-coder>, effort: medium }
+    engineer:  { provider: codex,  model: gpt-6.1-sol, effort: medium }
     mechanic:  { provider: claude, model: haiku,  effort: medium }
     scout:     { provider: claude, model: haiku,  effort: low }
     reviewer:  { provider: claude, model: opus,   effort: high }     # always the other family from the engineer
@@ -143,13 +143,50 @@ Switch with `mc run --profile codex`. Override a single role with `--role engine
 
 ### 2.1 Codex specifics
 
-_(filled in from the Codex CLI research; see below)_
+Checked against learn.chatgpt.com docs and the openai/codex source. The latest release is `rust-v0.162.1` (2026-10-09). **Pin it.**
+
+**Models with ChatGPT sign-in** ([models](https://learn.chatgpt.com/docs/models)):
+
+| Tier | Model | Plus usage per 5 h (OpenAI's estimate) | Role fit |
+|---|---|---|---|
+| Frontier | `gpt-6-astra` | 5–45 messages | architect, gates (rarely) |
+| Standard (CLI default) | `gpt-6.1-sol` | 15–160 | engineer, reviewer |
+| Cheap / fast | `gpt-6-luna` | 350–3,000 | scout, mechanic: **Codex's Haiku** |
+
+- Effort levels are `low…xhigh|max|ultra`. **`ultra` fans out to subagents. Never use it implicitly**: set effort explicitly per role.
+- `gpt-5.5` retires from ChatGPT sign-in on **Oct 14, 2026**. Validate model ids at startup with `codex debug models`.
+- On Pro, OpenAI says there is "currently no five-hour limit". Weekly caps are unclear.
+
+**CodexRunner command:**
+
+```
+codex exec -C <worktree> -m <model> -c model_reasoning_effort='"<effort>"' \
+  --sandbox <read-only|danger-full-access> --skip-git-repo-check \
+  --json --output-schema <schema.json> -o <final.md> "<prompt>"     # follow-ups: codex exec resume <id> "…"
+```
+
+| Gotcha | Handling |
+|---|---|
+| `--json` emits `thread.started`, `turn.completed{usage}`, `turn.failed`, `item.*` (`command_execution`, `file_change`, `agent_message`, `todo_list`, …). Some `error` events are recovered retries. | Decide success from `turn.failed` + the exit code |
+| Usage in `turn.completed` is the **thread total** | Subtract the previous total on resumed sessions |
+| A usage limit gives **exit 1** + "You've hit your usage limit… Try again at 3:45 PM" (local-time text). No structured reset time in exec. | Parse the text as a fallback. Primary: poll `codex app-server` → `account/rateLimits/read` (`usedPercent`, `resetsAt`), which also feeds **pacing** |
+| `workspace-write` has **no network**, and the bwrap sandbox can fail inside Docker | Inside *our* container, use `danger-full-access`; the container is the sandbox. Read-only roles use `--sandbox read-only`. |
+| Exec auto-**rejects** approval requests | Grant everything up front (sandbox mode). Never rely on prompts. |
+| Profiles changed in 0.134+: `[profiles.x]` is silently ignored | A profile is now `~/.codex/<name>.config.toml`, selected with `-p <name>`. We pass `-c` overrides per run instead. |
+| One `auth.json` must not be shared by concurrent jobs. It refreshes in place. | Serialize Codex runs per auth file in the MVP. Mount `~/.codex` read-write so refreshes persist. |
+| Hooks only run once trusted by hash | We don't depend on hooks. If we add some: `--dangerously-bypass-hook-trust` inside the container. |
+| `codex mcp-server` has been removed | Use `codex app-server` (JSON-RPC, "experimental") or the `@openai/codex-sdk`. MVP uses `exec`. |
+
+**Headless auth:** `codex login --device-auth` (enable device-code login in ChatGPT security settings first). Or log in elsewhere and copy `~/.codex/auth.json`. Check with `codex login status`.
+
+**Allowed?** OpenAI's pricing matrix lists "Codex SDK, `codex exec`, and scriptable workflows" on Plus/Pro/Business. Subscription auth for "commercial or hosted services" is not allowed. **Personal use is fine.**
 
 ### 2.2 Shared instructions across both CLIs
 
 - **`AGENTS.md` is the single source of truth** for project conventions. Codex reads it natively, and Claude Code ≥ 2.1.277 reads it natively **when no `CLAUDE.md` exists**. So: no `CLAUDE.md` in generated projects, or a one-line `CLAUDE.md` containing `@AGENTS.md`.
 - **Role prompts** (`roles/*.md`) live in the orchestrator, not the project. They are provider-neutral and injected per run (`--append-system-prompt-file` for Claude, prompt preamble or config for Codex).
-- **Skills** use the open Agent Skills format. The canonical location is `.claude/skills/`, symlinked to Codex's skills directory (§2.1).
+- **Skills** use the open Agent Skills format (`SKILL.md` + frontmatter), which both CLIs read. The canonical location is **`.agents/skills/`**, which Codex reads, with a symlink `.claude/skills → ../.agents/skills` for Claude Code. Codex follows symlinks.
+- **Keep `AGENTS.md` short**, like a table of contents. Codex caps the combined AGENTS.md chain at 32 KiB, and short files are better for context anyway.
 - **MCP:** the repo-knowledge service (Phase 3) is an MCP server, so both CLIs use the same one.
 
 ---
@@ -213,6 +250,9 @@ OK ─► LIMITED(kind, resetsAt)  kind ∈ {session, weekly, model:<name>, spen
         all providers limited → Dispatcher sleeps until the earliest resetsAt; state is in SQLite, so a reboot is safe
 ```
 
+- **Limit signals:**
+  - Claude: `rate_limit_event.resetsAt` in stream-json, or the text form `You've hit your … limit · resets <time>`. `--fallback-model` does *not* trigger on usage limits, so the governor switches models itself.
+  - Codex: `account/rateLimits/read` via app-server (`usedPercent`, `resetsAt`), or a fallback parse of exit 1 + "Try again at <local time>".
 - **Usage ledger:** per run, record provider, model, effort, tokens, est. cost, and wall time. Per night, the share of weekly limit used is *estimated* from token totals against calibrated plan budgets.
 - **Pacing:** stop starting new non-critical work when a provider's estimated weekly share for tonight exceeds `max_weekly_share_per_night`. That keeps your daytime interactive use alive.
 - **Never resume a session after a long sleep.** The cache is cold, so start a fresh session from the ledger. Resume only within a few minutes.
@@ -249,3 +289,15 @@ OK ─► LIMITED(kind, resetsAt)  kind ∈ {session, weekly, model:<name>, spen
 **Out of scope for now:** repo knowledge graph and file cards, learned router, ACE playbook, dashboard, parallel units. Start with **one unit at a time** (single writer). Add parallel worktrees after a few clean nights.
 
 **First real test:** three small greenfield specs (e.g. a todo app with auth, a markdown notes app, a URL shortener with stats) + three feature tasks on one of them. Run each under the `claude`, `codex` and `mixed` profiles. Compare verified features per night, usage share, and how often you had to fix things in the morning.
+
+---
+
+## 7. Open questions
+
+1. **Where will it run overnight?**
+   - (a) A small Linux VPS. Recommended: always on, cheap, reachable from the iPad over SSH or Tailscale.
+   - (b) A home computer that stays on.
+   - (c) Claude cloud routines, for Claude-only missions.
+2. **Which plan tiers?** Claude Pro / Max 5x / Max 20x, and ChatGPT Plus / Pro. This sets the pacing defaults and whether `gpt-6-astra` can hold the reviewer seat.
+3. **House stack** for new apps. Default proposal: Next.js + TypeScript + SQLite (Prisma or Drizzle) + Playwright + Vitest.
+4. **Where should results land?** A PR on GitHub per mission (needs a repo per app) or a branch you review.
