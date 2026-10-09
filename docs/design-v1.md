@@ -8,6 +8,17 @@ This builds on [`brainstorm.md`](./brainstorm.md). It turns the brainstorm into 
 | New apps, features: coding | Two mission types: **greenfield** (initializer phase first) and **feature** (onboarding phase first). Verification is executable: unit tests, typecheck, and Playwright e2e. |
 | Fully autonomous overnight | Quota governor (sleep, fail over, pace), crash-safe state, hard isolation, loop guards, a morning report, and push notifications. A human is only needed in the morning. |
 
+### Decisions (2026-10-09)
+
+| Question | Answer → what we build |
+|---|---|
+| Where it runs | **Your Windows PC**: WSL2 (Ubuntu) + Docker Desktop. Agents run in a container. Setup guide: [`setup-windows.md`](./setup-windows.md). |
+| Plans | **Claude Max 5x + ChatGPT Pro 5x.** Pro currently has no 5-hour window, so Codex is the bigger overnight pool. Astra can hold the reviewer seat. |
+| House stack | You said "anything", so: **Next.js + TypeScript + Tailwind + SQLite (Drizzle) + Vitest + Playwright**. It's the most common, best-supported web stack for agents, and runs locally with no paid services. |
+| Model rule | **Light work is always Haiku 5.5 (no Luna).** Frontier tier = Opus 5.5 / GPT-6 Astra. Standard tier = Sonnet 5.5 / GPT-6.1 Sol. |
+
+**Separation of duties for quality.** Each feature's acceptance tests are written *before* the build by a **test author** from the other model family. The test author must prove the tests fail first. The tests are then frozen (hashed), and the engineer has to make them pass without touching them.
+
 ---
 
 ## 0. Subscription rules: what's allowed (read this)
@@ -110,8 +121,8 @@ profiles:
   codex:                        # everything on the ChatGPT subscription
     architect: { provider: codex, model: gpt-6-astra, effort: high }    # scarce on Plus (5–45 msgs/5h): few calls only
     engineer:  { provider: codex, model: gpt-6.1-sol, effort: medium }
-    mechanic:  { provider: codex, model: gpt-6-luna,  effort: high }    # OpenAI suggests starting Luna at high
-    scout:     { provider: codex, model: gpt-6-luna,  effort: medium }
+    mechanic:  { provider: claude, model: haiku,  effort: medium }   # light work is always Haiku 5.5 (no Luna)
+    scout:     { provider: claude, model: haiku,  effort: low }
     reviewer:  { provider: codex, model: gpt-6.1-sol, effort: high }    # Astra if on Pro
   mixed:                        # spread load over BOTH quota pools + cross-family review
     architect: { provider: claude, model: opus,   effort: high }
@@ -151,7 +162,7 @@ Checked against learn.chatgpt.com docs and the openai/codex source. The latest r
 |---|---|---|---|
 | Frontier | `gpt-6-astra` | 5–45 messages | architect, gates (rarely) |
 | Standard (CLI default) | `gpt-6.1-sol` | 15–160 | engineer, reviewer |
-| Cheap / fast | `gpt-6-luna` | 350–3,000 | scout, mechanic: **Codex's Haiku** |
+| Cheap / fast | `gpt-6-luna` | 350–3,000 | **Not used** (user preference). Light work goes to Haiku 5.5. |
 
 - Effort levels are `low…xhigh|max|ultra`. **`ultra` fans out to subagents. Never use it implicitly**: set effort explicitly per role.
 - `gpt-5.5` retires from ChatGPT sign-in on **Oct 14, 2026**. Validate model ids at startup with `codex debug models`.
@@ -292,7 +303,7 @@ OK ─► LIMITED(kind, resetsAt)  kind ∈ {session, weekly, model:<name>, spen
 
 ---
 
-## 7. Open questions
+## 7. Open questions (answered 2026-10-09, see Decisions at the top)
 
 1. **Where will it run overnight?**
    - (a) A small Linux VPS. Recommended: always on, cheap, reachable from the iPad over SSH or Tailscale.
