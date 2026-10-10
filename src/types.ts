@@ -214,6 +214,11 @@ export interface Config {
     maxFiveHourUtilization: number;
     /** Don't START new work on a provider whose 7-day utilization is above this (0..1). */
     maxWeeklyUtilization: number;
+    /**
+     * Don't START new work on a provider once its 7-day utilization has grown by this much (0..1) since this night
+     * run first read it, leaving the rest of the week for the user. Unset: no per-night cap.
+     */
+    maxWeeklySharePerNight?: number;
   };
   notify: {
     /** e.g. https://ntfy.sh/my-secret-topic ; empty = disabled. */
@@ -402,6 +407,21 @@ export interface Mission {
   agentRuns: number;
   /** Free-form operator notes appended by the dispatcher (shown in report). */
   notes: string[];
+  /**
+   * Set while the mission is "failed": the note and the decision that failure added (both removed again when the
+   * mission runs again), and whether a plain `mc run` retries it by itself (an expired login, which the owner fixes
+   * outside Mission Control). Absent on missions saved before it existed, and on missions that never failed.
+   */
+  failure?: MissionFailure;
+}
+
+export interface MissionFailure {
+  /** The note the failure added to `notes`. */
+  reason: string;
+  /** The entry the failure added to `decisionsNeeded`, if any. */
+  decision?: string;
+  /** A plain `mc run` picks the mission up again (only `mc run --mission <id>` does otherwise). */
+  retryable: boolean;
 }
 
 /** One line in <home>/missions/<id>/events.jsonl. */

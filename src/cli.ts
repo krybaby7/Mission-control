@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 // `mc`: the Mission Control command line. Every command prints plain language; the exit code is 0 when it worked
 // and 1 when it didn't.
-import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError } from "commander";
 import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
-import { configPath, configTemplateYaml, defaultConfig, inContainer, loadConfig, parseRoleOverride } from "./config.js";
-import { type DoctorCheck, runDoctor } from "./doctor.js";
+import { ConfigProblemsError, configPath, configTemplateYaml, defaultConfig, inContainer, loadConfig, parseRoleOverride } from "./config.js";
+import { type DoctorCheck, runDoctor, unkeptFolderProblems } from "./doctor.js";
 import { Git } from "./git.js";
 import { packageRoot } from "./prompts.js";
 import { findMission, missionOutcome, runNight } from "./run.js";
@@ -16,6 +17,7 @@ import { MissionStore } from "./state.js";
 import type { Config, Mission, MissionEvent, MissionStatus, RoleOverride } from "./types.js";
 import { ensureDir, expandHome } from "./util/fs.js";
 import { runProcess } from "./util/process.js";
+import { stripControlChars } from "./util/terminal.js";
 
 /** Where the CLI writes; tests capture it. */
 export interface CliIO {
@@ -45,7 +47,10 @@ Examples:
   mc stop                                   stop a run after its current step`;
 
 /** Runs `mc` with the given argv (as in process.argv) and returns the exit code. */
-export async function main(argv: string[], io: CliIO = processIO): Promise<number> {
+export async function main(argv: string[], given: CliIO = processIO): Promise<number> {
+  // Agents write much of what mc prints (report prose, findings, run errors, event summaries): control characters
+  // in it could drive the terminal (OSC 52 writes the clipboard), so they never reach it.
+  const io: CliIO = { stdout: (text) => given.stdout(stripControlChars(text)), stderr: (text) => given.stderr(stripControlChars(text)) };
   let exitCode = 0;
   const program = buildProgram(io, (code) => {
     exitCode = Math.max(exitCode, code);
@@ -91,22 +96,23 @@ function buildProgram(io: CliIO, setExit: (code: number) => void): Command {
     .option("--live", "also make one tiny real request to each AI (uses a little of your plans)")
     .action(async (opts: { live?: boolean }) => setExit(await doctorCommand(io, opts.live === true)));
 
+  // The description is variadic: `mc new A habit tracker` (quotes forgotten) means the same as with quotes.
   program
-    .command("new <idea>")
-    .description("queue a new app, described in your own words")
+    .command("new <idea...>")
+    .description('queue a new app, described in your own words (best in quotes: mc new "A habit tracker")')
     .option("--name <title>", "a short name for the app")
     .option("--profile <profile>", "which AI does what: claude, codex or mixed (see your settings)")
     .option("--role <setting>", "change one role, e.g. engineer=codex:frontier (can be repeated)", collect, [])
-    .action((idea: string, opts: MissionOptions) => newCommand(io, idea, opts));
+    .action((idea: string[], opts: MissionOptions) => newCommand(io, idea.join(" "), opts));
 
   program
-    .command("feature <app-folder> <request>")
+    .command("feature <app-folder> <request...>")
     .description("queue a change to an app that already exists")
     .option("--base <branch>", "the branch to start from (default: the one checked out)")
     .option("--name <title>", "a short name for the change")
     .option("--profile <profile>", "which AI does what: claude, codex or mixed (see your settings)")
     .option("--role <setting>", "change one role, e.g. reviewer=claude (can be repeated)", collect, [])
-    .action((folder: string, request: string, opts: FeatureOptions) => featureCommand(io, folder, request, opts));
+    .action((folder: string, request: string[], opts: FeatureOptions) => featureCommand(io, folder, request.join(" "), opts));
 
   program
     .command("run")
@@ -175,8 +181,11 @@ function packageVersion(): string {
 function friendlyError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   const lock = /another mc run is active \((.+)\)/.exec(message);
-  if (lock) return `A Mission Control run is already active (${lock[1]}). Check it with "mc status", or stop it with "mc stop".`;
-  return message;
+  if (!lock) return message;
+  const text = `A Mission Control run is already active (${lock[1]}). Check it with "mc status", or stop it with "mc stop".`;
+  // A run in another container can't be checked from here: its lock counts until its heartbeat is 5 minutes old.
+  if (!lock[1]?.includes(" on host ")) return text;
+  return `${text} If no run is working (in Ubuntu, "docker ps" doesn't list mission-control-run), the last one was cut off: wait 5 minutes, then try again.`;
 }
 
 function say(write: (text: string) => void, ...lines: string[]): void {
@@ -250,8 +259,17 @@ function configSet(io: CliIO, key: string, raw: string): void {
   } catch {
     throw new Error(`"${key}" can't be set: part of that name is a single value, not a group of settings.`);
   }
-  saveIfValid(file, doc.toString());
+  const leftOver = saveIfValid(file, doc.toString());
   say(io.stdout, `Saved: ${key} = ${raw}`, `Settings file: ${file}`);
+  if (leftOver.length > 0) {
+    say(
+      io.stdout,
+      "",
+      `Your settings still have ${leftOver.length === 1 ? "a problem" : `${leftOver.length} problems`} from before:`,
+      ...leftOver.map((p) => `  - ${p}`),
+      'Fix it the same way (mc config set <setting> <value>), then run "mc doctor" to check.',
+    );
+  }
 }
 
 function settingPath(key: string): string[] {
@@ -293,19 +311,61 @@ function settingValue(path: string[], raw: string): unknown {
   }
 }
 
-/** Writes the new settings next to the file, checks them like `mc run` would, then swaps them in. */
-function saveIfValid(file: string, text: string): void {
+/**
+ * Writes the new settings next to the file, checks them like `mc run` would, then swaps them in. Refuses a change
+ * that adds a problem, saying only what is wrong with the new value: the file itself is untouched. A change that
+ * adds none is saved even while other settings still have problems (so they can be fixed one at a time); those are
+ * returned.
+ */
+function saveIfValid(file: string, text: string): string[] {
   ensureDir(dirname(file));
   const draft = `${file}.${process.pid}.draft`;
   writeFileSync(draft, text);
+  let problems: string[];
   try {
-    loadConfig(draft);
+    problems = settingsProblems(draft);
   } catch (err) {
     rmSync(draft, { force: true });
     const why = (err instanceof Error ? err.message : String(err)).replaceAll(draft, file);
     throw new Error(`Nothing was changed, because the new value doesn't work:\n${why}`);
   }
+  const before = existsSync(file) ? settingsProblemsOrNone(file) : [];
+  const added = problems.filter((p) => !before.includes(p));
+  if (added.length > 0) {
+    rmSync(draft, { force: true });
+    throw new Error(
+      [
+        "Nothing was changed, because the new value doesn't work:",
+        ...added.map((p) => `  - ${p}`),
+        "Your settings file is as it was. Correct the value and try again.",
+      ].join("\n"),
+    );
+  }
   renameSync(draft, file);
+  return problems;
+}
+
+/**
+ * The problems of the settings in `file`, one plain sentence each ([] when they are fine). Inside the container a
+ * folder setting pointing where nothing is kept counts too. Throws when the file can't be read as settings at all.
+ */
+function settingsProblems(file: string): string[] {
+  let config: Config;
+  try {
+    config = loadConfig(file);
+  } catch (err) {
+    if (err instanceof ConfigProblemsError) return err.problems;
+    throw err;
+  }
+  return unkeptFolderProblems(config);
+}
+
+function settingsProblemsOrNone(file: string): string[] {
+  try {
+    return settingsProblems(file);
+  } catch {
+    return [];
+  }
 }
 
 // ───────────────────────────── doctor ─────────────────────────────
@@ -353,8 +413,9 @@ async function featureCommand(io: CliIO, folder: string, requestText: string, op
   const config = loadConfig();
   const choices = missionChoices(config, opts);
   const repoPath = await checkRepo(resolve(expandHome(folder)));
-  const baseBranch = await checkBaseBranch(repoPath, opts.base);
-  const mission = openStore(config).createMission({
+  const store = openStore(config);
+  const baseBranch = await checkBaseBranch(repoPath, opts.base, store);
+  const mission = store.createMission({
     kind: "feature",
     title: missionTitle(opts.name, request),
     request,
@@ -392,7 +453,16 @@ export function missionTitle(name: string | undefined, request: string): string 
 
 /** The app folder must be the top folder of a git repository with its full history. Returns its canonical path. */
 async function checkRepo(dir: string): Promise<string> {
-  if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`There is no folder at ${dir}.`);
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+    const apps = join(homedir(), "mc-apps");
+    const outside = inContainer() && dir !== apps && !dir.startsWith(`${apps}/`);
+    // In the container a folder elsewhere on the computer looks missing: only ~/mc-apps is shared with it.
+    const hint = outside
+      ? " Mission Control works in a container that only sees your ~/mc-apps folder. Put the app's folder there, then give its path, " +
+        'for example: mc feature ~/mc-apps/<app-folder> "<your request>"'
+      : "";
+    throw new Error(`There is no folder at ${dir}.${hint}`);
+  }
   const git = new Git();
   const notRepo = `${dir} is not a git repository. Mission Control needs the app's git history to change it safely. ` +
     `Inside that folder, run "git init", then commit your files.`;
@@ -409,34 +479,72 @@ async function checkRepo(dir: string): Promise<string> {
   return realpathSync(dir);
 }
 
-async function checkBaseBranch(repo: string, given: string | undefined): Promise<string> {
+async function checkBaseBranch(repo: string, given: string | undefined, store: MissionStore): Promise<string> {
   const git = new Git();
   let branch = given;
   if (branch === undefined) {
     try {
       branch = await git.currentBranch(repo);
     } catch {
-      throw new Error(`${repo} has no branch checked out. Choose the branch to start from with --base <branch>.`);
+      throw new Error(await detachedHint(git, repo, store));
     }
   }
   if (!(await git.branchExists(repo, branch))) throw new Error(`There is no branch called "${branch}" in ${repo}.`);
   return branch;
 }
 
+/**
+ * Why `mc feature` needs --base on a folder without a branch checked out, and how to get out of it. A report's
+ * "How to try it" can leave the folder there (a detached checkout of a mission's work), so the branch that folder
+ * was on before, as the last mission on it recorded it, is the way back.
+ */
+async function detachedHint(git: Git, repo: string, store: MissionStore): Promise<string> {
+  const previous = store.list().filter((m) => m.repoPath === repo && m.baseBranch !== "").at(-1)?.baseBranch;
+  const candidates = [previous, "main", "master"].filter((b): b is string => b !== undefined);
+  let back: string | undefined;
+  for (const candidate of candidates) {
+    if (await git.branchExists(repo, candidate).catch(() => false)) {
+      back = candidate;
+      break;
+    }
+  }
+  const choose = "Choose the branch to start from with --base <branch>.";
+  if (back === undefined) return `${repo} has no branch checked out. ${choose}`;
+  return (
+    `${repo} has no branch checked out: it is still on a version you were trying (as a report's "How to try it" leaves it). ` +
+    `Put it back on your branch first: git -C ${shownPath(repo)} checkout ${back}. Or ${choose[0]?.toLowerCase()}${choose.slice(1)}`
+  );
+}
+
+/** A path as the owner can type it: inside the container, paths in its home are written with "~", which also works in Ubuntu. */
+function shownPath(path: string): string {
+  const home = homedir();
+  if (inContainer() && path.startsWith(`${home}/`)) return `~/${shellWord(path.slice(home.length + 1))}`;
+  return shellWord(path);
+}
+
+function shellWord(s: string): string {
+  return /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
 // ───────────────────────────── run / stop ─────────────────────────────
 
 async function runCommand(io: CliIO, opts: RunOptions): Promise<void> {
-  const { missions, summaryPath } = await runNight({
+  const { missions, summaryPath, waitingForYou } = await runNight({
     ...(opts.until !== undefined && { until: opts.until }),
     ...(opts.mission !== undefined && { missionId: opts.mission }),
     ...(opts.profile !== undefined && { profile: opts.profile }),
     roleOverrides: opts.role.map(parseRoleOverride),
   });
   const lines = missions.map((m) => `- ${m.title}: ${missionOutcome(m)}`);
+  // A failed mission is not "nothing queued": it waits for its owner, who needs the command that continues it.
+  const help = waitingForYou.map((m) => `- ${m.title} needs your help: see what with "mc report ${m.id}", then run "mc run --mission ${m.id}"`);
+  const nothing = waitingForYou.length > 0 ? "No mission could run by itself:" : "Nothing was queued. Add work with: mc new \"<your idea>\"";
   say(
     io.stdout,
-    missions.length === 0 ? "Nothing was queued. Add work with: mc new \"<your idea>\"" : "Night finished:",
+    missions.length === 0 ? nothing : "Night finished:",
     ...lines,
+    ...help,
     `Night summary: ${summaryPath}`,
     ...(missions.length > 0 ? ["Read the report: mc report"] : []),
   );
@@ -464,11 +572,14 @@ interface StatusRow {
   blocked: number;
   /** ISO time the mission waits for usage limits until, while it is waiting. */
   waitingUntil: string | null;
+  /** Saved as running or waiting, but no run is working: the last run was cut off. The next run continues it. */
+  interrupted: boolean;
 }
 
 function statusCommand(io: CliIO, json: boolean): void {
   const store = lenientStore(io);
-  const rows = store.list().map((m) => statusRow(store, m));
+  const runActive = activeRunOf(store) !== undefined;
+  const rows = store.list().map((m) => statusRow(store, m, runActive));
   if (json) {
     say(io.stdout, JSON.stringify(rows, null, 2));
     return;
@@ -482,7 +593,7 @@ function statusCommand(io: CliIO, json: boolean): void {
     ...rows.map((r) => [
       r.id,
       r.kind === "greenfield" ? "new app" : "change",
-      r.status,
+      r.interrupted ? "interrupted" : r.status,
       r.stage,
       `${r.featuresDone}/${r.featuresTotal}`,
       String(r.blocked),
@@ -490,10 +601,28 @@ function statusCommand(io: CliIO, json: boolean): void {
     ]),
   ];
   say(io.stdout, ...formatTable(table));
+  if (rows.some((r) => r.interrupted)) {
+    say(
+      io.stdout,
+      "",
+      "interrupted: the last run ended without finishing (it was stopped with docker stop, or the computer or Docker restarted). " +
+        'Nothing is lost: the next "mc run" continues it.',
+    );
+  }
+  // A failed mission waits for its owner (unless only a login expired: the next run retries that one by itself).
+  for (const m of store.list().filter((x) => x.status === "failed" && x.stage !== "complete")) {
+    say(
+      io.stdout,
+      "",
+      m.failure?.retryable
+        ? `${m.id} carries on by itself on the next run, once you have logged in again (see mc report ${m.id}).`
+        : `${m.id} needs your help: see what with "mc report ${m.id}", then run "mc run --mission ${m.id}".`,
+    );
+  }
   if (store.stopRequested()) say(io.stdout, "", "A stop has been requested (mc stop).");
 }
 
-function statusRow(store: MissionStore, m: Mission): StatusRow {
+function statusRow(store: MissionStore, m: Mission, runActive: boolean): StatusRow {
   return {
     id: m.id,
     title: m.title,
@@ -504,7 +633,17 @@ function statusRow(store: MissionStore, m: Mission): StatusRow {
     featuresTotal: m.features.length,
     blocked: m.features.filter((f) => f.status === "blocked").length,
     waitingUntil: m.status === "waiting" ? lastWaitUntil(store, m.id) : null,
+    interrupted: (m.status === "running" || m.status === "waiting") && !runActive,
   };
+}
+
+/** The `mc run` holding the lock ("pid 7 on host …"), or undefined; an unreadable lock counts as no run. */
+function activeRunOf(store: MissionStore): string | undefined {
+  try {
+    return store.activeRun();
+  } catch {
+    return undefined;
+  }
 }
 
 function lastWaitUntil(store: MissionStore, id: string): string | null {
@@ -522,27 +661,68 @@ function formatTable(rows: string[][]): string[] {
 function reportCommand(io: CliIO, id: string | undefined): number {
   const store = lenientStore(io);
   if (id !== undefined) findMission(store, id);
-  const path = id === undefined ? latestReport(store) : store.reportPath(id);
+  const latest = id === undefined ? latestReport(store) : undefined;
+  // After a night that worked on several missions, its summary lists them all, with what each needs from you.
+  const night = id === undefined ? latestNightSummary(store, latest?.at) : undefined;
+  if (night !== undefined) {
+    printPreview(io, "Night summary", night.path);
+    say(io.stdout, "", `Each mission's own report: mc report <mission>, for example: mc report ${night.missions[0]}`);
+    return 0;
+  }
+  const path = id === undefined ? latest?.path : store.reportPath(id);
   if (path === undefined || !existsSync(path)) {
     say(io.stdout, id === undefined ? "No reports yet. A report is written when a run finishes or stops." : `Mission ${id} has no report yet. It gets one when a run finishes or stops.`);
     return id === undefined ? 0 : 1;
   }
-  const lines = readFileSync(path, "utf8").trimEnd().split("\n");
-  say(io.stdout, `Report: ${path}`, "", ...lines.slice(0, REPORT_PREVIEW_LINES));
-  if (lines.length > REPORT_PREVIEW_LINES) say(io.stdout, "", `... ${lines.length - REPORT_PREVIEW_LINES} more lines. The full report is in: ${path}`);
-  if (inContainer()) say(io.stdout, "To read it in Windows with its pictures, run in Ubuntu: mc copy-reports");
+  printPreview(io, "Report", path);
   return 0;
 }
 
+function printPreview(io: CliIO, label: string, path: string): void {
+  const lines = readFileSync(path, "utf8").trimEnd().split("\n");
+  say(io.stdout, `${label}: ${path}`, "", ...lines.slice(0, REPORT_PREVIEW_LINES));
+  if (lines.length > REPORT_PREVIEW_LINES) say(io.stdout, "", `... ${lines.length - REPORT_PREVIEW_LINES} more lines. The full report is in: ${path}`);
+  // Notepad shows a report's pictures as text; copy-reports copies them next to it as picture files.
+  if (inContainer()) say(io.stdout, "To read the reports in Windows, with the screenshots as picture files next to them, run in Ubuntu: mc copy-reports");
+}
+
 /** The most recently written mission report (on a tie, the newer mission's). */
-function latestReport(store: MissionStore): string | undefined {
+function latestReport(store: MissionStore): { path: string; at: number } | undefined {
   const reports = store
     .list()
     .reverse()
     .map((m) => store.reportPath(m.id))
     .filter((path) => existsSync(path))
     .map((path) => ({ path, at: statSync(path).mtimeMs }));
-  return reports.sort((a, b) => b.at - a.at)[0]?.path;
+  return reports.sort((a, b) => b.at - a.at)[0];
+}
+
+/**
+ * The latest night summary (<home>/reports/night-*.md), when it was written after the latest mission report and
+ * that night worked on several missions: the missions it links, in order.
+ */
+function latestNightSummary(store: MissionStore, latestReportAt: number | undefined): { path: string; missions: string[] } | undefined {
+  const dir = join(store.home, "reports");
+  let names: string[];
+  try {
+    names = readdirSync(dir).filter((name) => /^night-.*\.md$/.test(name));
+  } catch {
+    return undefined;
+  }
+  const newest = names
+    .map((name) => ({ path: join(dir, name), at: statSync(join(dir, name)).mtimeMs }))
+    .sort((a, b) => b.at - a.at)[0];
+  if (newest === undefined || (latestReportAt !== undefined && newest.at < latestReportAt)) return undefined;
+  const missions = [...readFileSync(newest.path, "utf8").matchAll(/\]\(\.\.\/missions\/([^/)]+)\/report\.md\)/g)].map((match) => safeDecode(match[1] ?? ""));
+  return missions.length >= 2 ? { path: newest.path, missions } : undefined;
+}
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
 }
 
 // ───────────────────────────── logs ─────────────────────────────
@@ -552,6 +732,10 @@ async function logsCommand(io: CliIO, id: string, follow: boolean): Promise<void
   findMission(store, id);
   const file = join(store.missionDir(id), "events.jsonl");
   if (!follow) {
+    if (!existsSync(file) || statSync(file).size === 0) {
+      io.stdout("Nothing has happened in this mission yet. It starts on the next `mc run`.\n");
+      return;
+    }
     await followEvents(file, io.stdout, AbortSignal.abort());
     return;
   }
@@ -715,6 +899,8 @@ function invokedDirectly(): boolean {
 }
 
 if (invokedDirectly()) {
+  // Not "node": an agent's `pkill node` or `killall node` (say, to free a port) must not take Mission Control down.
+  process.title = "mission-control";
   // `mc report | head` closes the pipe early; that is not an error.
   process.stdout.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EPIPE") process.exit(0);

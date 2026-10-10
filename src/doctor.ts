@@ -66,6 +66,12 @@ const LIVE_SCHEMA: JsonSchema = {
 export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorCheck[]> {
   const settings = settingsCheck(opts.config);
   const c = settings.config;
+  // A night run uses the same logins. Codex refreshes its login in place, and two codex processes refreshing it at
+  // once can log Codex out for the night (design-v1 §2.1), so commands that may talk to the servers wait for the run.
+  const nightRun = activeNightRun(c);
+  // One codex process at a time, for the same reason.
+  const codexLogin = guarded("Codex login", "error", () => (nightRun ? skippedDuringRun("Codex login", nightRun) : codexLoginCheck(c)));
+  const codexModels = codexLogin.then(() => guarded("Codex models", "error", () => (nightRun ? [] : codexModelsCheck(c))));
   const groups = await Promise.all([
     guarded("Node.js", "error", () => nodeCheck(process.versions.node)),
     guarded("Git", "error", () => gitChecks()),
@@ -73,18 +79,39 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorCheck[]
     guarded("Claude Code", "error", () => cliVersionCheck(claudeTool(c))),
     guarded("Claude login", "error", () => claudeLoginCheck(c)),
     guarded("Codex", "error", () => cliVersionCheck(codexTool(c))),
-    guarded("Codex login", "error", () => codexLoginCheck(c)),
-    guarded("Codex models", "error", () => codexModelsCheck(c)),
+    codexLogin,
+    codexModels,
     guarded("API keys", "error", () => apiKeyCheck()),
     guarded("Container", "warn", () => containerCheck(c)),
-    guarded("Mission Control folder", "error", () => folderCheck("Mission Control folder", c.home, homeFolderFix(c.home))),
-    guarded("Apps folder", "error", () => folderCheck("Apps folder", c.workspaceRoot, appsFolderFix(c.workspaceRoot))),
+    guarded("Mission Control folder", "error", () => folderCheck("Mission Control folder", c.home, homeFolderFix(c.home), keptFolder("home"))),
+    guarded("Apps folder", "error", () => folderCheck("Apps folder", c.workspaceRoot, appsFolderFix(c.workspaceRoot), keptFolder("workspaceRoot"))),
     guarded("Disk space", "warn", () => diskChecks(c)),
     guarded("Notifications", "warn", () => notifyCheck(c)),
   ]);
   const checks = groups.flat();
-  if (opts.live) checks.push(...(await guarded("Live check", "error", () => liveChecks(c, opts.runners))));
+  if (opts.live) {
+    const live = nightRun ? [skippedDuringRun("Live check", nightRun)] : await guarded("Live check", "error", () => liveChecks(c, opts.runners));
+    checks.push(...live);
+  }
   return checks;
+}
+
+/** The `mc run` working right now ("pid 7 on host …"), or undefined. Read-only: the doctor never touches the lock. */
+function activeNightRun(c: Config): string | undefined {
+  try {
+    return new MissionStore(c.home).activeRun();
+  } catch {
+    return undefined; // an unreadable lock: the folder checks report the folder's problem
+  }
+}
+
+function skippedDuringRun(name: string, run: string): DoctorCheck {
+  return fail(
+    name,
+    "warn",
+    `Not checked: a night run is working right now (${run}), and this check would use the same logins at the same time, which can log Codex out for the rest of the night.`,
+    `Run "mc doctor${name === "Live check" ? " --live" : ""}" again after the run ends ("mc status" shows what it is doing; "mc stop" ends it early).`,
+  );
 }
 
 /** Node's version string (e.g. "22.12.0") is at least the minimum Mission Control needs. */
@@ -244,8 +271,8 @@ async function codexLoginCheck(c: Config): Promise<DoctorCheck> {
     // Never echo the output here: it can contain part of the key.
     return fail(
       name,
-      "warn",
-      "Codex is logged in with an API key, so it bills pay-per-use API credits instead of your ChatGPT plan.",
+      "error",
+      "Codex is logged in with an API key, which bills pay-per-use API credits instead of your ChatGPT plan, so Mission Control won't start Codex on it.",
       `Log out with "codex logout", then log in with ChatGPT: ${loginFix("codex")}`,
     );
   }
@@ -323,8 +350,56 @@ function containerCheck(c: Config): DoctorCheck {
   return fail(name, "warn", "Not running inside the Mission Control container.", useContainer);
 }
 
-function folderCheck(name: string, folder: string, fix: string): DoctorCheck {
+/** A folder the Mission Control container keeps between commands, and the setting that points there. */
+interface KeptFolder {
+  setting: "home" | "workspaceRoot";
+  /** As the user writes it ("~/mc-apps"). */
+  shown: string;
+  dir: string;
+}
+
+/**
+ * Inside the container, the folder `setting` must stay in (mc-docker.sh mounts only these two, and each command's
+ * container is deleted when it ends); undefined outside the container.
+ */
+function keptFolder(setting: KeptFolder["setting"], containerized = inContainer()): KeptFolder | undefined {
+  if (!containerized) return undefined;
+  const shown = setting === "home" ? "~/.mission-control" : "~/mc-apps";
+  return { setting, shown, dir: join(homedir(), shown.slice(2)) };
+}
+
+/**
+ * Inside the container, why the settings' folders would lose their contents (a folder the container doesn't keep),
+ * one plain sentence per folder; [] outside the container or when both are kept.
+ */
+export function unkeptFolderProblems(c: Pick<Config, "home" | "workspaceRoot">, containerized = inContainer()): string[] {
+  const problems: string[] = [];
+  for (const setting of ["home", "workspaceRoot"] as const) {
+    const kept = keptFolder(setting, containerized);
+    const dir = absolute(c[setting]);
+    if (kept && !isInside(dir, kept.dir)) problems.push(unkeptText(setting, dir, kept));
+  }
+  return problems;
+}
+
+function unkeptText(setting: KeptFolder["setting"], dir: string, kept: KeptFolder): string {
+  const what = setting === "home" ? "Mission Control's records (missions, reports)" : "your apps";
+  return (
+    `${setting} is ${dir}, which the Mission Control container doesn't keep: ${what} would be deleted when each ` +
+    `command ends. Inside the container only ~/mc-apps and ~/.mission-control are kept, so ${setting} must be ${kept.shown} or a folder inside it.`
+  );
+}
+
+function isInside(dir: string, root: string): boolean {
+  return dir === root || dir.startsWith(`${root}/`);
+}
+
+function folderCheck(name: string, folder: string, fix: string, kept?: KeptFolder): DoctorCheck {
   const dir = absolute(folder);
+  if (kept && !isInside(dir, kept.dir)) {
+    const reset = process.env.MC_HOME && kept.setting === "home" ? `Unset MC_HOME, or point it inside ${kept.shown}.` : `Put it back: mc config set ${kept.setting} ${kept.shown}`;
+    return fail(name, "error", unkeptText(kept.setting, dir, kept), reset);
+  }
   const existing = nearestExisting(dir);
   if (!statSync(existing).isDirectory()) return fail(name, "error", `${existing} is a file, not a folder.`, fix);
   try {

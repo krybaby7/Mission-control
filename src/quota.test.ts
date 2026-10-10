@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { defaultConfig } from "./config.js";
+import { detectLimitText } from "./limits.js";
 import { QuotaGovernor } from "./quota.js";
 import type { Config, LimitInfo, Logger } from "./types.js";
 import { FakeClock } from "./util/clock.js";
@@ -332,6 +333,71 @@ describe("QuotaGovernor: login failures", () => {
   });
 });
 
+describe("QuotaGovernor: CLI failures", () => {
+  it("rests a provider whose CLI failed for 60 s, 120 s, 240 s… capped at 15 min, until a run succeeds", async () => {
+    const logger = recordingLogger();
+    const q = governor({ logger });
+    const waits: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      q.recordFailure("codex", "codex exited with code 1: unknown option");
+      const until = q.availableAt("codex", "gpt-6.1-sol") ?? 0;
+      waits.push((until - clock.now()) / MIN);
+      await clock.advance(until - clock.now());
+    }
+    expect(waits).toEqual([1, 2, 4, 8, 15, 15]);
+    expect(logger.lines[0]).toMatchObject({ level: "warn", msg: expect.stringContaining("codex failed for a reason outside the job") });
+
+    q.recordFailure("codex", "boom");
+    expect(q.state("codex")).toEqual({ status: "failing", until: clock.now() + 15 * MIN, raw: "boom" });
+    expect(q.isAvailable("codex")).toBe(false);
+    expect(q.isAvailable("claude")).toBe(true);
+    // The streak outlasts the backoff, so a caller can tell a CLI that keeps failing from one resting after a blip.
+    await clock.advance(15 * MIN);
+    expect(q.state("codex")).toEqual({ status: "ok" });
+    expect(q.failureStreak("codex")).toEqual({ count: 7, raw: "boom" });
+    expect(q.failureStreak("claude")).toBeUndefined();
+    q.recordSuccess("codex");
+    expect(q.state("codex")).toEqual({ status: "ok" });
+    expect(q.failureStreak("codex")).toBeUndefined();
+    q.recordFailure("codex", "boom");
+    expect(q.availableAt("codex")).toBe(clock.now() + MIN); // the streak started over
+  });
+
+  it("reports the block that ends later, a usage limit or a failure", () => {
+    const q = governor();
+    q.recordFailure("claude", "crash");
+    expect(q.state("claude")).toMatchObject({ status: "failing" });
+    q.recordLimit(limit("claude", "session", { resetsAt: clock.now() + HOUR }));
+    expect(q.state("claude")).toMatchObject({ status: "limited", kind: "session" });
+    expect(q.availableAt("claude")).toBe(clock.now() + HOUR);
+    expect(q.snapshot().providers.claude).toMatchObject({ status: "limited" });
+  });
+
+  it("does not persist CLI failures, so a restart after a fix tries again", () => {
+    const statePath = join(tmp, "quota.json");
+    governor({ statePath }).recordFailure("codex", "crash");
+    expect(governor({ statePath }).state("codex")).toEqual({ status: "ok" });
+  });
+});
+
+describe("QuotaGovernor: codex per-model usage limit", () => {
+  it("blocks only the model codex names, so its other model keeps working", () => {
+    const q = governor();
+    const now = Date.UTC(2026, 9, 10, 12, 0);
+    const info = detectLimitText(
+      "You’ve hit your usage limit for GPT-6-Astra. Switch to another model now, or try again at Oct 13th, 2026 4:38 AM.",
+      "codex",
+      now,
+    );
+    expect(info).toMatchObject({ kind: "model", model: "gpt-6-astra" });
+    q.recordLimit({ ...(info as LimitInfo), resetsAt: clock.now() + 2 * DAY });
+    expect(q.isAvailable("codex", "gpt-6-astra")).toBe(false);
+    expect(q.isAvailable("codex", "gpt-6.1-sol")).toBe(true);
+    expect(q.state("codex")).toEqual({ status: "ok" });
+    expect(Object.keys(q.snapshot().modelBlocks)).toEqual(["codex:gpt-6-astra"]);
+  });
+});
+
 describe("QuotaGovernor: pacing by utilization", () => {
   it("pauses a provider whose five-hour window is at the cap until that window resets", async () => {
     const q = governor();
@@ -401,6 +467,75 @@ describe("QuotaGovernor: pacing by utilization", () => {
     const q = governor();
     q.recordUtilization({ provider: "codex", window: "five_hour", utilization: 0.6, resetsAt: clock.now() + HOUR });
     expect(q.isAvailable("codex")).toBe(false);
+  });
+
+  describe("a night's share of the weekly window", () => {
+    const weekly = (utilization: number, resetsAt: number) => ({ provider: "claude" as const, window: "seven_day", utilization, resetsAt });
+
+    beforeEach(() => {
+      config.pacing.maxWeeklyUtilization = 1.5; // only the per-night share is under test
+    });
+
+    it("pauses a provider once this night has used its share, until the weekly reset", () => {
+      const q = governor();
+      const resetsAt = clock.now() + 3 * DAY;
+      q.recordUtilization(weekly(0.2, resetsAt));
+      q.recordUtilization(weekly(0.54, resetsAt));
+      expect(q.isAvailable("claude")).toBe(true);
+      q.recordUtilization(weekly(0.55, resetsAt));
+      expect(q.isAvailable("claude")).toBe(false);
+      expect(q.state("claude")).toMatchObject({ status: "limited", kind: "weekly", until: resetsAt });
+      expect((q.state("claude") as { raw: string }).raw).toContain("this night's work used 35% of the weekly limit");
+      expect(q.isAvailable("codex")).toBe(true);
+    });
+
+    it("counts from this night run's first reading, not from a reading an earlier run saved", () => {
+      const statePath = join(tmp, "quota.json");
+      const resetsAt = clock.now() + 3 * DAY;
+      governor({ statePath }).recordUtilization(weekly(0.1, resetsAt)); // an earlier night
+      const q = governor({ statePath });
+      q.recordUtilization(weekly(0.4, resetsAt)); // the day's own use came in between
+      expect(q.isAvailable("claude")).toBe(true);
+      q.recordUtilization(weekly(0.74, resetsAt));
+      expect(q.isAvailable("claude")).toBe(true);
+      q.recordUtilization(weekly(0.75, resetsAt));
+      expect(q.isAvailable("claude")).toBe(false);
+    });
+
+    it("counts afresh when the weekly window resets during the night", async () => {
+      const q = governor();
+      q.recordUtilization(weekly(0.6, clock.now() + HOUR));
+      await clock.advance(HOUR);
+      const next = clock.now() + 7 * DAY;
+      q.recordUtilization(weekly(0.05, next));
+      q.recordUtilization(weekly(0.39, next));
+      expect(q.isAvailable("claude")).toBe(true);
+      q.recordUtilization(weekly(0.4, next));
+      expect(q.availableAt("claude")).toBe(next);
+    });
+
+    it("follows the configured share, and can be switched off", () => {
+      config.pacing.maxWeeklySharePerNight = 0.1;
+      const q = governor();
+      const resetsAt = clock.now() + DAY;
+      q.recordUtilization(weekly(0.3, resetsAt));
+      q.recordUtilization(weekly(0.4, resetsAt));
+      expect(q.isAvailable("claude")).toBe(false);
+
+      delete config.pacing.maxWeeklySharePerNight;
+      const unlimited = governor();
+      unlimited.recordUtilization(weekly(0.1, resetsAt));
+      unlimited.recordUtilization(weekly(1.2, resetsAt));
+      expect(unlimited.isAvailable("claude")).toBe(true);
+    });
+
+    it("logs once when the night's share is used up", () => {
+      const logger = recordingLogger();
+      const q = governor({ logger });
+      const resetsAt = clock.now() + DAY;
+      for (const used of [0.1, 0.3, 0.46, 0.5]) q.recordUtilization(weekly(used, resetsAt));
+      expect(logger.lines.map((l) => l.msg)).toEqual([expect.stringContaining("pausing new work on claude")]);
+    });
   });
 
   it("logs once when pacing starts", () => {

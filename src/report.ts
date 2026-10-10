@@ -1,10 +1,13 @@
 // Morning report: a warm, plain-language markdown summary of one mission for a non-programmer, the plain-text
 // fact sheet the scout turns into prose, and collection of the app's Playwright screenshots.
 import { createHash } from "node:crypto";
-import type { Dirent } from "node:fs";
+import { type Dirent, readFileSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
+import { inContainer } from "./config.js";
 import type { Attempt, Feature, Finding, Mission, MissionStatus, Provider, ReportProseOutput, UsageRecord } from "./types.js";
+import { stripControlChars } from "./util/terminal.js";
 
 // ───────────────────────────── Usage ─────────────────────────────
 
@@ -68,19 +71,55 @@ function totalDurationMs(usage: UsageRecord[]): number {
 
 // ───────────────────────────── How to run ─────────────────────────────
 
+export interface HowToRunOptions {
+  /**
+   * Written inside the Mission Control container (default: inContainer()). Paths in its home are then written with
+   * "~": `~/mc-apps/<app>` works both in `mc shell` and in the Ubuntu window, where the container's own path doesn't.
+   */
+  inContainer?: boolean;
+}
+
 /**
  * Shell commands that let the user try the result, or [] when no feature was finished (there is nothing new
- * to try, and a greenfield app may not even exist yet). Greenfield apps use the house Next.js stack.
+ * to try, and a greenfield app may not even exist yet). Greenfield apps use the house Next.js stack. A changed app
+ * is started with its own "dev" (or "start") script when its package.json has one, else its checks are run.
  */
-export function howToRun(m: Mission): string[] {
+export function howToRun(m: Mission, opts: HowToRunOptions = {}): string[] {
   if (!m.repoPath || !m.features.some((f) => f.status === "done")) return [];
-  const steps = [`cd ${shellQuote(m.repoPath)}`];
+  const steps = [`cd ${shownPath(m.repoPath, opts.inContainer ?? inContainer())}`];
   const checkout = checkoutStep(m);
   if (checkout) steps.push(checkout);
   if (m.kind === "greenfield") return [...steps, "npm install", "npm run dev", "open http://localhost:3000"];
   if (m.verify?.install) steps.push(m.verify.install);
+  const start = startCommand(m.repoPath);
+  if (start) return [...steps, start];
   if (m.verify?.full) steps.push(m.verify.full);
   return steps;
+}
+
+/** "npm run dev" or "npm start" when the app's package.json has that script; best effort, never throws. */
+function startCommand(repoPath: string): string | undefined {
+  try {
+    const scripts = (JSON.parse(readFileSync(join(repoPath, "package.json"), "utf8")) as { scripts?: Record<string, unknown> }).scripts;
+    if (typeof scripts?.dev === "string") return "npm run dev";
+    if (typeof scripts?.start === "string") return "npm start";
+  } catch {
+    // no package.json, or not one npm can read
+  }
+  return undefined;
+}
+
+/** A path as the owner types it: inside the container, its home folder is written as "~" (see HowToRunOptions). */
+function shownPath(path: string, container: boolean): string {
+  const home = homedir();
+  if (container && path.startsWith(`${home}/`)) return `~/${shellQuote(path.slice(home.length + 1))}`;
+  return shellQuote(path);
+}
+
+/** The app's folder under ~/mc-apps as seen from Ubuntu ("habit-tracker"), when the container runs and it is there. */
+function appsSubfolder(m: Mission, container: boolean): string | undefined {
+  const apps = join(homedir(), "mc-apps");
+  return container && m.repoPath.startsWith(`${apps}/`) ? m.repoPath.slice(apps.length + 1) : undefined;
 }
 
 /**
@@ -126,7 +165,9 @@ export function buildReportFacts(m: Mission, usage: UsageRecord[]): string {
   ];
   if (m.status === "partial" && allFeaturesDone(counts)) {
     // Finalize also calls a mission partial when the last whole-app check fails; say so, or it reads as a contradiction.
-    lines.push("Why partly done: every feature is done, but the final check of the whole app did not fully pass (see Run notes).");
+    lines.push(
+      "Why partly done: every feature is done, but the final checks or reviews of the whole app left problems open (see the decisions and Run notes).",
+    );
   }
   if (m.spec?.summary) lines.push(`Plan summary: ${oneLine(m.spec.summary)}`);
   lines.push(
@@ -146,7 +187,7 @@ export function buildReportFacts(m: Mission, usage: UsageRecord[]): string {
       `about ${formatDuration(totalDurationMs(runs))} of agent time.`,
     ...factSection("How to try it", howToRun(m)),
   );
-  return lines.join("\n") + "\n";
+  return stripControlChars(lines.join("\n") + "\n");
 }
 
 function factSection(title: string, items: string[]): string[] {
@@ -189,25 +230,35 @@ export interface RenderReportOptions {
    * e.g. <home>/reports for latest.md.
    */
   reportDir?: string;
+  /**
+   * Written inside the Mission Control container (default: inContainer()): the app is tried in `mc shell` (Ubuntu
+   * has no Node), and paths are written as the owner can type them (see HowToRunOptions).
+   */
+  inContainer?: boolean;
 }
 
-/** The morning report as markdown. Plain language first; technical details last. */
+/**
+ * The morning report as markdown. Plain language first; technical details last. The screenshots come after the
+ * features table, so the first lines (what `mc report` shows) keep the decisions and the features.
+ */
 export function renderReport(m: Mission, opts: RenderReportOptions): string {
   const usage = missionUsage(m, opts.usage);
+  const container = opts.inContainer ?? inContainer();
   const sections = [
     headerSection(m, opts.generatedAt),
-    narrative(m, opts.prose),
+    narrative(m, opts.prose, container),
     whatYouCanDoSection(m, opts.prose),
-    howToTrySection(m),
-    screenshotsSection(opts.screenshots, opts.reportDir),
-    decisionsSection(m),
+    howToTrySection(m, container),
+    decisionsSection(m, container),
     featuresSection(m),
+    screenshotsSection(opts.screenshots, opts.reportDir),
     choicesSection(m),
     reviewNotesSection(m),
     usageSection(usage),
     technicalSection(m, opts.generatedAt),
   ];
-  return sections.filter((s) => s !== "").join("\n\n") + "\n";
+  // Agents wrote much of this (prose, findings, summaries): no control characters reach a terminal that shows it.
+  return stripControlChars(sections.filter((s) => s !== "").join("\n\n") + "\n");
 }
 
 function headerSection(m: Mission, generatedAt: string): string {
@@ -216,6 +267,7 @@ function headerSection(m: Mission, generatedAt: string): string {
   return `# ${oneLine(m.title)}\n\n**${statusLabel(m.status)}** · ${progress} · report written ${formatLocalTime(generatedAt)}`;
 }
 
+/** The same words as the night summary and the notifications (run.ts statusPhrase). */
 function statusLabel(status: MissionStatus): string {
   switch (status) {
     case "done":
@@ -223,18 +275,19 @@ function statusLabel(status: MissionStatus): string {
     case "partial":
       return "Partly done";
     case "stopped":
+      return "Paused, continues on the next run";
     case "failed":
-      return "Stopped";
+      return "Stopped, needs your help";
     default:
       return "Still in progress";
   }
 }
 
-function narrative(m: Mission, prose: ReportProseOutput | null | undefined): string {
-  return prose?.narrative.trim() || templateNarrative(m);
+function narrative(m: Mission, prose: ReportProseOutput | null | undefined, container: boolean): string {
+  return prose?.narrative.trim() || templateNarrative(m, container);
 }
 
-function templateNarrative(m: Mission): string {
+function templateNarrative(m: Mission, container: boolean): string {
   const sentences = [
     m.kind === "greenfield"
       ? `I worked on your new app, “${oneLine(m.title)}”.`
@@ -243,7 +296,7 @@ function templateNarrative(m: Mission): string {
   if (m.spec?.summary) sentences.push(`The plan: ${sentence(m.spec.summary)}`);
   const counts = countFeatures(m.features);
   sentences.push(...progressSentences(counts), ...statusSentence(m.status, counts));
-  const decisions = decisionItems(m).length;
+  const decisions = decisionItems(m, container).length;
   if (decisions > 0) {
     sentences.push(
       `There ${decisions === 1 ? "is one thing" : `are ${decisions} things`} I need you to decide; see “Needs your decision”.`,
@@ -277,8 +330,8 @@ function statusSentence(status: MissionStatus, c: FeatureCounts): string[] {
     case "partial":
       return allFeaturesDone(c)
         ? [
-            "But the final check of the whole app didn't fully pass, so some parts may not work together yet. " +
-              "“Technical details” at the end says what it found.",
+            "But the final checks or reviews of the whole app left problems open, so some parts may not work right yet. " +
+              "“Needs your decision” and “Technical details” say what they found.",
           ]
         : []; // the progress sentences already say which features aren't done
     case "stopped":
@@ -299,15 +352,58 @@ function whatYouCanDoSection(m: Mission, prose: ReportProseOutput | null | undef
   return section("What you can do now", bulletList(items, "Nothing new to try yet: none of the features were finished."));
 }
 
-function howToTrySection(m: Mission): string {
-  const steps = howToRun(m);
+function howToTrySection(m: Mission, container: boolean): string {
+  const steps = howToRun(m, { inContainer: container });
   if (steps.length === 0) {
     const why = appExists(m) ? "none of the features were finished" : "the app wasn't created";
     return section("How to try it", `There's nothing to try yet: ${why}.`);
   }
-  const list = steps.map((cmd, i) => `${i + 1}. ${describeStep(m, cmd)}`).join("\n");
-  const after = m.kind === "feature" ? "\n\nThen start your app the way you usually do." : "";
-  return section("How to try it", `Open a terminal and run these one at a time:\n\n${list}${after}`);
+  const parts: string[] = [];
+  const folder = appsSubfolder(m, container);
+  if (folder !== undefined) {
+    const windows = `\\\\wsl.localhost\\Ubuntu\\home\\<your Ubuntu name>\\mc-apps\\${folder.replaceAll("/", "\\")}`;
+    parts.push(`The app is in your folder ${code(`~/mc-apps/${folder}`)} (in Windows File Explorer: ${code(windows)}).`);
+  }
+  parts.push(
+    container
+      ? "In the Ubuntu window, run `mc shell` first: it opens a terminal inside Mission Control's container, which has " +
+          "everything the app needs. Then run these one at a time:"
+      : "Open a terminal and run these one at a time:",
+    steps.map((cmd, i) => `${i + 1}. ${describeStep(m, cmd)}`).join("\n"),
+  );
+  const starts = steps.some((cmd) => cmd === "npm run dev" || cmd === "npm start");
+  if (m.kind === "feature") {
+    parts.push(starts ? "Then open the address it prints (often http://localhost:3000) in your browser." : "Then start your app the way you usually do.");
+  }
+  const leaveSteps = [
+    ...(starts ? ["press Ctrl+C to stop the app"] : []),
+    // A checkout of the mission's work leaves the folder off your own branch, and `mc feature` then needs it back.
+    ...(checkoutStep(m) ? [`put the folder back on your own version with ${code(`git checkout ${shellQuote(m.baseBranch)}`)}`] : []),
+    ...(container ? ["type `exit`"] : []),
+  ];
+  const keep = keepChangeText(m);
+  if (keep) parts.push(keep);
+  if (leaveSteps.length > 0) parts.push(`When you're done, ${listWords(leaveSteps)}.`);
+  return section("How to try it", parts.join("\n\n"));
+}
+
+/**
+ * A finished change to an existing app stays on its own branch: how to add it to the owner's version, or leave it.
+ * (A new app's main branch already holds its work.)
+ */
+function keepChangeText(m: Mission): string | undefined {
+  if (m.kind !== "feature" || m.stage !== "complete" || !m.features.some((f) => f.status === "done")) return undefined;
+  const base = shellQuote(m.baseBranch);
+  return (
+    `To keep the change, add it to your own version (${code(m.baseBranch)}), in the app's folder: ` +
+    `${code(`git checkout ${base} && git merge ${shellQuote(m.integrationBranch)}`)}. ` +
+    "If you don't want it, do nothing: it stays apart, and your version doesn't have it."
+  );
+}
+
+/** "a", "a and b", "a, b and c". */
+function listWords(items: string[]): string {
+  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
 /** A command plus a short plain-language note on what it is for. */
@@ -321,7 +417,7 @@ function describeStep(m: Mission, cmd: string): string {
 function stepHint(m: Mission, cmd: string): string | undefined {
   if (cmd.startsWith("cd ")) return "go to the app's folder";
   if (cmd.startsWith("git checkout ")) return "switch to the version with the new work";
-  if (cmd === "npm run dev") return "start the app (leave this window open while you try it)";
+  if (cmd === "npm run dev" || cmd === "npm start") return "start the app (leave this window open while you try it)";
   if (cmd === "npm install" || cmd === m.verify?.install) return "download what the app needs (slow the first time)";
   if (cmd === m.verify?.full) return "run the project's own checks";
   return undefined;
@@ -350,11 +446,11 @@ function screenshotCaption(path: string): string {
   return basename(path, extname(path)).replace(/[-_]+/g, " ").replace(/[[\]]/g, "").trim() || "screenshot";
 }
 
-function decisionsSection(m: Mission): string {
-  return section("Needs your decision", bulletList(decisionItems(m), "Nothing. You don't need to do anything."));
+function decisionsSection(m: Mission, container: boolean): string {
+  return section("Needs your decision", bulletList(decisionItems(m, container), "Nothing. You don't need to do anything."));
 }
 
-function decisionItems(m: Mission): string[] {
+function decisionItems(m: Mission, container: boolean): string[] {
   const items = [...m.decisionsNeeded];
   if (m.baselineBroken) {
     items.push(
@@ -362,7 +458,33 @@ function decisionItems(m: Mission): string[] {
         "my work. You may want someone to look at those older failures (listed under “Technical details”).",
     );
   }
+  const retry = retryItem(m, container);
+  if (retry) items.push(retry);
+  if (m.stage === "complete" && m.status === "partial" && allFeaturesDone(countFeatures(m.features)) && m.decisionsNeeded.length === 0) {
+    items.push(
+      "Every feature passed its own checks, but the final check of the whole app didn't, so some parts may not work " +
+        "right yet (“Technical details” has what it found). Have someone look at the app before you rely on it.",
+    );
+  }
   return items;
+}
+
+/**
+ * A finished mission never runs again, so its stuck and skipped features are dropped unless the owner queues them
+ * again: the command that does, starting from the mission's work (main for a new app, the change's own branch).
+ */
+function retryItem(m: Mission, container: boolean): string | undefined {
+  const left = m.stage === "complete" && m.repoPath !== "" ? m.features.filter((f) => f.status === "blocked" || f.status === "skipped") : [];
+  if (left.length === 0) return undefined;
+  const names = left.map((f) => `“${oneLine(f.title)}” (${f.status === "blocked" ? "got stuck" : "skipped: it needed a stuck feature"})`);
+  const request = left.map((f) => `${oneLine(f.title)}: ${oneLine(f.story)}`).join(" ");
+  const base = m.kind === "greenfield" ? m.baseBranch : m.integrationBranch;
+  const command = `mc feature ${shownPath(m.repoPath, container)} ${shellQuote(request)} --base ${shellQuote(base)}`;
+  return (
+    `${left.length === 1 ? "1 feature wasn't" : `${left.length} features weren't`} finished, and I won't try again by myself: ` +
+    `${listWords(names)}. The “Features” table says why. To have another go, queue ${left.length === 1 ? "it" : "them"} ` +
+    `as a change to the app${container ? " (in the Ubuntu window)" : ""}: ${code(command)}. It starts on the next run.`
+  );
 }
 
 function featuresSection(m: Mission): string {

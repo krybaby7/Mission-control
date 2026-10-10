@@ -20,25 +20,41 @@ export interface ClaudeRunnerOptions {
   env?: NodeJS.ProcessEnv;
   /** Where the per-run system prompt file is written. Default os.tmpdir(). */
   tmpDir?: string;
+  /** How long claude may stay silent after printing its result before it is stopped. Default 30 s. */
+  exitGraceMs?: number;
 }
 
 const READ_ONLY_TOOLS = "Read,Grep,Glob";
 /**
- * Tools an unattended write job must not have: they fan out into multi-agent runs, schedule work past the run,
- * move the agent out of the unit worktree, or reach other sessions and the user's phone.
+ * Everything a write job may use, as an allowlist: files, shell, web, subagents, task lists and skills (names this
+ * CLI lacks are ignored). Anything else stays off, including tools that reach past the run and the worktree:
+ * scheduling (CronCreate, ScheduleWakeup), cloud routines (RemoteTrigger), the user's claude.ai designs
+ * (DesignSync), other sessions and the user's phone. The account can switch such tools on server-side even for a
+ * pinned CLI, so a list of forbidden tools would always lag behind.
  */
-const WRITE_DISALLOWED_TOOLS = [
-  "Workflow",
-  "CronCreate",
-  "CronDelete",
-  "CronList",
-  "ScheduleWakeup",
-  "EnterWorktree",
-  "ExitWorktree",
-  "SendMessage",
-  "ListAgents",
-  "PushNotification",
+const WRITE_TOOLS = [
+  "Bash",
+  "Edit",
+  "Write",
+  "Read",
+  "Glob",
+  "Grep",
+  "NotebookEdit",
+  "WebFetch",
+  "WebSearch",
+  "Task",
+  "TaskCreate",
+  "TaskGet",
+  "TaskList",
+  "TaskUpdate",
+  "TaskStop",
+  "Monitor",
+  "Skill",
+  "ToolSearch",
 ].join(",");
+/** The init event's apiKeySource when the run uses the subscription login, not an API key. */
+const SUBSCRIPTION_KEY_SOURCE = "none";
+const DEFAULT_EXIT_GRACE_MS = 30_000;
 const PROGRESS_CHARS = 300;
 const ERROR_CHARS = 2_000;
 /** Longest `raw` kept for a transient API failure, as limits.ts keeps for limit text. */
@@ -67,6 +83,7 @@ export class ClaudeRunner implements AgentRunner {
   private readonly writeMode: ClaudeRunnerOptions["writeMode"];
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly tmpDir: string;
+  private readonly exitGraceMs: number;
 
   constructor(opts: ClaudeRunnerOptions) {
     this.command = opts.command ?? "claude";
@@ -74,8 +91,14 @@ export class ClaudeRunner implements AgentRunner {
     this.writeMode = opts.writeMode;
     this.env = opts.env;
     this.tmpDir = opts.tmpDir ?? tmpdir();
+    this.exitGraceMs = opts.exitGraceMs ?? DEFAULT_EXIT_GRACE_MS;
   }
 
+  /**
+   * Only these flags configure the run: `--setting-sources ""` loads no settings file (a repository's, or the one in
+   * the login folder), so none can switch billing to an API key, send the login to another server, add hooks or
+   * approve MCP servers; `--strict-mcp-config` connects no MCP server, claude.ai connectors included.
+   */
   buildArgs(job: AgentJob, systemPromptFile: string): string[] {
     const args = [
       "-p",
@@ -94,9 +117,8 @@ export class ClaudeRunner implements AgentRunner {
     if (job.outputSchema) args.push("--json-schema", JSON.stringify(job.outputSchema));
     if (job.resumeSessionId) args.push("--resume", job.resumeSessionId);
     args.push("--permission-mode", job.access === "workspace-write" ? this.writeMode : "dontAsk");
-    if (job.noTools) args.push("--tools", "");
-    else if (job.access === "read-only") args.push("--tools", READ_ONLY_TOOLS);
-    else args.push("--disallowedTools", WRITE_DISALLOWED_TOOLS);
+    args.push("--tools", toolsFor(job));
+    args.push("--setting-sources", "", "--strict-mcp-config");
     args.push("--permission-prompts", "none");
     return args;
   }
@@ -111,18 +133,7 @@ export class ClaudeRunner implements AgentRunner {
     try {
       const emit = safeEmitter(opts.onEvent, this.logger);
       const stream = new ClaudeStream(emit);
-      const proc = await runProcess({
-        command: this.command,
-        args: this.buildArgs(job, prompt.file),
-        cwd: job.cwd,
-        env: scrubEnv(this.env ?? process.env),
-        stdin: job.prompt,
-        timeoutMs: job.limits.timeoutMs,
-        signal: opts.signal,
-        onStdoutLine: (line) => stream.handleLine(line),
-        teeStdoutTo: job.logFile,
-        maxBufferBytes: CAPTURE_BYTES,
-      });
+      const proc = await this.spawn(job, prompt.file, stream, opts.signal);
       const result = buildResult(job, stream, proc, Date.now());
       // Reported once the outcome is known, so the event carries a reset time read from the result text.
       if (result.limit) emit({ type: "limit", info: result.limit });
@@ -136,6 +147,52 @@ export class ClaudeRunner implements AgentRunner {
       rmSync(prompt.dir, { recursive: true, force: true });
     }
   }
+
+  /**
+   * Runs claude, stopping it early when the stream says to (see ClaudeStream.stopReason), or when it stays silent for
+   * the exit grace after its result: print mode keeps waiting on background shells and child processes, and the
+   * result already stands. A new turn after the result (a background shell woke the model) holds the timer off.
+   */
+  private async spawn(job: AgentJob, promptFile: string, stream: ClaudeStream, callerSignal: AbortSignal | undefined): Promise<SpawnResult> {
+    const ourStop = new AbortController();
+    const stop = (reason: string): void => {
+      if (ourStop.signal.aborted) return;
+      this.logger.warn(`stopping claude run ${job.id}: ${reason}`, { job: job.id });
+      ourStop.abort();
+    };
+    let graceTimer: NodeJS.Timeout | undefined;
+    try {
+      return await runProcess({
+        command: this.command,
+        args: this.buildArgs(job, promptFile),
+        cwd: job.cwd,
+        env: scrubEnv(this.env ?? process.env),
+        stdin: job.prompt,
+        timeoutMs: job.limits.timeoutMs,
+        signal: callerSignal === undefined ? ourStop.signal : AbortSignal.any([callerSignal, ourStop.signal]),
+        onStdoutLine: (line) => {
+          stream.handleLine(line);
+          if (stream.stopReason !== undefined) stop(stream.stopReason);
+          if (!stream.idleAfterResult) {
+            clearTimeout(graceTimer);
+            graceTimer = undefined;
+          } else {
+            const reason = `it did not exit within ${this.exitGraceMs} ms of its result`;
+            graceTimer ??= setTimeout(() => stop(reason), this.exitGraceMs);
+          }
+        },
+        teeStdoutTo: job.logFile,
+        maxBufferBytes: CAPTURE_BYTES,
+      });
+    } finally {
+      clearTimeout(graceTimer);
+    }
+  }
+}
+
+function toolsFor(job: AgentJob): string {
+  if (job.noTools) return "";
+  return job.access === "read-only" ? READ_ONLY_TOOLS : WRITE_TOOLS;
 }
 
 /** Writes the system prompt into a private temp directory; the caller removes the directory. */
@@ -190,9 +247,14 @@ class ClaudeStream {
   sessionId?: string;
   lastText = "";
   result?: FinalResult;
-  /** The latest rejected rate_limit_event that extra usage did not cover, as a limit. */
+  /** The latest rejected rate_limit_event, as a limit. */
   rejected?: LimitInfo;
-  private usingExtraUsage = false;
+  /** The init event's apiKeySource when it is not the subscription login: the run would bill an API key. */
+  apiKeySource?: string;
+  /** Set when the run must be stopped now: it would bill an API key, or continue on paid extra usage. */
+  stopReason?: string;
+  /** The last event was the result: nothing has happened since (a new turn would start with assistant events). */
+  idleAfterResult = false;
 
   constructor(private readonly emit: (event: RunEvent) => void) {}
 
@@ -205,10 +267,15 @@ class ClaudeStream {
       case "system":
         return this.onSystem(event);
       case "assistant":
+        this.idleAfterResult = false;
         return this.onAssistant(event);
+      case "user":
+        this.idleAfterResult = false;
+        return;
       case "rate_limit_event":
         return this.onRateLimit(event);
       case "result":
+        this.idleAfterResult = true;
         return this.onResult(event);
     }
   }
@@ -217,6 +284,12 @@ class ClaudeStream {
     if (event.subtype === "init") {
       this.sessionId = asString(event.session_id) ?? this.sessionId;
       this.emit({ type: "started", ...(this.sessionId !== undefined && { sessionId: this.sessionId }) });
+      const keySource = asString(event.apiKeySource);
+      // Absent in older and test streams; only a named key source means pay-per-use billing.
+      if (keySource !== undefined && keySource !== SUBSCRIPTION_KEY_SOURCE) {
+        this.apiKeySource = keySource;
+        this.stopReason ??= `it would bill an API key (apiKeySource ${keySource}), not the subscription`;
+      }
     } else if (event.subtype === "api_retry") {
       const attempt = asNumber(event.attempt) ?? "?";
       const max = asNumber(event.max_retries) ?? "?";
@@ -245,14 +318,12 @@ class ClaudeStream {
     if (!info) return;
     this.emitUtilization(info);
     if (info.status !== "rejected") return;
-    if (coveredByExtraUsage(info)) return this.noteExtraUsage();
-    this.rejected = rejectedLimit(info);
-  }
-
-  private noteExtraUsage(): void {
-    if (this.usingExtraUsage) return;
-    this.usingExtraUsage = true;
-    this.emit({ type: "progress", text: "subscription limit reached: paid extra usage covers the rest of this run" });
+    this.rejected = laterRejection(this.rejected, rejectedLimit(info));
+    // The CLI would carry on, billed as paid extra usage: the subscription's own limit is what counts here.
+    if (coveredByExtraUsage(info) && this.stopReason === undefined) {
+      this.stopReason = "its subscription limit is reached and the rest would be billed as paid extra usage";
+      this.emit({ type: "progress", text: "subscription limit reached: stopping instead of going on with paid extra usage" });
+    }
   }
 
   /** One event per unified window, plus the top-level window when no unified entry already covers it. */
@@ -300,9 +371,9 @@ function toolSummary(block: Json): string {
 }
 
 /**
- * A rejection that paid extra usage absorbs, so the CLI carries on (CLI 2.1.296 sets isUsingOverage exactly when
- * status is rejected and overageStatus is allowed or allowed_warning). If the CLI stops after all, its result
- * text still names the limit.
+ * A rejection that paid extra usage would absorb, so the CLI carries on billing it (CLI 2.1.296 sets isUsingOverage
+ * exactly when status is rejected and overageStatus is allowed or allowed_warning). Mission Control never runs on
+ * extra usage: the run is stopped and the rejected window is the limit.
  */
 function coveredByExtraUsage(info: Json): boolean {
   return info.isUsingOverage === true || info.overageStatus === "allowed" || info.overageStatus === "allowed_warning";
@@ -321,6 +392,13 @@ function rejectedLimit(info: Json): LimitInfo {
     ...(model !== undefined && { model }),
     raw: JSON.stringify(info),
   };
+}
+
+/** The latest rejection decides, but one without a reset time keeps the reset an earlier one gave for the same limit. */
+function laterRejection(earlier: LimitInfo | undefined, next: LimitInfo): LimitInfo {
+  if (next.resetsAt !== undefined || earlier?.resetsAt === undefined) return next;
+  const sameLimit = earlier.kind === next.kind && earlier.model === next.model;
+  return sameLimit ? { ...next, resetsAt: earlier.resetsAt } : next;
 }
 
 function parseUsage(event: Json): Usage {
@@ -379,6 +457,12 @@ function buildResult(job: AgentJob, stream: ClaudeStream, proc: SpawnResult, now
 
 function decideOutcome(job: AgentJob, stream: ClaudeStream, proc: SpawnResult, nowMs: number): Verdict {
   const { result } = stream;
+  if (stream.apiKeySource !== undefined) {
+    const error =
+      `Claude Code is set to use an API key (${stream.apiKeySource}), which bills pay-per-use API credits instead of ` +
+      `your Claude plan, so the run was stopped. Log in to Claude Code with your Claude subscription instead.`;
+    return { outcome: "auth", error };
+  }
   if (!result) {
     const limit = findLimit(stream.rejected, [proc.stderr], nowMs);
     return limit ? limitedVerdict(limit) : noResultOutcome(job, proc);

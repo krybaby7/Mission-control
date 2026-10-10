@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -72,10 +72,14 @@ process.exit(hit.code ?? 0);
   return file;
 }
 
+/** The folders the container keeps (mc-docker.sh mounts them): ~/.mission-control and ~/mc-apps in the test's home. */
+const keptHome = () => join(root, "user-home", ".mission-control");
+const keptApps = () => join(root, "user-home", "mc-apps");
+
 function makeConfig(opts: { claude?: FakeTable; codex?: FakeTable } = {}): Config {
   const c = defaultConfig();
-  c.home = join(root, "home");
-  c.workspaceRoot = join(root, "apps");
+  c.home = keptHome();
+  c.workspaceRoot = keptApps();
   c.notify.ntfyUrl = "https://ntfy.sh/secret-topic-123";
   c.cli.claudeCommand = writeFakeCli("claude", opts.claude ?? CLAUDE_OK);
   c.cli.codexCommand = writeFakeCli("codex", opts.codex ?? CODEX_OK);
@@ -189,10 +193,10 @@ describe("runDoctor: tools and settings", () => {
     expect(login.fix).toContain("mc login-claude");
   });
 
-  it("warns about a Codex API-key login without echoing the key", async () => {
+  it("errors on a Codex API-key login (the runner refuses it) without echoing the key", async () => {
     const config = makeConfig({ codex: { ...CODEX_OK, "login status": { out: "Logged in using an API key - sk-proj-SECRET\n" } } });
     const login = check(await runDoctor({ config }), "Codex login");
-    expect(login).toMatchObject({ ok: false, severity: "warn" });
+    expect(login).toMatchObject({ ok: false, severity: "error" });
     expect(JSON.stringify(login)).not.toContain("SECRET");
   });
 
@@ -263,8 +267,9 @@ describe("runDoctor: tools and settings", () => {
     expect(check(checks, "Mission Control folder").detail).toContain("is writable");
     expect(check(checks, "Apps folder").detail).toContain("will be created");
 
-    writeFileSync(join(root, "a-file"), "");
-    config.workspaceRoot = join(root, "a-file", "apps");
+    mkdirSync(keptApps(), { recursive: true });
+    writeFileSync(join(keptApps(), "a-file"), "");
+    config.workspaceRoot = join(keptApps(), "a-file", "apps");
     checks = await runDoctor({ config });
     expect(check(checks, "Apps folder")).toMatchObject({ ok: false, severity: "error" });
     expect(check(checks, "Apps folder").detail).toContain("is a file, not a folder");
@@ -312,7 +317,39 @@ describe("runDoctor: tools and settings", () => {
     const settings = check(checks, "Settings");
     expect(settings).toMatchObject({ ok: false, severity: "error" });
     expect(settings.detail).toContain("Luna models are disabled");
-    expect(check(checks, "Apps folder").detail).toContain(join(root, "apps"));
+    expect(check(checks, "Apps folder").detail).toContain(keptApps());
+  });
+
+  it("in the container, refuses folders it doesn't keep, where a night's work would be deleted when the command ends", async () => {
+    const config = makeConfig();
+    config.workspaceRoot = join(root, "user-home", "apps");
+    config.home = join(root, "elsewhere", "records");
+    const checks = await runDoctor({ config });
+    const apps = check(checks, "Apps folder");
+    expect(apps).toMatchObject({ ok: false, severity: "error" });
+    expect(apps.detail).toContain(`workspaceRoot is ${join(root, "user-home", "apps")}, which the Mission Control container doesn't keep`);
+    expect(apps.fix).toBe("Put it back: mc config set workspaceRoot ~/mc-apps");
+    const home = check(checks, "Mission Control folder");
+    expect(home).toMatchObject({ ok: false, severity: "error" });
+    expect(home.detail).toContain("Mission Control's records (missions, reports) would be deleted");
+    expect(home.fix).toContain("MC_HOME"); // the tests set it
+
+    // Folders inside the kept ones are fine.
+    config.workspaceRoot = join(keptApps(), "work");
+    config.home = join(keptHome(), "nested");
+    const fine = await runDoctor({ config });
+    expect(check(fine, "Apps folder")).toMatchObject({ ok: true });
+    expect(check(fine, "Mission Control folder")).toMatchObject({ ok: true });
+  });
+
+  it.skipIf(existsSync("/.dockerenv"))("lets folders be anywhere outside the container", async () => {
+    vi.stubEnv("MC_IN_CONTAINER", "");
+    const config = makeConfig();
+    config.workspaceRoot = join(root, "apps");
+    config.home = join(root, "home");
+    const checks = await runDoctor({ config });
+    expect(check(checks, "Apps folder")).toMatchObject({ ok: true });
+    expect(check(checks, "Mission Control folder")).toMatchObject({ ok: true });
   });
 
   it("reads the settings file: missing, valid, or broken", async () => {
@@ -411,8 +448,37 @@ describe("runDoctor: live checks", () => {
     const claude = check(checks, "Live: Claude (claude-sonnet-5-5)");
     expect(claude).toMatchObject({ ok: false, severity: "error" });
     expect(claude.detail).toContain("claude CLI not found");
-    expect(claude.fix).toContain(join(root, "home", "doctor"));
+    expect(claude.fix).toContain(join(keptHome(), "doctor"));
     expect(check(checks, "Live: Haiku (claude-haiku-5-5)").detail).toContain("not with the expected reply");
+  });
+
+  it("leaves Codex and both AIs alone while a night run is working, since they share its logins", async () => {
+    const config = makeConfig({ codex: { ...CODEX_OK, "login status": { out: "should not run\n", code: 1 } } });
+    mkdirSync(config.home, { recursive: true });
+    // The night run's lock, written in its own container: fresh heartbeat, another host.
+    writeFileSync(join(config.home, "mc.lock"), JSON.stringify({ pid: 7, at: new Date().toISOString(), host: "mission-control-run-other" }));
+    const runners = liveRunners();
+    const checks = await runDoctor({ config, live: true, runners });
+
+    const login = check(checks, "Codex login");
+    expect(login).toMatchObject({ ok: false, severity: "warn" });
+    expect(login.detail).toContain("a night run is working right now (pid 7 on host mission-control-run-other)");
+    expect(login.fix).toContain('Run "mc doctor" again after the run ends');
+    expect(names(checks)).not.toContain("Codex models");
+    const live = check(checks, "Live check");
+    expect(live).toMatchObject({ ok: false, severity: "warn" });
+    expect(live.fix).toContain('"mc doctor --live"');
+    expect(runners.claude.calls).toHaveLength(0);
+    expect(runners.codex.calls).toHaveLength(0);
+    expect(checks.filter((c) => !c.ok && c.severity === "error")).toEqual([]);
+    expect(check(checks, "Codex")).toMatchObject({ ok: true }); // --version doesn't touch the login
+
+    // Once the run's heartbeat is old, it ended: everything is checked again.
+    const old = new Date(Date.now() - 10 * 60_000);
+    utimesSync(join(config.home, "mc.lock"), old, old);
+    const after = await runDoctor({ config, live: true, runners });
+    expect(check(after, "Codex login")).toMatchObject({ ok: false, severity: "error" });
+    expect(runners.codex.calls).toHaveLength(1);
   });
 
   it("reports a provider without a runner", async () => {

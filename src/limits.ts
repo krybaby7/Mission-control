@@ -269,6 +269,8 @@ type PhraseMatcher = (text: string) => RegExpExecArray | undefined;
 interface LimitRule {
   kind: DetectedKind;
   patterns: PhraseMatcher[];
+  /** For kind "model": the model the matched message names (a substring of the model ids it blocks). */
+  model?: (match: RegExpExecArray) => string | undefined;
 }
 
 /**
@@ -305,13 +307,25 @@ const YOU_HIT_YOUR = String.raw`you(?:['’]ve|\s+have)?\s+(?:hit|reached)\s+you
 const YOU_ARE_OUT_OF = String.raw`(?:you(?:['’]re|\s+are)|your\s+(?:org(?:anization)?|workspace|team|account)\s+is)\s+out\s+of\s+`;
 /** Ends a limit name; "your limit of 5 projects" is an app's own limit, not the provider's. */
 const LIMIT_END = String.raw`\b(?!\s+of\b)`;
+/**
+ * Codex's per-model limit: "You’ve hit your usage limit for GPT-6-Astra. Switch to another model now, or try again at
+ * …". The name is a display name ("GPT-6 Astra" or "GPT-6-Astra"), read up to codex's ". Switch to another model";
+ * without that sentence, only a single word with a digit in it counts as a model name ("… limit for gpt-6-astra.").
+ */
+const CODEX_MODEL_LIMIT = String.raw`${YOU_HIT_YOUR}usage\s+limit\s+for\s+(?:([^\n]{1,60}?)\.?\s+switch\s+to\s+another\s+model\b|([a-z][\w.-]*\d[\w.-]*?)\.?(?=\s|$))`;
 
 // Ordered: the first rule with a matching pattern decides the kind.
 // Claude: "You've hit your session limit · resets 3:45pm (America/New_York)", "… weekly / Opus / Sonnet limit",
 // "You've reached your Fable limit", "You've hit your monthly spend limit", "You're out of usage credits".
 // Codex: "You’ve hit your usage limit. … try again at 3:45 PM.", "Your workspace is out of credits", "You hit your spend cap".
 const LIMIT_RULES: LimitRule[] = [
-  { kind: "model", patterns: [cliMessage(String.raw`${YOU_HIT_YOUR}(opus|sonnet|fable|haiku)\s+(?:weekly\s+)?limit${LIMIT_END}`)] },
+  {
+    kind: "model",
+    patterns: [cliMessage(String.raw`${YOU_HIT_YOUR}(opus|sonnet|fable|haiku)\s+(?:weekly\s+)?limit${LIMIT_END}`)],
+    model: (match) => match[1]?.toLowerCase(),
+  },
+  // Before "usage": a usage limit for one model leaves the provider's other models usable.
+  { kind: "model", patterns: [cliMessage(CODEX_MODEL_LIMIT)], model: (match) => modelIdFromName(match[1] ?? match[2] ?? "") },
   {
     kind: "session",
     patterns: [
@@ -403,7 +417,7 @@ function detectLimitPhrase(text: string): Detection | undefined {
     for (const pattern of rule.patterns) {
       const match = pattern(text);
       if (!match) continue;
-      const model = rule.kind === "model" ? match[1]?.toLowerCase() : undefined;
+      const model = rule.model?.(match);
       return { kind: rule.kind, index: match.index, ...(model !== undefined && { model }) };
     }
   }
@@ -413,6 +427,20 @@ function detectLimitPhrase(text: string): Detection | undefined {
     if (match) return { kind: "throttle", index: match.index };
   }
   return undefined;
+}
+
+/**
+ * A model id as the quota matches it, from a display name: "GPT-6 Astra" and "GPT-6-Astra" → "gpt-6-astra",
+ * "GPT-6.1 Sol" → "gpt-6.1-sol". Parenthesized notes are dropped. Undefined when nothing is left, so the limit
+ * falls back to the model of the run that hit it.
+ */
+function modelIdFromName(name: string): string | undefined {
+  const id = name
+    .replace(/\([^)]*\)/g, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9.]+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return id === "" ? undefined : id;
 }
 
 function usageLimitKind(resetsAt: number | undefined, nowMs: number): LimitKind {

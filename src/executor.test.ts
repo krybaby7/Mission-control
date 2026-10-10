@@ -8,6 +8,7 @@ import {
   DeadlineError,
   type ExecRequest,
   type ExecResult,
+  ProvidersFailingError,
   RoleExecutor,
   type RoleExecutorDeps,
   StopRequestedError,
@@ -225,14 +226,23 @@ describe("RoleExecutor: running a job", () => {
     expect(r.codex.calls.at(-1)?.id).toBe("build-login-3");
   });
 
-  it.each(["failed", "timeout", "crashed"] as const)("returns a %s run as is, without retrying", async (outcome) => {
-    const r = runners(undefined, () => ({ result: { outcome, error: "boom" } }));
+  it("returns a failed run as is, without retrying: the agent answered, so the job judges it", async () => {
+    const r = runners(undefined, () => ({ result: { outcome: "failed", error: "invalid structured output: boom" } }));
     const success = vi.spyOn(quota, "recordSuccess");
     const res = await executor(r).exec(request());
-    expect(res).toMatchObject({ skipped: false, provider: "codex", result: { outcome, error: "boom" } });
+    expect(res).toMatchObject({ skipped: false, provider: "codex", result: { outcome: "failed", error: "invalid structured output: boom" } });
     expect(r.codex.calls).toHaveLength(1);
     expect(success).not.toHaveBeenCalled();
-    expect(store.readEvents(MISSION).at(-1)?.data).toMatchObject({ outcome, error: "boom" });
+    expect(quota.state("codex")).toEqual({ status: "ok" });
+    expect(store.readEvents(MISSION).at(-1)?.data).toMatchObject({ outcome: "failed", error: "invalid structured output: boom" });
+  });
+
+  it("returns a run that timed out after showing progress as is: the agent was too slow", async () => {
+    const r = runners(undefined, () => ({ events: [{ type: "progress", text: "Edit src/app.ts" }], result: { outcome: "timeout", error: "timed out" } }));
+    const res = await executor(r).exec(request());
+    expect(res).toMatchObject({ provider: "codex", result: { outcome: "timeout" } });
+    expect(r.codex.calls).toHaveLength(1);
+    expect(quota.state("codex")).toEqual({ status: "ok" });
   });
 
   it("records a success, which resets the provider's throttle backoff", async () => {
@@ -289,7 +299,7 @@ describe("RoleExecutor: candidates and failover", () => {
     const run = track(executor(r, { onWaiting }).exec(request(overrides)));
     await settle();
 
-    expect(onWaiting).toHaveBeenCalledWith(resetsAt + MARGIN, expect.stringContaining(ASTRA));
+    expect(onWaiting).toHaveBeenCalledWith(resetsAt + MARGIN, expect.stringContaining(ASTRA), "limits");
     await clock.advance(10 * MIN + MARGIN - 1);
     expect(run.done).toBe(false);
     await clock.advance(1);
@@ -704,7 +714,7 @@ describe("RoleExecutor: quota signals from runs", () => {
     expect(quota.state("mock")).toEqual({ status: "ok" });
   });
 
-  it("gives up after 8 runs that hit limits and returns the last one", async () => {
+  it("gives up after 8 runs that hit limits with ProvidersFailingError: such a run never counts as the job's answer", async () => {
     const throttled = (job: AgentJob) => limited({ provider: job.provider, kind: "throttle", raw: `429 on ${job.model}` });
     const r = runners(throttled, throttled);
     const warn = vi.fn();
@@ -714,12 +724,13 @@ describe("RoleExecutor: quota signals from runs", () => {
       await settle();
     }
     expect(r.codex.calls.length + r.claude.calls.length).toBe(8);
-    expect(run.value).toMatchObject({ skipped: false, result: { outcome: "limited" } });
-    const last = run.value as ExecResult;
-    expect(last.result?.error).toBe("usage limit");
+    expect(run.error).toBeInstanceOf(ProvidersFailingError);
+    expect(run.error).toMatchObject({ providers: ["codex", "claude"], detail: "usage limit" });
+    expect((run.error as Error).message).toBe("codex and claude kept refusing work (usage limits or overload, 8 runs in a row): usage limit");
     expect(store.readUsage()).toHaveLength(8);
     expect(warn).toHaveBeenCalledWith("giving up on build-login after 8 runs that hit usage limits", { label: "build-login" });
   });
+
 
   it("does not count a limited run as the result: the retry's result is returned", async () => {
     const r = runners(undefined, (_job, call) => (call === 0 ? limited({ provider: "codex", kind: "throttle", raw: "429" }) : ok()));
@@ -730,6 +741,112 @@ describe("RoleExecutor: quota signals from runs", () => {
     const res = run.value as ExecResult;
     expect(res.result?.outcome).toBe("ok");
     expect(r.codex.calls.map((j) => j.id)).toEqual(["build-login-1", "build-login-2"]);
+  });
+});
+
+describe("RoleExecutor: runs that fail for reasons outside the job", () => {
+  const crash = (text = "codex exited with code 1 without completing the turn: error: unknown option '--permission-prompts'"): StubStep => ({
+    result: { outcome: "crashed", error: text, exitCode: 1 },
+  });
+  /** A CLI that hung: no sign of work until the timeout. */
+  const hung = (): StubStep => ({ result: { outcome: "timeout", error: "timed out after 2700000 ms", exitCode: null } });
+
+  it.each([
+    ["crashed", () => crash()],
+    ["hung without a sign of work", hung],
+  ] as const)("does not hand back a run that %s: the other family takes the job, and the CLI rests", async (_, step) => {
+    const r = runners(undefined, () => step());
+    const res = await executor(r).exec(request());
+    expect(res).toMatchObject({ provider: "claude", model: OPUS, result: { outcome: "ok" } });
+    expect(r.codex.calls).toHaveLength(1);
+    expect(quota.state("codex")).toMatchObject({ status: "failing", until: clock.now() + MIN });
+    expect(quota.isAvailable("codex", SOL)).toBe(false);
+  });
+
+  it("retries the same provider after a backoff when failover is off, and a success ends the backoff", async () => {
+    const r = runners(undefined, (_job, call) => (call < 2 ? crash() : ok()));
+    const onWaiting = vi.fn();
+    const run = track(executor(r, { onWaiting }).exec(request({ allowFailover: false })));
+    await settle();
+    expect(onWaiting).toHaveBeenLastCalledWith(clock.now() + MIN + MARGIN, expect.stringContaining(`${ASTRA}: codex keeps failing (codex exited with code 1`), "trouble");
+    await clock.advance(MIN + MARGIN);
+    await settle();
+    expect(onWaiting).toHaveBeenLastCalledWith(clock.now() + 2 * MIN + MARGIN, expect.any(String), "trouble"); // backs off
+    await clock.advance(2 * MIN + MARGIN);
+    await settle();
+    expect(run.value).toMatchObject({ provider: "codex", result: { outcome: "ok" } });
+    expect(r.codex.calls).toHaveLength(3);
+    expect(r.claude.calls).toEqual([]);
+    expect(quota.state("codex")).toEqual({ status: "ok" });
+    expect(store.readUsage().map((u) => u.outcome)).toEqual(["crashed", "crashed", "ok"]);
+  });
+
+  it("gives up with ProvidersFailingError naming the real error once the CLIs have failed for half an hour", async () => {
+    const r = runners(() => crash("claude exited with code 1 without a result: Error: boom\n    at main (cli.js:1:1)\nTypeError: x is not a function"), () => crash());
+    const warn = vi.fn();
+    const start = clock.now();
+    const run = track(executor(r, { logger: { ...nullLogger, warn } }).exec(request()));
+    for (let minutes = 0; !run.done && minutes < 2 * HOUR / MIN; minutes++) {
+      await clock.advance(MIN);
+      await settle();
+    }
+    expect(run.error).toBeInstanceOf(ProvidersFailingError);
+    const err = run.error as ProvidersFailingError;
+    expect(err.providers).toEqual(["codex", "claude"]);
+    expect(err.message).toMatch(/^codex and claude keep failing: /);
+    expect(err.detail).toMatch(/exited with code 1/);
+    // Retried with growing pauses for about half an hour, alternating between the families.
+    const runs = r.codex.calls.length + r.claude.calls.length;
+    expect(runs).toBeGreaterThanOrEqual(6);
+    expect(runs).toBeLessThanOrEqual(16);
+    expect(clock.now() - start).toBeGreaterThanOrEqual(30 * MIN);
+    expect(clock.now() - start).toBeLessThan(HOUR);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^giving up on build-login after \d+ runs that failed for reasons outside the job$/), { label: "build-login" });
+  });
+
+  it("keeps the first and last line of a long error, where CLIs put the cause", async () => {
+    config.failover.enabled = false;
+    const r = runners(undefined, () => crash("codex exited with code 1 without completing the turn: warning: x\nmore\nError: the real cause"));
+    const run = track(executor(r).exec(request()));
+    for (let minutes = 0; !run.done && minutes < 2 * HOUR / MIN; minutes++) {
+      await clock.advance(MIN);
+      await settle();
+    }
+    expect((run.error as ProvidersFailingError).detail).toBe("codex exited with code 1 without completing the turn: warning: x … Error: the real cause");
+  });
+
+  it("stops waiting for a failing CLI at the deadline", async () => {
+    const r = runners(undefined, () => crash());
+    const err = await executor(r, { deadline: clock.now() + 30_000 }).exec(request({ allowFailover: false })).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(DeadlineError);
+    expect(r.codex.calls).toHaveLength(1);
+  });
+
+  it("returns a failing run of optional work as is, without blocking the provider for the required work", async () => {
+    const r = runners(() => crash("claude exited with code 1"));
+    const res = await executor(r).exec(request({ family: "claude", tier: "light", role: "scout", optional: true }));
+    expect(res).toMatchObject({ skipped: false, provider: "claude", model: HAIKU, result: { outcome: "crashed" } });
+    expect(r.claude.calls).toHaveLength(1);
+    expect(quota.state("claude")).toEqual({ status: "ok" });
+  });
+
+  it("tells a wait for usage limits apart from a wait for providers in trouble", async () => {
+    const onWaiting = vi.fn();
+    quota.recordLimit({ provider: "codex", kind: "session", resetsAt: clock.now() + 10 * MIN, raw: "limit" });
+    const first = track(executor(runners(), { onWaiting }).exec(request({ allowFailover: false })));
+    await settle();
+    expect(onWaiting).toHaveBeenLastCalledWith(clock.now() + 10 * MIN + MARGIN, expect.stringContaining("session limit"), "limits");
+    await clock.advance(10 * MIN + MARGIN);
+    await settle();
+    expect(first.done).toBe(true);
+
+    quota.recordLimit({ provider: "codex", kind: "throttle", raw: "API Error: Connection refused (ECONNREFUSED)" });
+    const second = track(executor(runners(), { onWaiting }).exec(request({ allowFailover: false })));
+    await settle();
+    expect(onWaiting).toHaveBeenLastCalledWith(clock.now() + MIN + MARGIN, expect.stringContaining("throttle limit"), "trouble");
+    await clock.advance(MIN + MARGIN);
+    await settle();
+    expect(second.done).toBe(true);
   });
 });
 

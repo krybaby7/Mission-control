@@ -24,6 +24,8 @@ const line = (event) => out(JSON.stringify(event) + "\n");
 const err = (text) => process.stderr.write(text + "\n");
 
 const init = { type: "system", subtype: "init", session_id: SESSION, model: flag("--model") ?? "unknown", tools: [] };
+/** Stays alive like a CLI with more to do (or waiting on a background shell), until it is killed. */
+const keepRunning = () => setInterval(() => {}, 1_000);
 const assistant = (...content) => ({ type: "assistant", message: { content }, session_id: SESSION });
 const text = (value) => ({ type: "text", text: value });
 const toolUse = (name, input) => ({ type: "tool_use", id: `tool-${name}`, name, input });
@@ -156,9 +158,23 @@ const scenarios = {
     line(rateLimit({ status: "rejected", rateLimitType: "five_hour", overageStatus: "allowed_warning" }));
     line(result({ result: "", structured_output: { verdict: "approve", issues: [] } }));
   },
+  /** Extra usage covers the rejection, so the CLI keeps working (and billing) until it is stopped. */
+  "extra-usage-continues"() {
+    line(init);
+    line(assistant(text("Working on it.")));
+    line(rateLimit(EXTRA_USAGE));
+    line(assistant(toolUse("Bash", { command: "npm test" })));
+    keepRunning();
+  },
+  /** The older event shape: no isUsingOverage, only the overage status, and no reset time or utilization. */
+  "extra-usage-continues-old-shape"() {
+    line(init);
+    line(rateLimit({ status: "rejected", rateLimitType: "five_hour", overageStatus: "allowed_warning" }));
+    keepRunning();
+  },
+  /** Extra usage is used up too: nothing covers the rejection, and the CLI stops by itself. */
   "extra-usage-exhausted"() {
     line(init);
-    line(rateLimit(EXTRA_USAGE));
     line(
       rateLimit({
         status: "rejected",
@@ -286,7 +302,35 @@ const scenarios = {
   },
   hang() {
     line(init);
-    setInterval(() => {}, 1_000);
+    keepRunning();
+  },
+  /** The login bills an API key ($FAKE_CLAUDE_KEY_SOURCE, as the init event names it); the CLI would go on. */
+  "api-key"() {
+    line({ ...init, apiKeySource: process.env.FAKE_CLAUDE_KEY_SOURCE ?? "ANTHROPIC_API_KEY" });
+    line(assistant(text("Working on it.")));
+    keepRunning();
+  },
+  "subscription-login"() {
+    line({ ...init, apiKeySource: "none" });
+    line(result({ result: "Done." }));
+  },
+  /** Prints its result, then keeps waiting (a background shell, a hung MCP child). */
+  linger() {
+    line(init);
+    line(result({ result: "Finished; the dev server is still running." }));
+    keepRunning();
+  },
+  /**
+   * Prints its result, then a background shell wakes the model: a second turn that goes quiet for 2.5 s (a long
+   * tool call) before its own result, after which the CLI exits by itself.
+   */
+  "result-then-new-turn"() {
+    line(init);
+    line(result({ result: "First answer." }));
+    setTimeout(() => {
+      line(assistant(toolUse("Bash", { command: "npm test" })));
+      setTimeout(() => line(result({ result: "Second answer." })), 2_500);
+    }, 100);
   },
 };
 

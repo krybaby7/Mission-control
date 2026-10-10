@@ -2,7 +2,7 @@ import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildReportFacts, collectScreenshots, howToRun, renderReport, usageSummary } from "./report.js";
 import type { Feature, Mission, ReportProseOutput, UsageRecord } from "./types.js";
 
@@ -167,8 +167,9 @@ const PROSE: ReportProseOutput = {
 
 const GENERATED_AT = "2026-10-10T05:00:00.000Z";
 
+/** Rendered as outside the container unless the test says otherwise (inContainer: true). */
 function render(m: Mission, opts: Partial<Parameters<typeof renderReport>[1]> = {}): string {
-  return renderReport(m, { prose: PROSE, usage: realisticUsage(), screenshots: [], generatedAt: GENERATED_AT, ...opts });
+  return renderReport(m, { prose: PROSE, usage: realisticUsage(), screenshots: [], generatedAt: GENERATED_AT, inContainer: false, ...opts });
 }
 
 /** The text of one "## <title>" section, without its heading. */
@@ -365,7 +366,7 @@ describe("buildReportFacts", () => {
       repoPath: "",
     };
     const facts = buildReportFacts(m, []);
-    expect(facts).toContain("Status: Stopped (failed). 0 of 0 features done");
+    expect(facts).toContain("Status: Stopped, needs your help (failed). 0 of 0 features done");
     expect(facts.match(/- \(none\)/g)).toHaveLength(6);
     expect(facts).toContain("Totals: 0 agent runs");
   });
@@ -374,7 +375,7 @@ describe("buildReportFacts", () => {
     const m = realisticMission();
     m.features = m.features.slice(0, 2);
     expect(buildReportFacts(m, [])).toContain(
-      "Why partly done: every feature is done, but the final check of the whole app did not fully pass (see Run notes).",
+      "Why partly done: every feature is done, but the final checks or reviews of the whole app left problems open (see the decisions and Run notes).",
     );
     expect(buildReportFacts(realisticMission(), [])).not.toContain("Why partly done");
   });
@@ -403,9 +404,9 @@ describe("renderReport", () => {
       PROSE.narrative,
       "## What you can do now",
       "## How to try it",
-      "## What it looks like",
       "## Needs your decision",
       "## Features",
+      "## What it looks like",
       "## Choices I made for you",
       "## Review notes",
       "## Usage",
@@ -442,7 +443,7 @@ describe("renderReport", () => {
       "I worked on your new app, “Habit tracker”. The plan: A simple app to keep track of your daily habits. " +
         "2 of the 4 features are built and checked. 1 feature got stuck; the table below says why. " +
         "1 feature depended on a stuck feature, so I skipped it. " +
-        "There is one thing I need you to decide; see “Needs your decision”.",
+        "There are 2 things I need you to decide; see “Needs your decision”.",
     );
     expect(sectionText(report, "What you can do now")).toBe(
       "- **Add a habit**: You can add a new habit with a name.\n- **Tick off a habit**: You can tick off a habit.",
@@ -464,12 +465,76 @@ describe("renderReport", () => {
         "2. `npm install`: download what the app needs (slow the first time)",
         "3. `npm run dev`: start the app (leave this window open while you try it)",
         "4. Open http://localhost:3000 in your browser.",
+        "",
+        "When you're done, press Ctrl+C to stop the app.",
       ].join("\n"),
     );
   });
 
-  it("shows the decisions the user needs to make", () => {
-    expect(sectionText(render(realisticMission()), "Needs your decision")).toBe("- Should a streak survive a skipped weekend?");
+  it("in the container, starts with mc shell (Ubuntu has no Node) and writes paths that work in Ubuntu too", () => {
+    vi.stubEnv("HOME", "/home/pwuser");
+    try {
+      expect(sectionText(render(realisticMission(), { inContainer: true }), "How to try it")).toBe(
+        [
+          "The app is in your folder `~/mc-apps/habit-tracker` (in Windows File Explorer: " +
+            "`\\\\wsl.localhost\\Ubuntu\\home\\<your Ubuntu name>\\mc-apps\\habit-tracker`).",
+          "",
+          "In the Ubuntu window, run `mc shell` first: it opens a terminal inside Mission Control's container, which has " +
+            "everything the app needs. Then run these one at a time:",
+          "",
+          "1. `cd ~/mc-apps/habit-tracker`: go to the app's folder",
+          "2. `npm install`: download what the app needs (slow the first time)",
+          "3. `npm run dev`: start the app (leave this window open while you try it)",
+          "4. Open http://localhost:3000 in your browser.",
+          "",
+          "When you're done, press Ctrl+C to stop the app and type `exit`.",
+        ].join("\n"),
+      );
+      // "~" stays outside the quotes, so the shell still expands it.
+      expect(howToRun({ ...realisticMission(), repoPath: "/home/pwuser/mc-apps/my app" }, { inContainer: true })[0]).toBe("cd ~/'mc-apps/my app'");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("shows the decisions the user needs to make, and how to have another go at the features that weren't finished", () => {
+    expect(sectionText(render(realisticMission()), "Needs your decision")).toBe(
+      [
+        "- Should a streak survive a skipped weekend?",
+        "- 2 features weren't finished, and I won't try again by myself: “Streaks” (got stuck) and “Share progress” " +
+          "(skipped: it needed a stuck feature). The “Features” table says why. To have another go, queue them as a change " +
+          "to the app: `mc feature /home/pwuser/mc-apps/habit-tracker 'Streaks: You can streaks. Share progress: You can " +
+          "share progress.' --base main`. It starts on the next run.",
+      ].join("\n"),
+    );
+  });
+
+  it("gives the retry command for a change to an existing app from its own branch, quoted for the shell, with ~ in the container", () => {
+    vi.stubEnv("HOME", "/home/pwuser");
+    try {
+      const m: Mission = { ...realisticMission(), kind: "feature", repoPath: "/home/pwuser/mc-apps/shop", decisionsNeeded: [] };
+      m.features = [m.features[0]!, { ...m.features[2]!, title: "Bob's streaks", story: "You can see Bob's streaks." }];
+      const decisions = sectionText(render(m, { inContainer: true }), "Needs your decision");
+      expect(decisions).toContain("1 feature wasn't finished, and I won't try again by myself: “Bob's streaks” (got stuck).");
+      expect(decisions).toContain(
+        `queue it as a change to the app (in the Ubuntu window): \`mc feature ~/mc-apps/shop 'Bob'\\''s streaks: You can see Bob'\\''s streaks.' --base mc/${MISSION_ID}\``,
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    // Not while the mission can still continue: its stuck features are its own business until it finishes.
+    const paused = render({ ...realisticMission(), status: "stopped", stage: "features" });
+    expect(sectionText(paused, "Needs your decision")).toBe("- Should a streak survive a skipped weekend?");
+  });
+
+  it("says what to do when every feature is done but the final check of the whole app failed", () => {
+    const m = realisticMission();
+    m.features = m.features.slice(0, 2);
+    m.decisionsNeeded = [];
+    expect(sectionText(render(m), "Needs your decision")).toBe(
+      "- Every feature passed its own checks, but the final check of the whole app didn't, so some parts may not work right " +
+        "yet (“Technical details” has what it found). Have someone look at the app before you rely on it.",
+    );
   });
 
   it("shows every feature with ✅ or ⛔ and a plain reason", () => {
@@ -493,7 +558,7 @@ describe("renderReport", () => {
     const report = render(m, { prose: null });
     expect(report).toContain("| ⏳ | Streaks | Started but not finished |");
     expect(report).toContain("| ⏳ | Share progress | Not started yet |");
-    expect(report).toContain("**Stopped** · 2 of 4 features done");
+    expect(report).toContain("**Paused, continues on the next run** · 2 of 4 features done");
     expect(report).toContain("2 features aren't finished yet. The run stopped before I could finish.");
   });
 
@@ -595,8 +660,8 @@ describe("renderReport", () => {
     const report = render(m, { prose: null });
     expect(report).toContain("**Partly done** · 2 of 2 features done");
     expect(report).toContain(
-      "All 2 features are built and checked. But the final check of the whole app didn't fully pass, so some parts " +
-        "may not work together yet. “Technical details” at the end says what it found.",
+      "All 2 features are built and checked. But the final checks or reviews of the whole app left problems open, so some parts " +
+        "may not work right yet. “Needs your decision” and “Technical details” say what they found.",
     );
     expect(sectionText(report, "Technical details")).toContain("- gate C: major: adding a habit breaks the list page");
   });
@@ -639,7 +704,7 @@ describe("renderReport", () => {
       verify: undefined,
     };
     const report = render(m, { prose: null, usage: [] });
-    expect(report).toContain("**Stopped** · no features planned yet");
+    expect(report).toContain("**Stopped, needs your help** · no features planned yet");
     expect(report).toContain("I didn't get as far as planning the features. I hit a problem I couldn't get past on my own");
     expect(sectionText(report, "How to try it")).toBe("There's nothing to try yet: the app wasn't created.");
     expect(sectionText(report, "What you can do now")).toBe("Nothing new to try yet: none of the features were finished.");
@@ -665,12 +730,69 @@ describe("renderReport", () => {
     expect(howTo).toContain(`2. \`git checkout --detach mc/${MISSION_ID}\`: switch to the version with the new work`);
     expect(howTo).toContain("3. `npm install`: download what the app needs");
     expect(howTo).toContain("4. `npm run verify`: run the project's own checks");
-    expect(howTo.endsWith("Then start your app the way you usually do.")).toBe(true);
+    expect(howTo).toContain("Then start your app the way you usually do.");
+    // The detached checkout must be undone before the next `mc feature`, and the change kept or left on purpose.
+    expect(howTo).toContain("When you're done, put the folder back on your own version with `git checkout main`.");
+    expect(howTo).toContain(`To keep the change, add it to your own version (\`main\`), in the app's folder: \`git checkout main && git merge mc/${MISSION_ID}\`.`);
+    expect(howTo).toContain("If you don't want it, do nothing");
     expect(sectionText(report, "Needs your decision")).toContain("already failing before I started");
-    expect(report).toContain("There is one thing I need you to decide");
+    expect(report).toContain("There are 2 things I need you to decide"); // that, and the features that weren't finished
     expect(sectionText(report, "Technical details")).toContain(
       "### Checks failing before the mission\n\n```\nFAIL tests/legacy.test.ts\n1 failed, 40 passed\n```",
     );
+  });
+
+  it("starts a changed app with its own dev script, when it has one, instead of only running its checks", () => {
+    const repo = mkdtempSync(join(tmpdir(), "mc-report-app-"));
+    try {
+      writeFileSync(join(repo, "package.json"), JSON.stringify({ scripts: { dev: "next dev", verify: "npm test" } }));
+      const m: Mission = { ...realisticMission(), kind: "feature", status: "done", repoPath: repo, decisionsNeeded: [] };
+      m.features = m.features.slice(0, 2);
+      expect(howToRun(m)).toEqual([`cd ${repo}`, `git checkout mc/${MISSION_ID}`, "npm install", "npm run dev"]);
+      const howTo = sectionText(render(m), "How to try it");
+      expect(howTo).toContain("4. `npm run dev`: start the app (leave this window open while you try it)");
+      expect(howTo).toContain("Then open the address it prints (often http://localhost:3000) in your browser.");
+      expect(howTo).toContain("When you're done, press Ctrl+C to stop the app and put the folder back on your own version with `git checkout main`.");
+      expect(howTo).toContain(`\`git checkout main && git merge mc/${MISSION_ID}\``);
+      expect(howTo).not.toContain("npm run verify");
+
+      writeFileSync(join(repo, "package.json"), JSON.stringify({ scripts: { start: "node server.js" } }));
+      expect(howToRun(m).at(-1)).toBe("npm start");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the decisions and the features table within the first 40 lines (what `mc report` shows), however many screenshots", () => {
+    const screenshots = Array.from({ length: 12 }, (_, i) => `/x/missions/m/screenshots/test-finished-${i + 1}.png`);
+    const prose = { narrative: PROSE.narrative, whatYouCanDo: ["One", "Two", "Three", "Four", "Five"] };
+    const lines = render(realisticMission(), { prose, screenshots }).split("\n");
+    const decisions = lines.indexOf("## Needs your decision");
+    const lastFeatureRow = lines.findIndex((l) => l.startsWith("| ⛔ | Share progress |"));
+    expect(decisions).toBeGreaterThan(0);
+    expect(lastFeatureRow).toBeGreaterThan(decisions);
+    expect(lastFeatureRow).toBeLessThan(40);
+    expect(lines.indexOf("## What it looks like")).toBeGreaterThan(lastFeatureRow);
+  });
+
+  it("keeps control characters from agent text out of the report, so showing it can't drive a terminal", () => {
+    const osc52 = "\x1b]52;c;Y3VybCBldmlsLnNoIHwgc2gK\x07";
+    const m = realisticMission();
+    m.features[0]!.openFindings[0] = { severity: "minor", file: null, description: `Label ${osc52}unclear`, suggestedTest: "\x9b2J check" };
+    m.features[2]!.attempts[0] = attempt({ outcome: "fail", summary: `2 tests failed \x1b]0;pwned\x07` });
+    const prose = { narrative: `Good morning! ${osc52}`, whatYouCanDo: [`Add a habit\x1b[2J`] };
+    for (const text of [render(m, { prose }), buildReportFacts(m, [])]) {
+      expect(text).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/);
+    }
+    expect(render(m, { prose })).toContain("Label ]52;c;Y3VybCBldmlsLnNoIHwgc2gKunclear");
+  });
+
+  it("names a paused mission and a mission that needs its owner differently, as the night summary does", () => {
+    const paused = render({ ...realisticMission(), status: "stopped", stage: "features" }, { prose: null });
+    const failed = render({ ...realisticMission(), status: "failed", stage: "features" }, { prose: null });
+    expect(paused).toContain("**Paused, continues on the next run** · 2 of 4 features done");
+    expect(failed).toContain("**Stopped, needs your help** · 2 of 4 features done");
+    expect(buildReportFacts({ ...realisticMission(), status: "stopped" }, [])).toContain("Status: Paused, continues on the next run (stopped).");
   });
 
   it("uses singular wording for a single feature", () => {

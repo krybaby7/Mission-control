@@ -1,6 +1,7 @@
 // Role executor: turns a role request into one agent run. It picks the first provider/model the quota allows
 // (failing over to the other family when permitted), waits out limits when nothing is available, runs the agent,
-// and records usage, mission events and the quota signals the run reports.
+// and records usage, mission events and the quota signals the run reports. A run that ended for reasons outside the
+// job (a crashed or hung CLI, limits that never clear) is retried, never handed back as the job's answer.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { otherFamily, resolveModel } from "./config.js";
@@ -30,6 +31,13 @@ const WAIT_MARGIN_MS = 45_000;
 const MAX_SLEEP_SLICE_MS = 60_000;
 /** A job whose runs keep hitting limits gives up after this many, so a misread failure cannot rerun all night. */
 const MAX_LIMITED_RUNS = 8;
+/**
+ * A job whose runs keep failing for reasons outside it (crashed, hung) gives up once this long has passed since the
+ * first such failure ended, or after MAX_FAILED_RUNS of them. The quota backs off 1, 2, 4… min between tries, so a
+ * short outage passes unnoticed and a broken CLI stops the work within about half an hour.
+ */
+const FAILURE_PATIENCE_MS = 30 * 60_000;
+const MAX_FAILED_RUNS = 16;
 const FAMILIES: readonly Family[] = ["claude", "codex"];
 
 /** Every candidate provider for a run needs a human to log in again. */
@@ -40,6 +48,22 @@ export class AuthUnavailableError extends Error {
   ) {
     super(message);
     this.name = "AuthUnavailableError";
+  }
+}
+
+/**
+ * The agent CLIs keep failing for reasons that have nothing to do with the job: a CLI crashes or cannot start, hangs
+ * without output, or the provider keeps refusing (limits or overload that never clear). Nothing an agent did caused
+ * it, so the work must pause, not count as a failed attempt. `detail` is the last error, for the person who fixes it.
+ */
+export class ProvidersFailingError extends Error {
+  constructor(
+    message: string,
+    readonly providers: Provider[] = [],
+    readonly detail = "",
+  ) {
+    super(message);
+    this.name = "ProvidersFailingError";
   }
 }
 
@@ -104,9 +128,13 @@ export interface RoleExecutorDeps {
   signal?: AbortSignal;
   /** Epoch ms; no run starts after it, and waiting for a limit to reset past it throws DeadlineError. */
   deadline?: number;
-  onWaiting?: (until: number, reason: string) => void;
+  /** `cause` says whether the wait is for usage limits or for providers that fail or are overloaded right now. */
+  onWaiting?: (until: number, reason: string, cause: WaitCause) => void;
   stopCheck?: () => boolean;
 }
+
+/** "limits": usage limits or pacing. "trouble": the providers waited for are overloaded, unreachable or failing. */
+export type WaitCause = "limits" | "trouble";
 
 interface Candidate {
   family: Family;
@@ -132,6 +160,7 @@ export class RoleExecutor {
       throw new Error(`no runner is configured for any model that can run "${req.label}"`);
     }
     let limitedRuns = 0;
+    const failed = { runs: 0, since: 0 };
     for (;;) {
       this.checkStop();
       this.checkDeadline();
@@ -141,15 +170,31 @@ export class RoleExecutor {
         await this.waitForCandidate(candidates);
         continue;
       }
-      const result = await this.run(req, pick);
+      const { result, progressed } = await this.run(req, pick);
+      const done: ExecResult = { skipped: false, result, provider: pick.provider, model: pick.model, family: pick.family };
       if (result.outcome === "auth") continue; // that login is blocked now: another model, or AuthUnavailableError
+      if (result.outcome === "aborted") throw new StopRequestedError();
       if (result.outcome === "limited") {
         if (++limitedRuns < MAX_LIMITED_RUNS) continue; // another model, or after the reset
         this.deps.logger.warn(`giving up on ${req.label} after ${limitedRuns} runs that hit usage limits`, { label: req.label });
+        if (req.optional) return done;
+        throw new ProvidersFailingError(
+          `${providersOf(candidates)} kept refusing work (usage limits or overload, ${limitedRuns} runs in a row): ${runError(result)}`,
+          providerList(candidates),
+          runError(result),
+        );
       }
-      if (result.outcome === "aborted") throw new StopRequestedError();
+      if (isOutsideFailure(result, progressed)) {
+        if (req.optional) return done; // optional work just goes without; it must not hold up the required work
+        this.deps.quota.recordFailure(pick.provider, runError(result));
+        if (failed.runs++ === 0) failed.since = this.deps.clock.now();
+        if (failed.runs < MAX_FAILED_RUNS && this.deps.clock.now() - failed.since < FAILURE_PATIENCE_MS) continue;
+        this.deps.logger.warn(`giving up on ${req.label} after ${failed.runs} runs that failed for reasons outside the job`, { label: req.label });
+        const providers = providerList(candidates);
+        throw new ProvidersFailingError(`${providers.join(" and ")} keep${providers.length === 1 ? "s" : ""} failing: ${runError(result)}`, providers, runError(result));
+      }
       if (result.outcome === "ok") this.deps.quota.recordSuccess(pick.provider);
-      return { skipped: false, result, provider: pick.provider, model: pick.model, family: pick.family };
+      return done;
     }
   }
 
@@ -209,8 +254,18 @@ export class RoleExecutor {
     if (deadline !== undefined && until > deadline) throw new DeadlineError(until);
     const reason = this.waitReason(candidates);
     this.deps.logger.info(`waiting until ${new Date(until).toISOString()}: ${reason}`, { until });
-    this.deps.onWaiting?.(until, reason);
+    this.deps.onWaiting?.(until, reason, this.waitCause(candidates, until - WAIT_MARGIN_MS));
     await this.sleepUntil(until);
+  }
+
+  /** Whether the candidate that frees up first (at `at`) waits for a usage limit, or for a provider in trouble. */
+  private waitCause(candidates: Candidate[], at: number): WaitCause {
+    const { quota } = this.deps;
+    const first = candidates.find((c) => quota.availableAt(c.provider, c.model) === at);
+    const state = first && quota.state(first.provider);
+    if (state?.status === "failing" && state.until === at) return "trouble";
+    if (state?.status === "limited" && state.until === at && state.kind === "throttle") return "trouble";
+    return "limits";
   }
 
   /** e.g. "gpt-6-astra: session limit until …; claude-opus-5-5: claude needs a new login". */
@@ -221,8 +276,10 @@ export class RoleExecutor {
         const state = quota.state(c.provider);
         if (state.status === "auth") return `${c.model}: ${c.provider} needs a new login`;
         const at = quota.availableAt(c.provider, c.model) ?? 0;
+        const time = new Date(at).toISOString();
+        if (state.status === "failing" && state.until === at) return `${c.model}: ${c.provider} keeps failing (${firstLine(state.raw)}), trying again at ${time}`;
         const kind = state.status === "limited" && state.until === at ? state.kind : "model";
-        return `${c.model}: ${kind} limit until ${new Date(at).toISOString()}`;
+        return `${c.model}: ${kind} limit until ${time}`;
       })
       .join("; ");
   }
@@ -254,20 +311,28 @@ export class RoleExecutor {
 
   // ───────────── Running ─────────────
 
-  private async run(req: ExecRequest, candidate: Runnable): Promise<RunResult> {
+  /** One run; `progressed` tells whether the agent showed any sign of working (a progress event). */
+  private async run(req: ExecRequest, candidate: Runnable): Promise<{ result: RunResult; progressed: boolean }> {
     const { store, clock, logger, signal } = this.deps;
     const job = this.buildJob(req, candidate);
     const reported: LimitInfo[] = [];
+    let progressed = false;
     const runInfo = { label: req.label, jobId: job.id, role: req.role, provider: job.provider, model: job.model };
     logger.info(`run ${job.id}: ${job.role} on ${job.provider}/${job.model} (${job.effort})`, runInfo);
     store.appendEvent(req.missionId, "run.start", { ...runInfo, effort: job.effort }, clock.now());
 
-    const result = await candidate.runner.run(job, { signal, onEvent: (event) => this.onRunEvent(event, job, reported) });
+    const result = await candidate.runner.run(job, {
+      signal,
+      onEvent: (event) => {
+        if (event.type === "progress") progressed = true;
+        this.onRunEvent(event, job, reported);
+      },
+    });
 
     this.recordRun(req, job, result);
     if (result.outcome === "limited") this.recordRunLimit(job, result, reported);
     if (result.outcome === "auth") this.deps.quota.recordAuthFailure(job.provider, result.error || result.text || "login required");
-    return result;
+    return { result, progressed };
   }
 
   private buildJob(req: ExecRequest, candidate: Candidate): AgentJob {
@@ -378,6 +443,43 @@ export class RoleExecutor {
       now,
     );
   }
+}
+
+/**
+ * A run that ended for a reason outside the job: the CLI crashed or could not start, or it timed out without a single
+ * sign of work (a hung CLI or a dead connection). Such a run says nothing about the job, so it is retried rather than
+ * counted as the agent's failed attempt. A timeout after real progress is the agent's own (it was too slow).
+ */
+function isOutsideFailure(result: RunResult, progressed: boolean): boolean {
+  return result.outcome === "crashed" || (result.outcome === "timeout" && !progressed);
+}
+
+/** The run's error on one line: its first line and, when the cause follows in a stderr tail, its last line. */
+function runError(result: RunResult): string {
+  const lines = (result.error || result.text || `the run ended "${result.outcome}"`)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "");
+  const [first = "", last = first] = [lines[0], lines.at(-1)];
+  return cap(first === last ? first : `${first} … ${last}`, 400);
+}
+
+/** The first non-empty line, capped. */
+function firstLine(text: string): string {
+  return cap(text.split("\n").map((l) => l.trim()).find((l) => l !== "") ?? text.trim(), 300);
+}
+
+function cap(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+function providerList(candidates: Candidate[]): Provider[] {
+  return [...new Set(candidates.map((c) => c.provider))];
+}
+
+/** "codex", "claude and codex". */
+function providersOf(candidates: Candidate[]): string {
+  return providerList(candidates).join(" and ");
 }
 
 /**

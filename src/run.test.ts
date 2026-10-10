@@ -61,8 +61,10 @@ function runners(script: MockScript) {
   return { claude: new MockRunner(script, { provider: "claude" }), codex: new MockRunner(script, { provider: "codex" }) };
 }
 
-/** Every login has expired: each mission fails fast with a "log in again" decision. */
+/** Every login has expired: a mission fails fast with a "log in again" decision, and the night ends there. */
 const loggedOut = (): MockBehavior => ({ outcome: "auth", error: "Please run /login" });
+/** No usable plan, ever: each mission fails fast (two spec runs), for its owner to look at; the next one still runs. */
+const noPlan = (): MockBehavior => ({ outcome: "failed", error: "no usable plan" });
 /** An agent that never finishes on its own. */
 const hung = (): MockBehavior => ({ delayMs: Infinity });
 
@@ -135,10 +137,10 @@ describe("runNight", () => {
     const waiting = queue("Waiting app", { status: "waiting" });
     const partial = queue("Partial app", { status: "partial", stage: "complete" });
 
-    const result = await runNight({ config: testConfig(), logger: nullLogger, runners: runners(loggedOut) });
+    const result = await runNight({ config: testConfig(), logger: nullLogger, runners: runners(noPlan) });
 
     expect(result.missions.map((m) => m.id)).toEqual([first.id, stopped.id, running.id, waiting.id]);
-    for (const m of result.missions) expect(m.status).toBe("failed"); // every login expired
+    for (const m of result.missions) expect(m.status).toBe("failed"); // no usable plan
     expect(statusOf(done.id)).toBe("done");
     expect(statusOf(failed.id)).toBe("failed");
     expect(statusOf(partial.id)).toBe("partial");
@@ -163,15 +165,18 @@ describe("runNight", () => {
   it("links every mission report relatively in the summary, lists decisions, and copies the last report to latest.md", async () => {
     const a = queue("Habit tracker");
     const b = queue("Notes app");
-    const result = await runNight({ config: testConfig(), logger: nullLogger, runners: runners(loggedOut) });
+    const result = await runNight({ config: testConfig(), logger: nullLogger, runners: runners(noPlan) });
 
     const summary = readFileSync(result.summaryPath, "utf8");
-    expect(summary).toContain(`[Read the report](../missions/${a.id}/report.md)`);
-    expect(summary).toContain(`[Read the report](../missions/${b.id}/report.md)`);
+    expect(summary).toContain(`[Read the report](../missions/${a.id}/report.md), or run \`mc report ${a.id}\``);
+    expect(summary).toContain(`[Read the report](../missions/${b.id}/report.md), or run \`mc report ${b.id}\``);
     expect(summary).toContain("**Habit tracker**: Stopped, needs your help, no features planned yet.");
     expect(summary).toContain("## Needs your decision");
-    expect(summary).toContain("Log in again");
     expect(summary).toContain("Every queued mission was worked on.");
+    // Failed missions wait for their owner, who is told how to continue them.
+    expect(summary).toContain("## Waiting for you");
+    expect(summary).toContain(`\`mc run --mission ${a.id}\``);
+    expect(result.waitingForYou.map((m) => m.id)).toEqual([a.id, b.id]);
     for (const m of [a, b]) expect(existsSync(join(home, "missions", m.id, "report.md"))).toBe(true);
 
     expect(readFileSync(join(home, "reports", "latest.md"), "utf8")).toContain("# Notes app");
@@ -297,6 +302,37 @@ describe("runNight", () => {
     expect(result.summaryPath).toContain("night-2026-10-10");
   });
 
+  it("refuses a stop time that passed a little while ago, instead of working about 24 hours through the day", async () => {
+    const clock = new FakeClock(new Date(2026, 9, 10, 7, 20).getTime()); // Saturday 07:20, a morning test with the usual command
+    const m = queue("Habit tracker");
+    const r = runners(hung);
+    await expect(runNight({ config: testConfig(), clock, logger: nullLogger, runners: r, until: "07:00" })).rejects.toThrow(
+      "It's 07:20 now, already past 07:00, so this run would work until 07:00 tomorrow (Sun Oct 11): about 24 hours, " +
+        "through your day. Nothing was started. To work now anyway, give a stop time later today, for example: mc run --until 11:00",
+    );
+    expect(allCalls(r)).toHaveLength(0);
+    expect(statusOf(m.id)).toBe("queued");
+    expect(notifications()).toEqual([]);
+    store().acquireLock()(); // never taken
+  });
+
+  it("says when the night will stop as it starts, for a night or an afternoon start", async () => {
+    for (const [hour, expected] of [
+      [23, "Working until 07:00 tomorrow (Sun Oct 11)."],
+      [13, "Working until 07:00 tomorrow (Sun Oct 11)."], // 18 hours: still allowed
+      [5, "Working until 07:00 today."],
+    ] as const) {
+      const lines: string[] = [];
+      const logger = { info: (msg: string) => void lines.push(msg), warn: () => {}, error: () => {} };
+      const clock = new FakeClock(new Date(2026, 9, 10, hour, 0).getTime());
+      await runNight({ config: testConfig(), clock, logger, runners: runners(loggedOut), until: "07:00" });
+      expect(lines[0], `start at ${hour}:00`).toBe(expected);
+    }
+    const lines: string[] = [];
+    await runNight({ config: testConfig(), logger: { info: (msg: string) => void lines.push(msg), warn: () => {}, error: () => {} }, runners: runners(loggedOut) });
+    expect(lines[0]).toBe("Working until the queue is done (no stop time given).");
+  });
+
   it.each([
     ["Ctrl+C", "SIGINT", 130],
     ["docker stop", "SIGTERM", 143],
@@ -377,10 +413,57 @@ describe("runNight", () => {
     let late: Mission | undefined;
     const r = runners((_job, call) => {
       if (call === 0 && !late) late = queue("Queued at midnight");
-      return loggedOut();
+      return noPlan();
     });
     const result = await runNight({ config: testConfig(), logger: nullLogger, runners: r });
     expect(result.missions.map((m) => m.title)).toEqual(["First app", "Queued at midnight"]);
+  });
+
+  it("ends the night once every login has expired: the next missions stay queued, and the failed one is retried next run", async () => {
+    const first = queue("First app");
+    const second = queue("Second app");
+    const r = runners(loggedOut);
+
+    const result = await runNight({ config: testConfig(), logger: nullLogger, runners: r });
+
+    expect(result.missions.map((m) => [m.id, m.status])).toEqual([[first.id, "failed"]]);
+    expect(statusOf(second.id)).toBe("queued"); // never started: it would only have failed too
+    expect(allCalls(r).every((j) => j.cwd !== join(home, "missions", second.id))).toBe(true);
+    const summary = readFileSync(result.summaryPath, "utf8");
+    expect(summary).toContain("Ended early because every AI needs a new login");
+    expect(summary).toContain("Still waiting in the queue: 1 mission(s).");
+    expect(summary).not.toContain("## Waiting for you");
+    expect(result.waitingForYou).toEqual([]);
+
+    // After the owner logs in, a plain run takes both up again, the failed one first.
+    const again = await runNight({ config: testConfig(), logger: nullLogger, runners: runners(noPlan) });
+    expect(again.missions.map((m) => m.id)).toEqual([first.id, second.id]);
+  });
+
+  it("tells the phone when the last run died without finishing, and carries on with its missions", async () => {
+    const crashed = queue("Crashed app", { status: "running", stage: "spec" });
+
+    const result = await runNight({ config: testConfig(), logger: nullLogger, runners: runners(noPlan) });
+
+    expect(result.missions.map((m) => m.id)).toEqual([crashed.id]);
+    const notice = notifications()[0];
+    expect(notice).toMatchObject({ title: "Mission Control stopped unexpectedly", priority: "4" });
+    expect(notice?.body).toContain("Crashed app");
+  });
+
+  it("does not say nothing was queued when a failed mission waits for its owner", async () => {
+    const stuck = queue("Stuck app", { status: "failed" });
+
+    const result = await runNight({ config: testConfig(), logger: nullLogger, runners: runners(noPlan) });
+
+    expect(result.missions).toEqual([]);
+    expect(result.waitingForYou.map((m) => m.id)).toEqual([stuck.id]);
+    const summary = readFileSync(result.summaryPath, "utf8");
+    expect(summary).not.toContain("Nothing was queued");
+    expect(summary).toContain(`\`mc report ${stuck.id}\``);
+    expect(summary).toContain(`\`mc run --mission ${stuck.id}\``);
+    expect(notifications()).toEqual([expect.objectContaining({ title: "Night finished", priority: "4" })]);
+    expect(notifications()[0]?.body).toContain(`Stuck app: still needs your help (mc report ${stuck.id})`);
   });
 
   it("records an unexpected dispatcher crash as a failed mission with a report, and goes on with the next", async () => {

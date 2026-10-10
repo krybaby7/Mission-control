@@ -1,5 +1,5 @@
 // Quota governor: what each provider may start right now (usage limits, throttling, model-specific limits,
-// pacing by reported utilization, failed logins) and when a blocked provider or model frees up.
+// pacing by reported utilization, failed logins, a CLI that keeps failing) and when a blocked provider or model frees up.
 // Limits are saved to statePath so a restart remembers them.
 import { existsSync } from "node:fs";
 import type { Clock, Config, LimitInfo, LimitKind, Logger, Provider, Utilization } from "./types.js";
@@ -9,6 +9,8 @@ import { nullLogger } from "./util/logger.js";
 export type ProviderState =
   | { status: "ok" }
   | { status: "limited"; kind: LimitKind; until: number; raw: string }
+  /** Its CLI failed for a reason outside the job (it crashed or hung); tried again from `until`. */
+  | { status: "failing"; until: number; raw: string }
   | { status: "auth"; raw: string };
 
 export interface QuotaSnapshot {
@@ -34,6 +36,9 @@ const THROTTLE_BASE_MS = MINUTE_MS;
 const THROTTLE_MAX_MS = 15 * MINUTE_MS;
 /** A failed login blocks the provider this long; then one run may check it again, since a 401 can be transient. */
 const AUTH_RECHECK_MS = 30 * MINUTE_MS;
+/** A CLI that crashed or hung is tried again after 60 s, 120 s, 240 s… (capped), until a run succeeds. */
+const FAILURE_BASE_MS = MINUTE_MS;
+const FAILURE_MAX_MS = 15 * MINUTE_MS;
 
 /**
  * How far ahead a reported reset may lie: usage windows last at most a week, a spend cap a month. A later time was
@@ -56,6 +61,11 @@ const PACED_WINDOWS = [
   { window: "five_hour", setting: "maxFiveHourUtilization", kind: "session" },
   { window: "seven_day", setting: "maxWeeklyUtilization", kind: "weekly" },
 ] as const satisfies readonly { window: string; setting: keyof Config["pacing"]; kind: LimitKind }[];
+
+/** The usage window a night's share of the week is measured in. */
+const WEEKLY_WINDOW = "seven_day";
+/** Readings are fractions such as 0.65 - 0.3; this keeps a share exactly at the cap from slipping under it. */
+const SHARE_EPSILON = 1e-9;
 
 const PROVIDERS: readonly Provider[] = ["claude", "codex", "mock"];
 const LIMIT_KINDS: readonly LimitKind[] = ["session", "weekly", "model", "spend", "throttle", "unknown"];
@@ -86,7 +96,16 @@ interface AuthBlock {
   until: number;
 }
 
-/** The statePath file. Login failures are deliberately not saved: a restart usually follows a fresh login. */
+interface FailureBlock {
+  raw: string;
+  /** When a run may try the provider again. */
+  until: number;
+}
+
+/**
+ * The statePath file. Login and CLI failures are deliberately not saved: a restart usually follows a fresh login
+ * or a fix.
+ */
 interface PersistedState {
   version: number;
   limits: Partial<Record<Provider, Block>>;
@@ -103,9 +122,18 @@ export class QuotaGovernor {
   private readonly modelBlocks = new Map<string, ModelBlock>();
   /** Latest reading per "<provider>:<window>". */
   private readonly utilization = new Map<string, Utilization>();
+  /**
+   * Per provider, the 7-day utilization when this governor (one night run) first read it, lowered when the window
+   * resets or old usage rolls out of it: tonight's share of the week counts from here. Memory only, so every night
+   * run starts afresh.
+   */
+  private readonly nightStart = new Map<Provider, number>();
   private readonly auth = new Map<Provider, AuthBlock>();
   /** Consecutive throttles per provider since its last success; drives the exponential backoff. */
   private readonly throttleStreak = new Map<Provider, number>();
+  private readonly failures = new Map<Provider, FailureBlock>();
+  /** Consecutive CLI failures per provider since its last success, and the last one's text; drives their backoff. */
+  private readonly failureStreaks = new Map<Provider, { count: number; raw: string }>();
 
   constructor(opts: QuotaGovernorOptions) {
     this.clock = opts.clock;
@@ -132,6 +160,20 @@ export class QuotaGovernor {
     if (this.auth.delete(provider)) this.logger.info(`${provider} login marked as working again`, { provider });
   }
 
+  /**
+   * The provider's CLI failed for a reason that says nothing about the job: it crashed, could not start, or hung
+   * without output. New work waits 60 s, then 120 s, 240 s… (capped at 15 min) until a run on it succeeds, so other
+   * providers take over when they may. Kept in memory only.
+   */
+  recordFailure(provider: Provider, raw: string): void {
+    const now = this.prune();
+    const streak = (this.failureStreaks.get(provider)?.count ?? 0) + 1;
+    this.failureStreaks.set(provider, { count: streak, raw });
+    const until = now + Math.min(FAILURE_BASE_MS * 2 ** (streak - 1), FAILURE_MAX_MS);
+    this.failures.set(provider, { raw, until });
+    this.logger.warn(`${provider} failed for a reason outside the job (trying it again at ${iso(until)}): ${raw}`, { provider, streak });
+  }
+
   recordUtilization(u: Utilization): void {
     const now = this.prune();
     const key = windowKey(u.provider, u.window);
@@ -140,11 +182,15 @@ export class QuotaGovernor {
     const resetsAt = futureTime(u.resetsAt, now, MAX_RESET_AHEAD_MS) ?? previous?.resetsAt;
     const reading: Utilization = { provider: u.provider, window: u.window, utilization: u.utilization };
     if (resetsAt !== undefined) reading.resetsAt = resetsAt;
+    const sharedBefore = this.nightShareBlock(u.provider);
+    if (u.window === WEEKLY_WINDOW) this.noteNightStart(u.provider, u.utilization);
     if (previous && sameReading(previous, reading)) return;
     this.utilization.set(key, reading);
     const pacing = this.pacingBlock(reading);
-    if (pacing && !(previous && this.pacingBlock(previous))) {
-      this.logger.info(`pausing new work on ${u.provider} until ${iso(pacing.until)} (${pacing.raw})`, {
+    const newlyPaced = pacing && !(previous && this.pacingBlock(previous)) ? pacing : undefined;
+    const started = newlyPaced ?? (sharedBefore ? undefined : this.nightShareBlock(u.provider));
+    if (started) {
+      this.logger.info(`pausing new work on ${u.provider} until ${iso(started.until)} (${started.raw})`, {
         provider: u.provider,
         window: u.window,
         utilization: u.utilization,
@@ -153,9 +199,20 @@ export class QuotaGovernor {
     this.save();
   }
 
-  /** A success ends the provider's throttle streak, so the next throttle backs off from the base delay again. */
+  /**
+   * The provider's CLI failures since its last successful run (see recordFailure), with the last one's text; undefined
+   * when it has not failed since. Unlike state(), this outlasts the current backoff.
+   */
+  failureStreak(provider: Provider): { count: number; raw: string } | undefined {
+    const streak = this.failureStreaks.get(provider);
+    return streak && { ...streak };
+  }
+
+  /** A success ends the provider's throttle and failure streaks, so the next backoff starts from the base delay again. */
   recordSuccess(provider: Provider): void {
     this.throttleStreak.delete(provider);
+    this.failureStreaks.delete(provider);
+    this.failures.delete(provider);
   }
 
   /** Whether new work may start on the provider (and, when given, this model of it). */
@@ -172,12 +229,14 @@ export class QuotaGovernor {
     return at === null ? null : Math.max(now, at);
   }
 
-  /** Provider-wide state; model blocks are reported by snapshot() only. */
+  /** Provider-wide state; model blocks are reported by snapshot() only. Of a limit and a failure, the later end wins. */
   state(provider: Provider): ProviderState {
     this.prune();
     const auth = this.auth.get(provider);
     if (auth) return { status: "auth", raw: auth.raw };
     const block = longest(this.providerBlocks(provider));
+    const failure = this.failures.get(provider);
+    if (failure && !(block && block.until > failure.until)) return { status: "failing", until: failure.until, raw: failure.raw };
     return block ? { status: "limited", kind: block.kind, until: block.until, raw: block.raw } : { status: "ok" };
   }
 
@@ -251,7 +310,7 @@ export class QuotaGovernor {
   private freeAt(provider: Provider, model: string | undefined): number | null {
     if (this.auth.has(provider)) return null;
     const blocks = [...this.providerBlocks(provider), ...this.modelBlocksFor(provider, model)];
-    return longest(blocks)?.until ?? 0;
+    return Math.max(longest(blocks)?.until ?? 0, this.failures.get(provider)?.until ?? 0);
   }
 
   private providerBlocks(provider: Provider): Block[] {
@@ -263,6 +322,8 @@ export class QuotaGovernor {
       const pacing = reading && this.pacingBlock(reading);
       if (pacing) blocks.push(pacing);
     }
+    const share = this.nightShareBlock(provider);
+    if (share) blocks.push(share);
     return blocks;
   }
 
@@ -272,6 +333,26 @@ export class QuotaGovernor {
     return [...this.modelBlocks.values()]
       .filter((b) => b.provider === provider && id.includes(b.model))
       .map((b) => ({ kind: "model", until: b.until, raw: b.raw }));
+  }
+
+  private noteNightStart(provider: Provider, utilization: number): void {
+    const start = this.nightStart.get(provider);
+    if (start === undefined || utilization < start) this.nightStart.set(provider, utilization);
+  }
+
+  /** Blocks the provider until its weekly reset once this night has used the configured share of its week. */
+  private nightShareBlock(provider: Provider): Block | undefined {
+    const cap = this.config.pacing.maxWeeklySharePerNight;
+    const start = this.nightStart.get(provider);
+    const latest = this.utilization.get(windowKey(provider, WEEKLY_WINDOW));
+    if (cap === undefined || start === undefined || latest?.resetsAt === undefined) return undefined;
+    const used = latest.utilization - start;
+    if (used + SHARE_EPSILON < cap) return undefined;
+    return {
+      kind: "weekly",
+      until: latest.resetsAt,
+      raw: `pacing: this night's work used ${percent(used)} of the weekly limit, the most one night may use (${percent(cap)})`,
+    };
   }
 
   private pacingBlock(reading: Utilization): Block | undefined {
@@ -294,6 +375,7 @@ export class QuotaGovernor {
       light.provider,
       ...this.limits.keys(),
       ...this.auth.keys(),
+      ...this.failures.keys(),
       ...[...this.modelBlocks.values()].map((b) => b.provider),
       ...[...this.utilization.values()].map((u) => u.provider),
     ]);
@@ -305,6 +387,7 @@ export class QuotaGovernor {
     for (const [provider, block] of this.limits) if (block.until <= now) this.limits.delete(provider);
     for (const [key, block] of this.modelBlocks) if (block.until <= now) this.modelBlocks.delete(key);
     for (const [provider, block] of this.auth) if (block.until <= now) this.auth.delete(provider);
+    for (const [provider, block] of this.failures) if (block.until <= now) this.failures.delete(provider);
     for (const [key, reading] of this.utilization) {
       if (reading.resetsAt !== undefined && reading.resetsAt <= now) this.utilization.delete(key);
     }

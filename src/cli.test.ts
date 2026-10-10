@@ -159,13 +159,44 @@ describe("mc init / config", () => {
     expect(await mc("config", "set", "git.push", "maybe")).toBe(1);
     expect(err).toContain("Nothing was changed");
     expect(err).toContain("git.push must be true or false");
-    expect(err).toContain(file());
     expect(err).not.toContain(".draft");
+    // Only what is wrong with the new value: nothing suggests the (untouched) file is broken or needs editing.
+    expect(err).toContain("Your settings file is as it was. Correct the value and try again.");
+    expect(err).not.toMatch(/has a problem|Fix it in the file/);
+    expect(await mc("config", "set", "notify.ntfyUrl", "ntfy.sh/mc-abc")).toBe(1);
+    expect(err.trim().split("\n")).toEqual([
+      "Nothing was changed, because the new value doesn't work:",
+      expect.stringMatching(/^ {2}- notify\.ntfyUrl must be a web address .* but it is "ntfy\.sh\/mc-abc"\.$/),
+      "Your settings file is as it was. Correct the value and try again.",
+    ]);
     expect(await mc("config", "set", "colour", "blue")).toBe(1);
     expect(err).toContain("not a setting Mission Control knows");
     expect(await mc("config", "set", "git.push.deeper", "x")).toBe(1);
     expect(err).toContain("single value");
     expect(readFileSync(file(), "utf8")).toBe(before);
+  });
+
+  it("saves a fix while other settings still have problems from before, and lists those", async () => {
+    mkdirSync(home, { recursive: true });
+    writeFileSync(file(), "git:\n  push: maybe\nnotify:\n  ntfyUrl: ntfy.sh/x\n");
+    expect(await mc("config", "set", "git.push", "false")).toBe(0);
+    expect(out).toContain("Saved: git.push = false");
+    expect(out).toContain("Your settings still have a problem from before:");
+    expect(out).toContain("notify.ntfyUrl must be a web address");
+    expect(readFileSync(file(), "utf8")).toContain("push: false");
+    expect(await mc("config", "set", "notify.ntfyUrl", "https://ntfy.sh/x")).toBe(0);
+    expect(out).not.toContain("from before");
+  });
+
+  it("in the container, refuses to point a folder setting where the container keeps nothing", async () => {
+    vi.stubEnv("MC_IN_CONTAINER", "1");
+    await mc("init");
+    const before = readFileSync(file(), "utf8");
+    expect(await mc("config", "set", "workspaceRoot", "~/apps")).toBe(1);
+    expect(err).toContain("Nothing was changed");
+    expect(err).toContain("which the Mission Control container doesn't keep: your apps would be deleted when each command ends");
+    expect(readFileSync(file(), "utf8")).toBe(before);
+    expect(await mc("config", "set", "workspaceRoot", "~/mc-apps/work")).toBe(0);
   });
 
   it("won't edit a settings file that isn't valid YAML", async () => {
@@ -200,10 +231,13 @@ process.exit(hit.code ?? 0);
       "login status": codexLogin,
       "debug models": { out: "gpt-6-astra\ngpt-6.1-sol\n" },
     });
-    mkdirSync(home, { recursive: true });
+    // The folders the container keeps (mc-docker.sh mounts them), in the test's home.
+    const keptHome = join(root, "user-home", ".mission-control");
+    vi.stubEnv("MC_HOME", keptHome);
+    mkdirSync(keptHome, { recursive: true });
     writeFileSync(
-      join(home, "config.yaml"),
-      `workspaceRoot: ${join(root, "apps")}\nnotify:\n  ntfyUrl: https://ntfy.sh/t\ncli:\n  claudeCommand: ${claude}\n  codexCommand: ${codex}\n`,
+      join(keptHome, "config.yaml"),
+      `workspaceRoot: ~/mc-apps\nnotify:\n  ntfyUrl: https://ntfy.sh/t\ncli:\n  claudeCommand: ${claude}\n  codexCommand: ${codex}\n`,
     );
     vi.stubEnv("MC_IN_CONTAINER", "1");
     for (const name of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"]) {
@@ -259,6 +293,14 @@ describe("mc new / feature", () => {
     expect(out).toContain(`Mission id: ${m.id}`);
   });
 
+  it("takes an idea or a request typed without quotes as one description", async () => {
+    expect(await mc("new", "A", "habit", "tracker", "with", "streaks", "--name", "Habits")).toBe(0);
+    expect(onlyMission()).toMatchObject({ request: "A habit tracker with streaks", title: "Habits" });
+    const repo = await makeRepo();
+    expect(await mc("feature", repo, "Add", "a", "dark", "mode")).toBe(0);
+    expect(store().list().find((m) => m.kind === "feature")).toMatchObject({ request: "Add a dark mode", title: "Add a dark mode" });
+  });
+
   it("uses the default profile and names the app after the idea", async () => {
     expect(await mc("new", "A notes app. It syncs nothing.")).toBe(0);
     expect(onlyMission()).toMatchObject({ title: "A notes app", profile: "mixed", roleOverrides: [] });
@@ -301,6 +343,30 @@ describe("mc new / feature", () => {
     await git(repo, "checkout", "-q", "--detach");
     expect(await mc("feature", repo, "Add search")).toBe(1);
     expect(err).toContain("--base <branch>");
+  });
+
+  it("on a folder left on a version to try, says how to get back to the branch the last mission there started from", async () => {
+    const repo = await makeRepo();
+    await git(repo, "branch", "develop");
+    await git(repo, "checkout", "-q", "develop");
+    expect(await mc("feature", repo, "Add search")).toBe(0);
+    // As a report's "How to try it" leaves it: a detached checkout of the mission's work.
+    await git(repo, "checkout", "-q", "--detach");
+    expect(await mc("feature", repo, "Add a dark mode")).toBe(1);
+    expect(err).toContain("is still on a version you were trying");
+    expect(err).toContain(`Put it back on your branch first: git -C ${realpathSync(repo)} checkout develop.`);
+    expect(err).toContain("--base <branch>");
+    await git(repo, "checkout", "-q", "develop");
+    expect(await mc("feature", repo, "Add a dark mode")).toBe(0);
+  });
+
+  it("in the container, explains a missing folder: only ~/mc-apps is shared with it", async () => {
+    vi.stubEnv("MC_IN_CONTAINER", "1");
+    expect(await mc("feature", "/home/adam/projects/myapp", "Add a dark mode")).toBe(1);
+    expect(err).toContain("There is no folder at /home/adam/projects/myapp. Mission Control works in a container that only sees your ~/mc-apps folder.");
+    expect(err).toContain('mc feature ~/mc-apps/<app-folder> "<your request>"');
+    expect(await mc("feature", join(root, "user-home", "mc-apps", "gone"), "x")).toBe(1);
+    expect(err).not.toContain("only sees your ~/mc-apps");
   });
 
   it("refuses folders that aren't the top of a full git repository", async () => {
@@ -363,7 +429,9 @@ describe("mc status / stop / report / logs", () => {
     const lines = out.trim().split("\n");
     expect(lines[0]).toMatch(/^MISSION +KIND +STATUS +STAGE +FEATURES DONE +BLOCKED +WAITING UNTIL$/);
     expect(lines[1]).toMatch(new RegExp(`^${a.id} +new app +queued +spec +0/0 +0 +-$`));
-    expect(lines[2]).toMatch(new RegExp(`^${b.id} +new app +waiting +features +1/3 +1 +\\S`));
+    // Saved as waiting, but no run holds the lock: the last run was cut off.
+    expect(lines[2]).toMatch(new RegExp(`^${b.id} +new app +interrupted +features +1/3 +1 +\\S`));
+    expect(out).toContain('interrupted: the last run ended without finishing');
 
     expect(await mc("status", "--json")).toBe(0);
     const rows = JSON.parse(out) as Array<Record<string, unknown>>;
@@ -377,8 +445,32 @@ describe("mc status / stop / report / logs", () => {
       featuresTotal: 3,
       blocked: 1,
       waitingUntil: until,
+      interrupted: true,
     });
     expect(rows[0]?.waitingUntil).toBeNull();
+    expect(rows[0]?.interrupted).toBe(false);
+
+    // While a run holds the lock, the mission really is waiting.
+    const release = store().acquireLock();
+    try {
+      expect(await mc("status")).toBe(0);
+      expect(out.trim().split("\n")[2]).toMatch(new RegExp(`^${b.id} +new app +waiting +features`));
+      expect(out).not.toContain("interrupted");
+    } finally {
+      release();
+    }
+  });
+
+  it("says how to move on a mission that failed: by itself after a new login, else with mc run --mission", async () => {
+    const stuck = queue("Habit tracker");
+    const loggedOut = queue("Notes app");
+    const s = store();
+    s.save({ ...s.load(stuck.id), status: "failed", failure: { reason: "Not a repo.", retryable: false } });
+    s.save({ ...s.load(loggedOut.id), status: "failed", failure: { reason: "No model could run.", retryable: true } });
+
+    expect(await mc("status")).toBe(0);
+    expect(out).toContain(`${stuck.id} needs your help: see what with "mc report ${stuck.id}", then run "mc run --mission ${stuck.id}".`);
+    expect(out).toContain(`${loggedOut.id} carries on by itself on the next run, once you have logged in again (see mc report ${loggedOut.id}).`);
   });
 
   it("requests a stop and shows it in the status", async () => {
@@ -410,6 +502,61 @@ describe("mc status / stop / report / logs", () => {
 
     expect(await mc("report", older.id)).toBe(0);
     expect(out).toContain("# Old");
+  });
+
+  it("shows the night's summary when the last night worked on several missions, with each mission's command", async () => {
+    const a = queue("Habit tracker");
+    const b = queue("Notes app");
+    writeFileSync(store().reportPath(a.id), "# Habit tracker\n");
+    writeFileSync(store().reportPath(b.id), "# Notes app\n");
+    const hourAgo = new Date(Date.now() - 60 * 60_000);
+    for (const id of [a.id, b.id]) utimesSync(store().reportPath(id), hourAgo, hourAgo);
+    mkdirSync(join(home, "reports"), { recursive: true });
+    const summary = join(home, "reports", "night-2026-10-10.md");
+    writeFileSync(
+      summary,
+      `# Night of 2026-10-10\n\n## Missions\n\n- **Habit tracker**: Done. [Read the report](../missions/${a.id}/report.md)\n` +
+        `- **Notes app**: Partly done. [Read the report](../missions/${b.id}/report.md)\n\n## Needs your decision\n\n- **Notes app**: pick a colour\n`,
+    );
+
+    expect(await mc("report")).toBe(0);
+    expect(out).toContain(`Night summary: ${summary}`);
+    expect(out).toContain("- **Notes app**: pick a colour");
+    expect(out).toContain(`Each mission's own report: mc report <mission>, for example: mc report ${a.id}`);
+    expect(await mc("report", b.id)).toBe(0);
+    expect(out).toContain("# Notes app");
+
+    // A mission report written after that night (or a night with one mission) is shown itself.
+    const halfHourAgo = new Date(Date.now() - 30 * 60_000);
+    utimesSync(summary, halfHourAgo, halfHourAgo);
+    writeFileSync(store().reportPath(b.id), "# Notes app, again\n");
+    expect(await mc("report")).toBe(0);
+    expect(out).toContain(`Report: ${store().reportPath(b.id)}`);
+    writeFileSync(summary, `# Night\n\n- **Notes app**: Done. [Read the report](../missions/${b.id}/report.md)\n`);
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(summary, later, later);
+    expect(await mc("report")).toBe(0);
+    expect(out).toContain("# Notes app, again");
+  });
+
+  it("never prints control characters from agent text (report, logs), so they can't drive the terminal", async () => {
+    const m = queue("Habit tracker");
+    const osc52 = "\x1b]52;c;Y3VybCBldmlsLnNoIHwgc2gK\x07";
+    writeFileSync(store().reportPath(m.id), `# Habit tracker\n\n- A finding ${osc52} with a title \x1b]0;pwned\x07\n`);
+    store().appendEvent(m.id, "attempt", { feature: "f1", model: "gpt-6.1-sol", outcome: "fail", summary: `2 tests failed ${osc52}` });
+    store().appendEvent(m.id, "run.end", { label: "build", outcome: "failed", durationMs: 1000, error: `boom \x9b2J` });
+    expect(await mc("report", m.id)).toBe(0);
+    expect(out).toContain("- A finding ]52;c;Y3VybCBldmlsLnNoIHwgc2gK with a title ]0;pwned");
+    expect(await mc("logs", m.id)).toBe(0);
+    expect(out).toContain("2 tests failed ]52;c;");
+    expect(out).toContain("(boom 2J)");
+    expect(out).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/);
+  });
+
+  it("says plainly when a queued mission has no log yet", async () => {
+    const m = queue("Habit tracker");
+    expect(await mc("logs", m.id)).toBe(0);
+    expect(out).toContain("Nothing has happened in this mission yet");
   });
 
   it("explains a missing mission or report with exit code 1", async () => {
@@ -545,6 +692,16 @@ describe("mc run", () => {
     expect(out).toMatch(/Night summary: .*reports\/night-\d{4}-\d{2}-\d{2}\.md/);
   });
 
+  it("does not say nothing was queued when a failed mission waits, and gives the command that continues it", async () => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stuck = queue("Habit tracker");
+    store().save({ ...store().load(stuck.id), status: "failed" });
+
+    expect(await mc("run")).toBe(0);
+    expect(out).not.toContain("Nothing was queued");
+    expect(out).toContain(`- Habit tracker needs your help: see what with "mc report ${stuck.id}", then run "mc run --mission ${stuck.id}"`);
+  });
+
   it("runs only the given mission, with tonight's profile and roles, and keeps the mission's own", async () => {
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     // Stands in for both AI command lines: logged out, so the mission ends quickly.
@@ -575,9 +732,15 @@ describe("mc run", () => {
     const release = store().acquireLock();
     try {
       expect(await mc("run")).toBe(1);
-      expect(err).toMatch(/^A Mission Control run is already active \(pid \d+\)\. Check it with "mc status", or stop it with "mc stop"\./);
+      expect(err).toMatch(/^A Mission Control run is already active \(pid \d+\)\. Check it with "mc status", or stop it with "mc stop"\.\n$/);
     } finally {
       release();
     }
+
+    // A run in another container is judged by its heartbeat, so a run cut off there blocks for up to 5 minutes.
+    writeFileSync(join(home, "mc.lock"), JSON.stringify({ pid: 7, at: new Date().toISOString(), host: "3f2a1b2c3d4e" }));
+    expect(await mc("run")).toBe(1);
+    expect(err).toContain("A Mission Control run is already active (pid 7 on host 3f2a1b2c3d4e).");
+    expect(err).toContain(`If no run is working (in Ubuntu, "docker ps" doesn't list mission-control-run), the last one was cut off: wait 5 minutes, then try again.`);
   });
 });

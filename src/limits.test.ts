@@ -380,12 +380,34 @@ describe("detectLimitText: Codex usage limit", () => {
     });
   });
 
-  it("treats a per-model usage limit as a provider-wide one", () => {
-    const info = codex(
-      "You’ve hit your usage limit for GPT-6 Astra. Switch to another model now, or try again at Oct 14th, 2026 9:00 AM.",
-    );
-    expect(info).toMatchObject({ kind: "weekly", resetsAt: utc(2026, 10, 14, 13, 0) });
-    expect(info?.model).toBeUndefined();
+  it("reads codex's per-model usage limit as a limit on that model only, named by its model id", () => {
+    // As codex 0.162.0 words it (turn.failed) after a 429 usage_limit_reached for one model.
+    const line =
+      '{"type":"turn.failed","error":{"message":"You’ve hit your usage limit for GPT-6-Astra. Switch to another model now, or try again at Oct 13th, 2026 4:38 AM."}}';
+    expect(codex(line)).toEqual({
+      provider: "codex",
+      kind: "model",
+      model: "gpt-6-astra",
+      resetsAt: utc(2026, 10, 13, 8, 38),
+      raw: expect.stringContaining("usage limit for GPT-6-Astra"),
+    });
+    expect(codex("You’ve hit your usage limit for GPT-6 Astra. Switch to another model now, or try again at Oct 14th, 2026 9:00 AM.")).toMatchObject({
+      kind: "model",
+      model: "gpt-6-astra",
+      resetsAt: utc(2026, 10, 14, 13, 0),
+    });
+    expect(codex("You've hit your usage limit for GPT-6.1 Sol. Switch to another model now, or try again at 3:45 PM.")).toMatchObject({
+      kind: "model",
+      model: "gpt-6.1-sol",
+      resetsAt: utc(2026, 10, 9, 19, 45),
+    });
+    expect(codex("You’ve hit your usage limit for GPT-6-Astra (High). Switch to another model now, or try again later.")?.model).toBe("gpt-6-astra");
+    expect(codex("You've hit your usage limit for gpt-6-astra.")).toMatchObject({ kind: "model", model: "gpt-6-astra" });
+  });
+
+  it("keeps a usage limit 'for' something that is not a model provider-wide", () => {
+    expect(codex("You’ve hit your usage limit for this week. Try again at Oct 14th, 2026 9:00 AM.")).toMatchObject({ kind: "weekly" });
+    expect(codex("You’ve hit your usage limit for today.")?.model).toBeUndefined();
   });
 });
 

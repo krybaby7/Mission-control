@@ -1068,14 +1068,65 @@ describe("remotes and push", () => {
     expect(rev(remote, "refs/heads/mc/m")).toBe(pushed);
   });
 
-  it("runs the repository's pre-push hook and returns its failure", async () => {
+  it("runs no hook while pushing, from .git/hooks or from a hooks folder the repository's config names", async () => {
     const { repo, remote } = await withRemote();
-    installHook(repo, "pre-push", "echo 'pre-push says no' >&2; exit 1");
+    sh(repo, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"); // a push updates origin/<branch>
+    await git.ensureBranch(repo, "mc/a", "main");
+    await git.ensureBranch(repo, "mc/b", "main");
+    const marker = join(tempDir(), "hook-ran");
+    const hook = `#!/bin/sh\necho "$0" >> '${marker}'\n`;
+    const planted = join(tempDir(), "planted-hooks");
+    mkdirSync(planted);
+    for (const dir of [join(repo, ".git", "hooks"), planted]) {
+      writeFileSync(join(dir, "reference-transaction"), hook);
+      chmodSync(join(dir, "reference-transaction"), 0o755);
+    }
+    expect(await git.push(repo, "mc/a", "mc")).toEqual({ ok: true });
+    sh(repo, "config", "core.hooksPath", planted);
+    expect(await git.push(repo, "mc/b", "mc")).toEqual({ ok: true });
+    for (const branch of ["mc/a", "mc/b"]) {
+      expect(rev(remote, `refs/heads/${branch}`)).toBe(rev(repo, branch));
+      expect(rev(repo, `refs/remotes/origin/${branch}`)).toBe(rev(repo, branch));
+    }
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("does not push a repository with a pre-push hook, never running it, and says how to push by hand", async () => {
+    const { repo, remote } = await withRemote();
+    const marker = join(tempDir(), "hook-ran");
+    installHook(repo, "pre-push", `touch '${marker}'; git -c core.hooksPath=/dev/null push -q -f origin HEAD:refs/heads/main`);
     await git.ensureBranch(repo, "mc/m", "main");
     const result = await git.push(repo, "mc/m", "mc");
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/pre-push says no/);
+    expect(result.error).toMatch(/pre-push hook \(\.git\/hooks\/pre-push\)/);
+    expect(result.error).toContain("git push origin mc/m");
+    expect(existsSync(marker)).toBe(false);
     expect(sh(remote, "for-each-ref").trim()).toBe("");
+  });
+
+  it("counts a pre-push hook in the hooks folder core.hooksPath names (one an agent planted, or husky's)", async () => {
+    const { repo, remote } = await withRemote();
+    const marker = join(tempDir(), "hook-ran");
+    const planted = join(repo, ".husky", "_");
+    mkdirSync(planted, { recursive: true });
+    writeFileSync(join(planted, "pre-push"), `#!/bin/sh\ntouch '${marker}'\ngit -c core.hooksPath=/dev/null push -q -f origin HEAD:refs/heads/main\n`);
+    chmodSync(join(planted, "pre-push"), 0o755);
+    sh(repo, "config", "core.hooksPath", ".husky/_");
+    await git.ensureBranch(repo, "mc/m", "main");
+    const result = await git.push(repo, "mc/m", "mc");
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/pre-push hook \(\.husky\/_\/pre-push\)/);
+    expect(existsSync(marker)).toBe(false);
+    expect(sh(remote, "for-each-ref").trim()).toBe("");
+  });
+
+  it("pushes when the pre-push file is not executable (git would not run it either)", async () => {
+    const { repo, remote } = await withRemote();
+    writeFileSync(join(repo, ".git", "hooks", "pre-push"), "#!/bin/sh\nexit 1\n");
+    chmodSync(join(repo, ".git", "hooks", "pre-push"), 0o644);
+    await git.ensureBranch(repo, "mc/m", "main");
+    expect(await git.push(repo, "mc/m", "mc")).toEqual({ ok: true });
+    expect(rev(remote, "refs/heads/mc/m")).toBe(rev(repo, "mc/m"));
   });
 
   it("returns the error when the remote is unreachable", async () => {
@@ -1183,5 +1234,69 @@ describe("environment", () => {
     } finally {
       process.env.PATH = path;
     }
+  });
+});
+
+describe("Git.keepOnBranch and isAncestor", () => {
+  it("puts a worktree an agent moved to its own branch back on the branch, keeping the files for the next commit", async () => {
+    const repo = tempDir();
+    await git.ensureRepo(repo);
+    const wt = join(tempDir(), "unit");
+    await git.addWorktree(repo, wt, "mc/x--a", "main");
+    sh(wt, "checkout", "-q", "-b", "agent/own");
+    writeFileSync(join(wt, "work.txt"), "done\n");
+    sh(wt, "add", "-A");
+    sh(wt, "commit", "-q", "-m", "agent's own commit");
+
+    expect(await git.keepOnBranch(wt, "mc/x--a")).toBe(true);
+    expect(await git.currentBranch(wt)).toBe("mc/x--a");
+    expect(readFileSync(join(wt, "work.txt"), "utf8")).toBe("done\n");
+    const sha = await git.commitAll(wt, "wip");
+    expect(sha).not.toBeNull();
+    expect(await git.headSha(repo, "mc/x--a")).toBe(sha);
+    expect(sh(repo, "show", "mc/x--a:work.txt")).toBe("done\n");
+    expect(await git.keepOnBranch(wt, "mc/x--a")).toBe(false);
+  });
+
+  it("reattaches a detached HEAD, and recreates a branch the agent deleted at HEAD", async () => {
+    const repo = tempDir();
+    await git.ensureRepo(repo);
+    const wt = join(tempDir(), "unit");
+    await git.addWorktree(repo, wt, "mc/x--b", "main");
+    sh(wt, "checkout", "-q", "--detach");
+    expect(await git.keepOnBranch(wt, "mc/x--b")).toBe(true);
+    expect(await git.currentBranch(wt)).toBe("mc/x--b");
+
+    sh(wt, "checkout", "-q", "-b", "elsewhere");
+    sh(wt, "branch", "-D", "mc/x--b");
+    expect(await git.keepOnBranch(wt, "mc/x--b")).toBe(true);
+    expect(await git.currentBranch(wt)).toBe("mc/x--b");
+    expect(await git.headSha(wt)).toBe(await git.headSha(repo, "main"));
+  });
+
+  it("tells whether one commit is in another's history", async () => {
+    const repo = tempDir();
+    await git.ensureRepo(repo);
+    const first = await git.headSha(repo);
+    writeFileSync(join(repo, "a.txt"), "a\n");
+    const second = (await git.commitAll(repo, "a")) ?? "";
+    expect(await git.isAncestor(repo, first, second)).toBe(true);
+    expect(await git.isAncestor(repo, second, first)).toBe(false);
+    expect(await git.isAncestor(repo, second, second)).toBe(true);
+  });
+});
+
+describe("Git and repository settings an agent wrote", () => {
+  it("never runs a core.fsmonitor command from the repository's config", async () => {
+    const repo = tempDir();
+    await git.ensureRepo(repo);
+    const marker = join(tempDir(), "fsmonitor-ran");
+    sh(repo, "config", "core.fsmonitor", `touch ${marker}; false #`);
+    writeFileSync(join(repo, "a.txt"), "a\n");
+
+    expect(await git.isClean(repo)).toBe(false);
+    await git.commitAll(repo, "a");
+    await git.changedFiles(repo, "HEAD");
+    expect(existsSync(marker)).toBe(false);
   });
 });

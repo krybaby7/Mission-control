@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { loadConfig } from "./config.js";
 import { Dispatcher } from "./dispatcher.js";
-import { RoleExecutor } from "./executor.js";
+import { RoleExecutor, type WaitCause } from "./executor.js";
 import { Git } from "./git.js";
 import { createNotifier, type Notifier } from "./notify.js";
 import { QuotaGovernor } from "./quota.js";
@@ -39,12 +39,20 @@ export interface NightResult {
   /** Every mission worked on tonight, as it ended. */
   missions: Mission[];
   summaryPath: string;
+  /** Failed missions that wait for their owner (see needsOwner), whether or not they ran tonight. */
+  waitingForYou: Mission[];
 }
 
 /** How often the STOP file and the deadline are checked while an agent or a test run is busy. */
 const STOP_POLL_MS = 1_000;
 /** Waits shorter than this are not worth a phone notification. */
 const WAIT_NOTICE_MIN_MS = 10 * 60_000;
+/**
+ * The furthest a night's stop time may be. --until always means the next time the clock shows it, so a run started
+ * just after that time (a morning test, a delayed scheduled start) would otherwise work about 24 hours, through
+ * the owner's day. A run at 13:00 with --until 07:00 is still fine.
+ */
+const MAX_NIGHT_MS = 18 * 60 * 60_000;
 /** Signals that stop the night gracefully (SIGHUP: the terminal was closed), with the exit code of a forced quit. */
 const STOP_SIGNALS: Partial<Record<NodeJS.Signals, number>> = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 };
 
@@ -71,6 +79,7 @@ export async function runNight(opts: NightOptions = {}): Promise<NightResult> {
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
   const deadline = opts.until === undefined ? undefined : parseUntil(opts.until, startedAt);
+  if (opts.until !== undefined && deadline !== undefined) checkNightLength(opts.until, startedAt, deadline);
   checkProfile(config, opts.profile);
   const store = new MissionStore(config.home);
   if (opts.missionId !== undefined) findMission(store, opts.missionId);
@@ -80,13 +89,17 @@ export async function runNight(opts: NightOptions = {}): Promise<NightResult> {
   const stop = new StopControl({ store, clock, deadline, logger, onForceExit: release });
   try {
     store.clearStop();
+    logger.info(deadline === undefined ? "Working until the queue is done (no stop time given)." : `Working until ${describeDeadline(deadline, startedAt)}.`);
     const night: Night = { config, clock, store, logger, notifier, stop, deadline, startedAt, opts };
+    await reportInterruptedRun(night);
     const dispatcher = buildDispatcher(night, opts.runners);
     const missions = await workThroughQueue(night, dispatcher, opts.missionId);
-    const summaryPath = writeSummary(night, missions);
+    const waitingForYou = store.list().filter(needsOwner);
+    const summaryPath = writeSummary(night, missions, waitingForYou);
     logger.info(`Night finished. Summary: ${summaryPath}`);
-    await notifier.notify("Night finished", nightMessage(missions), { priority: missions.some((m) => m.status === "failed") ? "high" : "default" });
-    return { missions, summaryPath };
+    const priority = missions.some((m) => m.status === "failed") || waitingForYou.length > 0 ? "high" : "default";
+    await notifier.notify("Night finished", nightMessage(missions, waitingForYou), { priority });
+    return { missions, summaryPath, waitingForYou };
   } catch (err) {
     logger.error(`The night run stopped because of an error: ${errorText(err)}`);
     await notifier.notify("Mission Control stopped", `The night run stopped because of an error: ${errorText(err)}`, { priority: "high" });
@@ -100,6 +113,8 @@ export async function runNight(opts: NightOptions = {}): Promise<NightResult> {
 // ───────────────────────────── Setup ─────────────────────────────
 
 interface Night {
+  /** Set when the night ended because no mission could do any work (see Dispatcher.noWorkPossible). */
+  noWork?: string;
   config: Config;
   clock: Clock;
   store: MissionStore;
@@ -113,6 +128,24 @@ interface Night {
 
 function withAbsolutePaths(c: Config): Config {
   return { ...c, home: resolve(expandHome(c.home)), workspaceRoot: resolve(expandHome(c.workspaceRoot)) };
+}
+
+/** Refuses a stop time that passed only a little while ago, which would mean working through the day. */
+function checkNightLength(until: string, startedAt: number, deadline: number): void {
+  if (deadline - startedAt <= MAX_NIGHT_MS) return;
+  const hours = Math.round((deadline - startedAt) / 3_600_000);
+  const suggestion = clockTime(startedAt + 4 * 3_600_000).replace(/:\d\d$/, ":00");
+  throw new Error(
+    `It's ${clockTime(startedAt)} now, already past ${until}, so this run would work until ${describeDeadline(deadline, startedAt)}: ` +
+      `about ${hours} hours, through your day. Nothing was started. To work now anyway, give a stop time later today, ` +
+      `for example: mc run --until ${suggestion}`,
+  );
+}
+
+/** "07:00 tomorrow (Sun Oct 11)" or "23:30 today", in local time. */
+function describeDeadline(deadline: number, startedAt: number): string {
+  const day = localDate(deadline) === localDate(startedAt) ? "today" : `tomorrow (${new Date(deadline).toDateString().slice(0, 10)})`;
+  return `${clockTime(deadline)} ${day}`;
 }
 
 function checkProfile(config: Config, profile: string | undefined): void {
@@ -166,9 +199,9 @@ function buildDispatcher(night: Night, givenRunners: Partial<Record<Provider, Ag
     logger,
     signal: stop.signal,
     stopCheck,
-    onWaiting: (until, reason) => {
+    onWaiting: (until, reason, cause) => {
       dispatcher?.onWaiting(until, reason);
-      announceWait(night, until);
+      announceWait(night, until, cause);
     },
     ...(deadline !== undefined && { deadline }),
   });
@@ -218,9 +251,19 @@ class TonightStore extends MissionStore {
   }
 }
 
-/** Tells the phone when every usable AI is at its limit for a while. Waits never overlap, so each is told once. */
-function announceWait(night: Night, until: number): void {
+/**
+ * Tells the phone when no usable AI can work for a while: because of usage limits, or because the AIs are overloaded,
+ * unreachable or failing (a network outage is not a usage limit). Waits never overlap, so each is told once.
+ */
+function announceWait(night: Night, until: number, cause: WaitCause): void {
   if (until - night.clock.now() < WAIT_NOTICE_MIN_MS) return;
+  if (cause === "trouble") {
+    void night.notifier.notify(
+      "Waiting for the AIs to respond",
+      `The AIs Mission Control may use are not responding or keep failing right now (a network or service problem, not a usage limit). It tries again at ${clockTime(until)}; if this goes on, it pauses the work and tells you.`,
+    );
+    return;
+  }
   void night.notifier.notify(
     "Waiting for usage limits",
     `Every AI Mission Control may use is at its usage limit. It waits until ${clockTime(until)}, then carries on.`,
@@ -328,8 +371,30 @@ async function workThroughQueue(night: Night, dispatcher: Dispatcher, onlyId: st
     if (!next) break;
     seen.add(next.id);
     worked.push(await runOne(night, dispatcher, next));
+    // Every login expired, every AI limited past the deadline, a full disk: the next mission would only set up its
+    // worktrees and installs to stop again at once. It waits for the next run instead.
+    const noWork = dispatcher.noWorkPossible();
+    if (noWork !== undefined && nextMission(night.store, seen, onlyId)) {
+      night.noWork = noWork;
+      night.logger.warn(`Ending the night early: ${noWork}. The remaining missions wait for the next run.`);
+      break;
+    }
   }
   return worked;
+}
+
+/**
+ * Missions left "running" or "waiting" mean the last run died without finishing (it was killed, the container or the
+ * computer went down): it wrote no report and sent nothing, so the phone hears about it now. They carry on tonight.
+ */
+async function reportInterruptedRun(night: Night): Promise<void> {
+  const interrupted = night.store.list().filter((m) => m.status === "running" || m.status === "waiting");
+  if (interrupted.length === 0) return;
+  const last = interrupted.map((m) => Date.parse(m.updatedAt)).reduce((a, b) => Math.max(a, b));
+  const names = interrupted.map((m) => oneLine(m.title)).join(", ");
+  const message = `The last run stopped unexpectedly around ${clockTime(last)} while working on ${names}, without writing its report. The work so far is kept and carries on now.`;
+  night.logger.warn(message);
+  await night.notifier.notify("Mission Control stopped unexpectedly", message, { priority: "high", tags: ["warning"] });
 }
 
 /**
@@ -342,11 +407,18 @@ function nextMission(store: MissionStore, seen: Set<string>, onlyId: string | un
 }
 
 /**
- * Not complete yet, and not failed (a failed mission waits for a human: `mc run --mission <id>`). By stage, not
- * status: a "done" or "partial" mission cut off while being finalized still needs its report and notification.
+ * Not complete yet, and not failed, unless the failure was an expired login: the owner fixes that outside Mission
+ * Control, so the next run simply tries again. Any other failed mission waits for its owner (`mc run --mission <id>`).
+ * By stage, not status: a "done" or "partial" mission cut off while being finalized still needs its report and
+ * notification.
  */
 function hasWorkLeft(m: Mission): boolean {
-  return m.stage !== "complete" && m.status !== "failed";
+  return m.stage !== "complete" && (m.status !== "failed" || m.failure?.retryable === true);
+}
+
+/** A failed mission only its owner can move on: what it needs is in its report, then `mc run --mission <id>`. */
+function needsOwner(m: Mission): boolean {
+  return m.stage !== "complete" && m.status === "failed" && m.failure?.retryable !== true;
 }
 
 async function runOne(night: Night, dispatcher: Dispatcher, m: Mission): Promise<Mission> {
@@ -417,16 +489,16 @@ function reportsDir(config: Config): string {
   return join(config.home, "reports");
 }
 
-function writeSummary(night: Night, missions: Mission[]): string {
+function writeSummary(night: Night, missions: Mission[], waitingForYou: Mission[]): string {
   const dir = ensureDir(reportsDir(night.config));
   const base = `night-${localDate(night.startedAt)}`;
   let path = join(dir, `${base}.md`);
   for (let n = 2; existsSync(path); n++) path = join(dir, `${base}-${n}.md`);
-  writeFileSync(path, renderSummary(night, missions));
+  writeFileSync(path, renderSummary(night, missions, waitingForYou));
   return path;
 }
 
-function renderSummary(night: Night, missions: Mission[]): string {
+function renderSummary(night: Night, missions: Mission[], waitingForYou: Mission[]): string {
   const { startedAt, clock } = night;
   const lines = [
     `# Night of ${localDate(startedAt)}`,
@@ -437,13 +509,19 @@ function renderSummary(night: Night, missions: Mission[]): string {
     "",
     ...(missions.length > 0
       ? missions.map((m) => missionLine(m, existsSync(night.store.reportPath(m.id))))
-      : ['Nothing was queued. Add work with: mc new "<your idea>"']),
+      : [waitingForYou.length > 0 ? "No mission could run by itself tonight: the ones left need your help first (below)." : 'Nothing was queued. Add work with: mc new "<your idea>"']),
   ];
   const decisions = missions.flatMap((m) => m.decisionsNeeded.map((d) => `- **${oneLine(m.title)}**: ${oneLine(d)}`));
   if (decisions.length > 0) lines.push("", "## Needs your decision", "", ...decisions);
+  if (waitingForYou.length > 0) lines.push("", "## Waiting for you", "", ...waitingForYou.map(ownerLine));
   const queued = night.store.list().filter((m) => hasWorkLeft(m) && !missions.some((w) => w.id === m.id));
   if (queued.length > 0) lines.push("", `Still waiting in the queue: ${queued.length} mission(s). They start on the next run.`);
   return lines.join("\n") + "\n";
+}
+
+/** How the owner moves a failed mission on. */
+function ownerLine(m: Mission): string {
+  return `- **${oneLine(m.title)}** stopped and needs your help. See what it needs with \`mc report ${m.id}\`, then continue it with \`mc run --mission ${m.id}\`.`;
 }
 
 function endingSentence(night: Night, missions: Mission[]): string {
@@ -454,19 +532,26 @@ function endingSentence(night: Night, missions: Mission[]): string {
     case "stop file":
       return "Stopped early because you asked it to.";
     default:
-      if (missions.some((m) => m.status === "stopped")) return "Some work is paused until the AIs' usage limits reset; it continues on the next run.";
+      if (night.noWork !== undefined) return `Ended early because ${night.noWork}; the remaining missions start on the next run.`;
+      if (missions.some((m) => m.status === "stopped")) return "Some work is paused; it continues on the next run. Each report says why it paused.";
       return "Every queued mission was worked on.";
   }
 }
 
+/** One mission's result; the command works in the terminal, where `mc report` shows this summary. */
 function missionLine(m: Mission, hasReport: boolean): string {
   const line = `- **${oneLine(m.title)}**: ${missionOutcome(m)}.`;
-  return hasReport ? `${line} [Read the report](${missionLinkBase(m.id)}/report.md)` : line;
+  return hasReport ? `${line} [Read the report](${missionLinkBase(m.id)}/report.md), or run \`mc report ${m.id}\`` : line;
 }
 
-function nightMessage(missions: Mission[]): string {
-  if (missions.length === 0) return 'Nothing was queued. Add work with: mc new "<your idea>"';
-  return [...missions.map((m) => `${oneLine(m.title)}: ${missionOutcome(m)}`), "Read the report: mc report"].join("\n");
+function nightMessage(missions: Mission[], waitingForYou: Mission[]): string {
+  if (missions.length === 0 && waitingForYou.length === 0) return 'Nothing was queued. Add work with: mc new "<your idea>"';
+  const helped = new Set(missions.map((m) => m.id));
+  return [
+    ...missions.map((m) => `${oneLine(m.title)}: ${missionOutcome(m)}`),
+    ...waitingForYou.filter((m) => !helped.has(m.id)).map((m) => `${oneLine(m.title)}: still needs your help (mc report ${m.id})`),
+    "Read the report: mc report",
+  ].join("\n");
 }
 
 /** A mission's result in plain words, e.g. "Partly done, 4 of 6 features done". */

@@ -84,7 +84,7 @@ export function defaultConfig(): Config {
       maxAgentRunsPerMission: 150,
     },
     failover: { enabled: true },
-    pacing: { maxFiveHourUtilization: 0.97, maxWeeklyUtilization: 0.85 },
+    pacing: { maxFiveHourUtilization: 0.97, maxWeeklyUtilization: 0.85, maxWeeklySharePerNight: 0.35 },
     notify: { ntfyUrl: "" },
     git: { push: false, branchPrefix: "mc" },
     permissions: {
@@ -125,9 +125,12 @@ version: 1
 
 # Where Mission Control keeps its records: missions, logs, reports and the STOP file.
 # "~" means your home folder. The MC_HOME environment variable, when set, replaces this setting.
+# With the Docker setup (mc-docker.sh), keep it inside ~/.mission-control: the container keeps nothing else.
 home: ~/.mission-control
 
 # Folder where new apps are created, one sub-folder per app.
+# With the Docker setup (mc-docker.sh), keep it inside ~/mc-apps: that is the only folder shared with Ubuntu,
+# and anything written elsewhere is deleted when the command ends.
 workspaceRoot: ~/mc-apps
 
 
@@ -260,10 +263,12 @@ failover:
   enabled: true
 
 # Leave some of your plan for yourself: no new work starts on a family once its
-# usage reaches these levels (0.97 = 97%).
+# usage reaches these levels (0.97 = 97%), or once one night has used this much
+# of its weekly limit (0.35 = 35% per night; 1 = no per-night limit).
 pacing:
   maxFiveHourUtilization: 0.97   # of the 5-hour window
   maxWeeklyUtilization: 0.85     # of the weekly window
+  maxWeeklySharePerNight: 0.35   # of the weekly window, per night
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +283,9 @@ notify:
   ntfyUrl: ""
 
 git:
-  push: false        # true = upload finished work to the "origin" remote (only Mission Control branches, never forced)
+  # Uploading needs a GitHub token in the app's folder, where agents can read it. Before turning it
+  # on, follow "Optional: upload finished work to GitHub" in docs/setup-windows.md.
+  push: false        # true = upload each finished mission's branch to the app's "origin" remote
   branchPrefix: mc   # start of the names of branches Mission Control creates (no "/")
 
 # What agents are allowed to do on this computer. Full autonomy is only used
@@ -327,7 +334,7 @@ export function loadConfig(path?: string): Config {
   const settings = readSettingsFile(file);
   const merged = mergeSettings(defaultConfig(), settings) as Config;
   const problems = validateConfig(merged);
-  if (problems.length > 0) throw new Error(describeProblems(file, problems));
+  if (problems.length > 0) throw new ConfigProblemsError(file, problems);
   return {
     ...merged,
     home: envHome() ?? expandHome(merged.home),
@@ -402,6 +409,17 @@ function mergeSettings(base: unknown, override: unknown): unknown {
     else Object.defineProperty(merged, key, { value: next, enumerable: true, writable: true, configurable: true });
   }
   return merged;
+}
+
+/** The settings file reads fine but some settings are wrong: `problems` lists them, one plain sentence each. */
+export class ConfigProblemsError extends Error {
+  constructor(
+    readonly file: string,
+    readonly problems: string[],
+  ) {
+    super(describeProblems(file, problems));
+    this.name = "ConfigProblemsError";
+  }
 }
 
 function describeProblems(file: string, problems: string[]): string {
@@ -657,11 +675,16 @@ function checkSwitches(check: Checker, root: Record<string, unknown>): void {
   const failover = check.section("failover", root.failover, ["enabled"]);
   if (failover) check.bool("failover.enabled", failover.enabled);
   const thresholds = ["maxFiveHourUtilization", "maxWeeklyUtilization"];
-  const pacing = check.section("pacing", root.pacing, thresholds);
+  const pacing = check.section("pacing", root.pacing, [...thresholds, "maxWeeklySharePerNight"]);
   for (const name of pacing ? thresholds : []) {
     const v = pacing?.[name];
     const ok = typeof v === "number" && v > 0 && v <= 1.5;
     check.require(`pacing.${name}`, v, ok, "a number above 0 and at most 1.5 (for example 0.9 means 90%)");
+  }
+  const share = pacing?.maxWeeklySharePerNight;
+  if (share !== undefined) {
+    const ok = typeof share === "number" && share > 0 && share <= 1;
+    check.require("pacing.maxWeeklySharePerNight", share, ok, "a number above 0 and at most 1 (for example 0.35 means 35% of the weekly limit per night)");
   }
 }
 

@@ -9,8 +9,7 @@
   "files": [
     "dist",
     "prompts",
-    "stacks",
-    "templates"
+    "stacks"
   ],
   "engines": {
     "node": ">=22.12"

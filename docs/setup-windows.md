@@ -23,19 +23,21 @@ Mission Control lets AI agents run commands all night without asking you first. 
 - the Claude and Codex logins;
 - Mission Control's own notes and reports.
 
-**It protects** your Windows files (Documents, Pictures, Desktop), your browsers and saved passwords, and everything else in Ubuntu. If an agent runs a harmful command such as "delete everything", the damage stays in the box and in `~/mc-apps`, where git keeps the history of each app.
+**It protects** your Windows files (Documents, Pictures, Desktop), your browsers and saved passwords, and everything else in Ubuntu. If an agent runs a harmful command such as "delete everything", the damage stays in the box and in `~/mc-apps`, where git keeps the history of each app. The box also has limits: it may use at most three quarters of Docker's memory and a few thousand programs at once, so an app build that runs out of control fails inside the box instead of freezing Docker Desktop.
 
 **It does not protect:**
 
 - **Your Claude and Codex logins.** Agents can read them, so a misbehaving agent could use your subscriptions.
-- **The internet.** Agents can reach the internet, because they need it to download building blocks. In principle, they could send out anything inside the box.
+- **The internet.** Agents can reach the internet, because they need it to download building blocks. In principle, they could send out anything inside the box, your Claude and Codex logins included. This version has no list of allowed websites.
 - **Your home network.** Agents can also reach the other devices on your network (your router's settings page, a network drive, printers) and programs on your PC that accept network connections. Keep those protected with passwords that aren't the factory defaults.
 - **Your apps folder.** Anything in `~/mc-apps` can be changed or deleted.
-- **Your usage allowance.** Each night uses a lot of your Claude and ChatGPT limits. Mission Control paces itself, but it does use them.
+- **Git in your apps folder during a run.** An agent could add git settings that make git run commands. Mission Control undoes them after every step and when a mission finishes, but while a night run is working, don't run `git` in `~/mc-apps`, or open those folders in an editor, outside `mc shell`.
+- **Your usage allowance.** Each night uses a lot of your Claude and ChatGPT limits. Mission Control paces itself: by default one night uses at most about a third (35%) of each plan's weekly limit (setting `pacing.maxWeeklySharePerNight`), and it stops rather than run on paid extra usage. But it does use them.
+- **Mission Control itself.** Agents run as the same user as Mission Control, so a misbehaving agent could stop a night's run early or change Mission Control's settings and records in `~/.mission-control`. Work already saved is kept, and the next run carries on.
 
 **So, follow these rules:**
 
-1. Never put real passwords, API keys, SSH keys, bank details or personal documents in `~/mc-apps`, and never give them to an agent.
+1. Never put real passwords, API keys, SSH keys, bank details or personal documents in `~/mc-apps`, and never give them to an agent. The one exception is a GitHub token limited to one repository, if you turn on uploading: see [Optional: upload finished work to GitHub](#optional-upload-finished-work-to-github) first.
 2. Don't connect extra folders to the container, and don't edit `scripts/mc-docker.sh` to add any.
 3. Never set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. They would switch you from your subscription to pay-per-use billing. `mc doctor` checks for this.
 4. Treat your notification topic name (Step 6) like a password.
@@ -232,7 +234,7 @@ mc new "A habit tracker where I can add daily habits, tick them off each day, an
 mc status
 ```
 
-To change an app that already exists, its folder must be inside `~/mc-apps`. Then:
+To change an app that already exists, its folder must be inside `~/mc-apps` (Mission Control's container sees no other folder; move or copy the app there first). Then:
 
 ```
 mc feature ~/mc-apps/<app-folder> "Add a dark mode"
@@ -246,7 +248,7 @@ Before bed, in the Ubuntu window:
 mc run --until 07:00
 ```
 
-Mission Control works until 7:00 in the morning (your local time), then writes a report and notifies you. **You should see** it start on the first mission. Minimize the window, but leave it open until the morning: closing it cuts the run short. To stop early, run `mc stop` in another Ubuntu window: the run stops within a few minutes, keeps its progress, writes the report and notifies you. Missions that don't finish continue automatically the next time you run this.
+Mission Control works until 7:00 in the morning (your local time), then writes a report and notifies you. **You should see** it start on the first mission. Minimize the window, but leave it open until the morning: closing it cuts the run short. To stop early, run `mc stop` in another Ubuntu window: the run stops within a few minutes, keeps its progress, writes the report and notifies you. Missions that were paused (by `mc stop`, by the 7:00 stop time, or while the AIs were at their usage limits) continue automatically the next time you run this. Features that got stuck don't: once a mission is finished, its report's **Needs your decision** gives the command that queues them again, if you still want them. If you start a run after its stop time has passed (say at 7:20 with `--until 07:00`), it refuses instead of working through your day: give a later time, such as `--until 12:00`. A mission that stopped because it needs your help (the report and `mc status` say so) waits for you: do what its report asks under **Needs your decision**, then continue it with `mc run --mission <mission>` (the mission's name as `mc status` shows it). If it only needed a new login, the next run continues it by itself.
 
 ### Optional: start it automatically at 23:00 every night
 
@@ -265,7 +267,7 @@ Mission Control works until 7:00 in the morning (your local time), then writes a
 5. **Conditions** tab: check **Wake the computer to run this task**. Click **OK**.
 6. To test it, right-click the task and choose **Run**. A black window opens and stays open while it works. Leave it open: closing it cuts the run short. In the Ubuntu window, `docker ps` **should show** `mission-control-run`. End the test with `mc stop`.
 
-Only one run can happen at a time. If you start one by hand while the scheduled one is working, you'll see "a Mission Control run is already active". If Docker Desktop is still starting at 23:00 (say, after Windows restarted for an update), the scheduled run waits up to 5 minutes for it. The scheduled run's messages go to `~/mc-night.log`; read the end with `tail -n 50 ~/mc-night.log`.
+Only one run can happen at a time. If you start one by hand while the scheduled one is working, you'll see "a Mission Control run is already active". If Docker Desktop is still starting at 23:00 (say, after Windows restarted for an update), the scheduled run waits up to 5 minutes for it. If the scheduled run can't start at all (Docker Desktop isn't running, for example), your iPad gets a notification "Mission Control: the night run didn't start" that says why. This works once a run has started at least once since you set up notifications in Step 6: each run that starts keeps a copy of the notification address in Ubuntu for this. The scheduled run's messages go to `~/mc-night.log`; read the end with `tail -n 50 ~/mc-night.log`.
 
 ## Step 10: In the morning
 
@@ -276,23 +278,65 @@ Only one run can happen at a time. If you start one by hand while the scheduled 
    mc report
    ```
 
-   **You should see** the start of the report: how it went, what you can do now, how to try the app, and any decisions it needs from you.
-3. To read the full reports with screenshots in Windows:
+   **You should see** the start of the report: how it went, what you can do now, how to try the app, and any decisions it needs from you. If the night worked on several missions, you see the night's summary instead: each mission's result, what they need from you, and the command for each one's own report, such as `mc report 2026-10-09-habit-tracker`.
+3. To read the full reports in Windows:
 
    ```
    mc copy-reports
    ```
 
-   It prints a folder address like `\\wsl.localhost\Ubuntu\home\adam\mc-reports`. Paste it into the address bar of **File Explorer**. Open `reports\latest.md` with Notepad. Screenshots are in `missions\<mission>\screenshots`.
+   It prints a folder address like `\\wsl.localhost\Ubuntu\home\adam\mc-reports`. Paste it into the address bar of **File Explorer**. Open `reports\latest.md` with Notepad (the night's summaries are the `reports\night-....md` files). Notepad shows the report's pictures as lines of text: the screenshots themselves are picture files in `missions\<mission>\screenshots`.
 4. Try the app:
 
    ```
    mc shell
    ```
 
-   Then type the commands from the report's **How to try it** section, one at a time. When the app says it's ready, open <http://localhost:3000> in your Windows browser. When you're done, press **Ctrl+C** to stop the app and type `exit`.
+   Then type the commands from the report's **How to try it** section, one at a time. When the app says it's ready, open <http://localhost:3000> in your Windows browser. When you're done, press **Ctrl+C** to stop the app, run the `git checkout ...` command the report gives to put the app's folder back on your own version (if it gave one), and type `exit`. For a change to an app you already had, the report also says how to keep the change.
 
 Your apps' files are in File Explorer at `\\wsl.localhost\Ubuntu\home\<your-ubuntu-name>\mc-apps`.
+
+## Optional: upload finished work to GitHub
+
+Out of the box, Mission Control keeps everything on your PC. If you turn uploading on, each finished mission's branch (`mc/<mission>`) goes to the app's repository on GitHub. Mission Control never uploads `main` and never overwrites what is already there, and it doesn't run the app's git hooks while uploading.
+
+**Read this first.** To upload, the container needs a GitHub token, and it has to be saved in the app's folder, where the agents work. So a misbehaving agent can read the token and use it itself, for anything the token allows; Mission Control's own care only covers what Mission Control does. That is why the token must be limited to that one repository, and why GitHub itself must refuse changes to `main`. If you can't do both, leave uploading off.
+
+Do this once for each app, during the day (not while a night run is working):
+
+1. On <https://github.com>, open the app's repository. For an app Mission Control built, create one first: **+** (top right) > **New repository**, give it a name, and leave **Add README**, **.gitignore** and **license** off, so it starts empty.
+2. Create a token for that repository only: your picture > **Settings** > **Developer settings** > **Personal access tokens** > **Fine-grained tokens** > **Generate new token**.
+   - **Token name:** for example `mission-control-<app>`. **Expiration:** 90 days is a good choice.
+   - **Repository access:** **Only select repositories**, and pick this one repository.
+   - **Permissions:** give **Contents** the access **Read and write**, and nothing else (GitHub adds **Metadata: Read-only** by itself).
+   - Click **Generate token** and copy it (it starts with `github_pat_`). Make a separate token for each app.
+3. Save the address with the token in the app's folder. Open `mc shell`, then paste this with your own values in place of the placeholders:
+
+   ```
+   git -C ~/mc-apps/<app-folder> remote add origin https://<github-username>:<token>@github.com/<github-username>/<repository>.git
+   ```
+
+   **You should see** nothing, just the prompt again. If it says `remote origin already exists` (an app you got from GitHub), paste it again with `set-url` in place of `add`.
+4. If you created the repository in instruction 1, upload the app once yourself, still in `mc shell`:
+
+   ```
+   git -C ~/mc-apps/<app-folder> push origin main
+   ```
+
+   **You should see** a few lines ending in `main -> main`. Then type `exit`.
+5. Make GitHub protect `main`. In the repository on github.com: **Settings** > **Rules** > **Rulesets** > **New ruleset** > **New branch ruleset**.
+   - **Ruleset Name:** `protect main`. **Enforcement status:** **Active**.
+   - **Bypass list:** leave it empty. The token acts as you, so anything you are allowed to skip, it can skip too.
+   - **Target branches:** **Add target** > **Include default branch**.
+   - **Rules:** check **Restrict deletions**, **Block force pushes** and **Require a pull request before merging**.
+   - Click **Create**. If GitHub says the rules won't be enforced (private repositories on the free plan), nothing on GitHub stops an agent with the token from changing `main`: remove the token (instruction 2's page, **Delete**) and leave uploading off for this app.
+6. Turn uploading on (once, for all apps):
+
+   ```
+   mc config set git.push true
+   ```
+
+To bring a mission's work into `main`, open the repository on github.com, click **Compare & pull request** next to the `mc/...` branch, then **Create pull request** and **Merge pull request**. When the token expires, make a new one (instruction 2) and save it with `set-url` (instruction 3). An app without a GitHub address just gets a note in its report that it wasn't uploaded.
 
 ## Updating Mission Control
 
@@ -300,26 +344,36 @@ Your apps' files are in File Explorer at `\\wsl.localhost\Ubuntu\home\<your-ubun
 cd ~/Mission-control && git pull && mc build
 ```
 
-Your logins, missions and apps are kept.
+Your logins, missions and apps are kept. If the project is private, `git pull` asks for your GitHub username and token again, as in Step 3 (tokens expire: make a new one when it is refused).
 
 ## Troubleshooting
 
 | What you see | What to do |
 |---|---|
 | `Docker isn't running` | Start Docker Desktop and wait until it shows **Engine running** (bottom left). Then try again. |
-| `Docker isn't available in Ubuntu`, or `docker: command not found` | In Docker Desktop: **Settings > Resources > WSL integration**, turn on **Ubuntu**, then **Apply & restart**. Open a new Ubuntu window. |
+| `Docker isn't available in Ubuntu`, or `docker: command not found` | Usually Docker Desktop isn't running: start it and wait until it shows **Engine running** (bottom left), then try again. If it was already running: in Docker Desktop, **Settings > Resources > WSL integration**, turn on **Ubuntu**, then **Apply & restart**. Open a new Ubuntu window. |
 | `mc: command not found` | Run `source ~/.bashrc`. If that doesn't help, repeat Step 3, instruction 2. |
 | `the Mission Control image isn't built yet` | Run `mc build`. |
-| `not logged in to Claude yet` or `not logged in to Codex yet`, or `mc doctor` says a login expired | Log in again: `mc login-claude` or `mc login-codex`. Logins sometimes expire; that's normal. |
+| `not logged in to Claude yet` or `not logged in to Codex yet`, or `mc doctor --live` says `Not logged in` (plain `mc doctor` only checks that a login is stored, not that it still works) | Log in again: `mc login-claude` or `mc login-codex`. Logins sometimes expire; that's normal. Missions that stopped because of it continue by themselves on the next `mc run`. |
+| A mission is "Stopped, needs your help", or `mc status` shows it `failed` | Read what it needs: `mc report <mission>`, under **Needs your decision**. Do that, then continue it: `mc run --mission <mission>`. `mc status` shows the mission names. |
+| "paused, the disk is almost full" | Free some space: delete apps you no longer need from `~/mc-apps`, or run `docker system prune` to clear old Docker data. Then run `mc run` again; it continues where it paused. |
+| "Mission Control stopped unexpectedly" | The last run ended without finishing (the PC restarted, Docker Desktop stopped, or the power went out). Nothing is lost: the work so far is kept and continues. If it keeps happening, check Step 7 and that Docker Desktop stays running. |
 | The Codex code is refused | Turn on device code sign-in in ChatGPT's security settings (Step 4b), then run `mc login-codex` again. |
 | "You've hit your limit", or `mc status` shows a mission waiting | Nothing to do. Mission Control notices limits, switches to the other AI when allowed, or waits until the limit resets and carries on. If it happens every night, queue less work. |
+| "Waiting for the AIs to respond", or "paused, the AI isn't working" | The internet connection or an AI service had a problem, or an AI command line keeps failing. Nothing was lost and nothing counted against the work. Check that the PC is online, then run `mc doctor --live`. The next `mc run` carries on where it paused. |
 | You want to stop a run | In another Ubuntu window: `mc stop`. It stops after the current step and keeps its progress; the next `mc run` continues. If it hasn't stopped after a few minutes: `docker stop mission-control-run`. |
-| `a Mission Control run is already active` | One is already working, maybe the scheduled one. Check with `mc status`, or stop it with `mc stop`. |
+| `a Mission Control run is already active` | One is already working, maybe the scheduled one. Check with `mc status`, or stop it with `mc stop`. If `docker ps` doesn't list `mission-control-run`, the last run was cut off: wait 5 minutes and try again. |
+| `mc status` shows a mission `interrupted` | The last run ended without finishing (it was stopped with `docker stop`, or the PC or Docker Desktop restarted). Nothing is lost: the next `mc run` continues it. |
+| `this run would work until 07:00 tomorrow` | The stop time had already passed when the run started. Give a later time, such as `mc run --until 12:00`. |
+| `Mission Control can only change apps inside ~/mc-apps`, or `There is no folder at ...` | Move or copy the app's folder into `~/mc-apps`, then use its path there: `mc feature ~/mc-apps/<app-folder> "..."`. |
+| `has no branch checked out` when running `mc feature` | The app's folder is still on a version you were trying from a report. Run the `git -C ... checkout ...` command it prints, then try again. |
+| `mc doctor` says `Not checked: a night run is working right now` | It leaves the AIs alone while a run uses the same logins. Run it again after the run ends. |
 | `cannot write to /home/pwuser/.claude` (or `.codex`, or `.mission-control`) | Run `mc fix-permissions`. |
 | `cannot write to /home/pwuser/mc-apps` | Run the command it prints: `sudo chown -R "$USER": ~/mc-apps && mc build`. |
 | `port is already allocated` when running `mc shell` | Another `mc shell` window is open. Close it first. |
 | http://localhost:3000 doesn't open | Check that the app is still running in the `mc shell` window. If it is, stop it with **Ctrl+C** and start it again with `npm run dev -- --hostname 0.0.0.0`. |
-| Nothing happened overnight | Was the PC asleep or restarted (Step 7)? For the scheduled run, read `tail -n 50 ~/mc-night.log`, and make sure Docker Desktop starts when you sign in (Step 2). |
+| Nothing happened overnight, or "Mission Control: the night run didn't start" | The notification and the end of `~/mc-night.log` (`tail -n 50 ~/mc-night.log`) say why; look that message up in this table. Without either, the scheduled run didn't run at all: was the PC asleep, restarted, or signed out (Step 7)? Also make sure Docker Desktop starts when you sign in (Step 2). |
+| The report says `Could not push mc/...` | Uploading is on (see [Optional: upload finished work to GitHub](#optional-upload-finished-work-to-github)). With `no remote`: the app has no GitHub address yet; follow instructions 1 to 3 there, or ignore it. With `Authentication failed`, `could not read Username`, `403` or `denied`: the token expired or can't write to that repository; make a new one (instruction 2) and save it with `set-url` (instruction 3). With `pre-push hook`: the app has its own git hook that runs before uploads (some projects use one for big files, called Git LFS, or for checks), and Mission Control never runs an app's hooks, so it didn't upload. Upload it yourself in the Ubuntu window when no night run is working: `git -C ~/mc-apps/<app-folder> push origin mc/<mission>`. |
 | No notification on the iPad | Repeat the test in Step 6, instruction 5. Check that notifications are allowed for ntfy in the iPad's Settings. Check the address with `mc config get notify.ntfyUrl`. |
 | `couldn't tell your timezone, so times such as 07:00 mean UTC` | Run `sudo dpkg-reconfigure tzdata` and pick your region and city. |
 | You want to start over: forget the logins, missions and reports | `docker volume rm mc-claude mc-codex mc-home mc-browsers` deletes them for good (your apps in `~/mc-apps` are kept; `mc-browsers` only holds test browsers, which come back by themselves). Then repeat Steps 4 to 6. |

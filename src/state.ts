@@ -8,7 +8,7 @@
 //   <home>/worktrees/<id>/              git worktrees of the mission
 //   <home>/usage.jsonl                  global UsageRecord ledger
 //   <home>/STOP                         graceful-stop request
-//   <home>/mc.lock                      {pid, at, host} of the active `mc run`; its mtime is a heartbeat
+//   <home>/mc.lock                      {pid, at, host, start} of the active `mc run`; its mtime is a heartbeat
 //   <home>/mc.lock.<hash>.takeover      short-lived guard while a stale lock is being removed
 import { randomBytes } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
@@ -51,12 +51,18 @@ interface LockContent {
   at: string;
   /** os.hostname() of the holder: the container id under Docker, where pids of other containers mean nothing. */
   host: string;
+  /**
+   * When the holder process started (see processStart), where /proc tells. A live process with the holder's pid but
+   * another start time took the pid over after the holder died (after a restart, or in a new container).
+   */
+  start?: string;
 }
 
-/** What a lock file says about its holder; host is undefined in locks that predate the field. */
+/** What a lock file says about its holder; host and start are undefined in locks that predate them. */
 interface LockHolder {
   pid: number;
   host: string | undefined;
+  start: string | undefined;
 }
 
 /** Lock files this process currently holds, so a second acquisition in the same process is refused too. */
@@ -224,6 +230,18 @@ export class MissionStore {
     throw new Error(`could not acquire ${lockFile}: it keeps changing (another mc run starting?)`);
   }
 
+  /**
+   * The `mc run` holding the lock right now, described like the refusal of acquireLock ("pid 7", "pid 7 on host
+   * 3f2a…"), or undefined when none does. Only reads: commands that must not disturb a run (or say whether one is
+   * on) use it. A run in another container counts while its heartbeat is fresh.
+   */
+  activeRun(): string | undefined {
+    const lockFile = this.lockFile();
+    const existing = readLockFile(lockFile);
+    const holder = existing === undefined ? undefined : parseLockHolder(existing);
+    return holder !== undefined && isLiveHolder(holder, lockFile) ? describeHolder(holder) : undefined;
+  }
+
   // ───────────── Paths and helpers ─────────────
 
   private missionsRoot(): string {
@@ -381,7 +399,34 @@ function readLockFile(file: string): string | undefined {
 }
 
 function newLockContent(): string {
-  return JSON.stringify({ pid: process.pid, at: new Date().toISOString(), host: hostname() } satisfies LockContent);
+  const start = processStart(process.pid);
+  const content: LockContent = { pid: process.pid, at: new Date().toISOString(), host: hostname(), ...(start !== undefined && { start }) };
+  return JSON.stringify(content);
+}
+
+/**
+ * When process `pid` started: the boot it started in and its start time in clock ticks since that boot (field 22
+ * of /proc/<pid>/stat). Two processes that ever had the same pid differ in it. Undefined without /proc (not Linux)
+ * or when the process is gone.
+ */
+function processStart(pid: number): string | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    // "pid (comm) state ppid …": comm may contain spaces and parentheses, so count fields after its last ")".
+    const startTicks = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+    if (startTicks === undefined || !/^\d+$/.test(startTicks)) return undefined;
+    return `${bootId() ?? "boot"}:${startTicks}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function bootId(): string | undefined {
+  try {
+    return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The holder recorded in a lock file, or undefined when the file is corrupt (treated as stale). */
@@ -393,10 +438,10 @@ function parseLockHolder(text: string): LockHolder | undefined {
     return undefined;
   }
   if (!isRecord(data)) return undefined;
-  const { pid, host } = data;
+  const { pid, host, start } = data;
   // pid 0 and negative pids address process groups in kill(2), so they never identify a holder.
   if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) return undefined;
-  return { pid, host: isString(host) ? host : undefined };
+  return { pid, host: isString(host) ? host : undefined, start: isString(start) ? start : undefined };
 }
 
 function isForeign(holder: LockHolder): boolean {
@@ -410,12 +455,15 @@ function describeHolder(holder: LockHolder): string {
 /**
  * A holder on another host (another container) is judged by its heartbeat, since its pid means nothing here.
  * Our own pid only counts as a holder while this process really holds the lock: a lock file carrying our pid
- * but not held here was left by a crashed run whose pid got reused (common in containers).
+ * but not held here was left by a crashed run whose pid got reused (common in containers). Another live process
+ * with the holder's pid is the holder only if it started when the holder did (when both start times are known).
  */
 function isLiveHolder(holder: LockHolder, lockFile: string): boolean {
   if (isForeign(holder)) return msSinceModified(lockFile) < FOREIGN_LOCK_TTL_MS;
   if (holder.pid === process.pid) return locksHeldByThisProcess.has(lockFile);
-  return isProcessAlive(holder.pid);
+  if (!isProcessAlive(holder.pid)) return false;
+  const now = holder.start === undefined ? undefined : processStart(holder.pid);
+  return now === undefined || now === holder.start;
 }
 
 function isProcessAlive(pid: number): boolean {

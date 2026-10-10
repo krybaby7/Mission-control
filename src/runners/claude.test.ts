@@ -22,8 +22,23 @@ import { ClaudeRunner, type ClaudeRunnerOptions } from "./claude.js";
 const FIXTURE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
 const NODE_PATH = `${dirname(process.execPath)}:${process.env.PATH ?? ""}`;
 const HOUR_MS = 3_600_000;
-const WRITE_DISALLOWED =
-  "Workflow,CronCreate,CronDelete,CronList,ScheduleWakeup,EnterWorktree,ExitWorktree,SendMessage,ListAgents,PushNotification";
+const WRITE_TOOLS =
+  "Bash,Edit,Write,Read,Glob,Grep,NotebookEdit,WebFetch,WebSearch,Task,TaskCreate,TaskGet,TaskList,TaskUpdate,TaskStop,Monitor,Skill,ToolSearch";
+/** Tools of CLI 2.1.295 that act beyond the run and the worktree: on the account, other sessions or the phone. */
+const ESCAPING_TOOLS = [
+  "RemoteTrigger",
+  "DesignSync",
+  "CronCreate",
+  "CronDelete",
+  "CronList",
+  "ScheduleWakeup",
+  "Workflow",
+  "EnterWorktree",
+  "ExitWorktree",
+  "SendMessage",
+  "ListAgents",
+  "PushNotification",
+];
 
 interface Recorded {
   argv: string[];
@@ -179,50 +194,58 @@ describe("buildArgs", () => {
     file,
   ];
 
-  const writeTail = (mode: string) => [
+  const tail = (mode: string, tools: string) => [
     "--permission-mode",
     mode,
-    "--disallowedTools",
-    WRITE_DISALLOWED,
+    "--tools",
+    tools,
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
     "--permission-prompts",
     "none",
   ];
+  const writeTail = (mode: string) => tail(mode, WRITE_TOOLS);
 
-  it("runs workspace-write jobs in the configured write mode, without tools that escape the run", () => {
+  it("runs workspace-write jobs in the configured write mode, with an allowlist of tools", () => {
     const args = makeRunner("success").buildArgs(makeJob(), "/tmp/sp.md");
     expect(args).toEqual([...head("/tmp/sp.md"), ...writeTail("bypassPermissions")]);
-    expect(args).not.toContain("--tools");
+  });
+
+  it("gives write jobs no tool that acts beyond the run, and no deny-list that new tools would slip past", () => {
+    const args = makeRunner("success").buildArgs(makeJob(), "/tmp/sp.md");
+    const tools = (args[args.indexOf("--tools") + 1] ?? "").split(",");
+    expect(tools).toEqual(expect.arrayContaining(["Bash", "Edit", "Write", "Read", "Glob", "Grep", "WebFetch", "Task", "Skill"]));
+    for (const tool of ESCAPING_TOOLS) expect(tools).not.toContain(tool);
+    expect(args).not.toContain("--disallowedTools");
+  });
+
+  it.each([
+    ["write", {}],
+    ["read-only", { access: "read-only" }],
+    ["noTools", { access: "read-only", noTools: true }],
+  ] as const)("loads no settings file and no MCP server for %s jobs", (_, job) => {
+    const args = makeRunner("success").buildArgs(makeJob(job), "/tmp/sp.md");
+    const sources = args.indexOf("--setting-sources");
+    expect(sources).toBeGreaterThan(0);
+    expect(args[sources + 1]).toBe("");
+    expect(args).toContain("--strict-mcp-config");
+    expect(args).not.toContain("--mcp-config");
   });
 
   it.each(["acceptEdits", "auto"] as const)("passes write mode %s through", (writeMode) => {
     const args = makeRunner("success", { writeMode }).buildArgs(makeJob(), "/tmp/sp.md");
-    expect(args.slice(-6)).toEqual(writeTail(writeMode));
+    expect(args.slice(-9)).toEqual(writeTail(writeMode));
   });
 
   it("limits read-only jobs to Read, Grep and Glob without prompting", () => {
     const args = makeRunner("success").buildArgs(makeJob({ access: "read-only" }), "/tmp/sp.md");
-    expect(args).toEqual([
-      ...head("/tmp/sp.md"),
-      "--permission-mode",
-      "dontAsk",
-      "--tools",
-      "Read,Grep,Glob",
-      "--permission-prompts",
-      "none",
-    ]);
+    expect(args).toEqual([...head("/tmp/sp.md"), ...tail("dontAsk", "Read,Grep,Glob")]);
   });
 
   it("disables every tool for noTools jobs", () => {
     const args = makeRunner("success").buildArgs(makeJob({ access: "read-only", noTools: true }), "/tmp/sp.md");
-    expect(args).toEqual([
-      ...head("/tmp/sp.md"),
-      "--permission-mode",
-      "dontAsk",
-      "--tools",
-      "",
-      "--permission-prompts",
-      "none",
-    ]);
+    expect(args).toEqual([...head("/tmp/sp.md"), ...tail("dontAsk", "")]);
   });
 
   it("adds the JSON schema and the session to resume, in that order", () => {
@@ -477,17 +500,36 @@ describe("ClaudeRunner.run: usage limits", () => {
     expect(ofType(events, "limit")).toEqual([{ type: "limit", info: result.limit }]);
   });
 
-  it("keeps a run that paid extra usage covers, with its structured output", async () => {
-    const job = { outputSchema: SCHEMAS.gate, access: "read-only", noTools: true } as const;
-    const { result, events } = await play("extra-usage-success", job);
-    expect(result).toMatchObject({ outcome: "ok", structured: { verdict: "approve", issues: [] } });
-    expect(result.limit).toBeUndefined();
-    expect(ofType(events, "limit")).toEqual([]);
-    expect(progressTexts(events)).toEqual(["subscription limit reached: paid extra usage covers the rest of this run"]);
-    // The exhausted window is still reported, so pacing holds off new runs until it resets.
+  it("stops a run that would go on with paid extra usage, and reports the subscription's limit", async () => {
+    const { result, events } = await play("extra-usage-continues");
+    expect(result.outcome).toBe("limited");
+    expect(result.durationMs).toBeLessThan(10_000); // stopped, not left running until the 20 s timeout
+    expect(isAlive(recorded().pid)).toBe(false);
+    expect(result.limit).toMatchObject({ provider: "claude", kind: "session", resetsAt: 1791600000000 });
+    expect(result.limit?.raw).toContain('"isUsingOverage":true');
+    expect(ofType(events, "limit")).toEqual([{ type: "limit", info: result.limit }]);
+    expect(progressTexts(events)).toContain("subscription limit reached: stopping instead of going on with paid extra usage");
     expect(ofType(events, "utilization").map((e) => e.info)).toEqual([
       { provider: "claude", window: "five_hour", utilization: 1.01, resetsAt: 1791600000000 },
     ]);
+  });
+
+  it("stops on extra usage even when the event carries no utilization or reset time (older shape)", async () => {
+    const { result, events } = await play("extra-usage-continues-old-shape");
+    expect(result.outcome).toBe("limited");
+    expect(result.durationMs).toBeLessThan(10_000);
+    // Recorded as a limit, so later runs don't start on extra usage either: the quota blocks the session window.
+    expect(result.limit).toMatchObject({ provider: "claude", kind: "session" });
+    expect(ofType(events, "utilization")).toEqual([]);
+    expect(ofType(events, "limit")).toEqual([{ type: "limit", info: result.limit }]);
+  });
+
+  it("does not keep the answer of a run that finished on paid extra usage", async () => {
+    const job = { outputSchema: SCHEMAS.gate, access: "read-only", noTools: true } as const;
+    const { result } = await play("extra-usage-success", job);
+    expect(result.outcome).toBe("limited");
+    expect(result.limit).toMatchObject({ kind: "session", resetsAt: 1791600000000 });
+    expect(result.structured).toBeUndefined();
   });
 
   it("treats running out of extra usage as a spend limit", async () => {
@@ -674,5 +716,60 @@ describe("ClaudeRunner.run: failures", () => {
     expect(result).toMatchObject({ outcome: "crashed", exitCode: 0, text: "" });
     expect(result.error).toBe("claude exited with code 0 without a result");
     expect(result.usage).toEqual({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
+  });
+});
+
+describe("ClaudeRunner.run: billing guard", () => {
+  it.each(["ANTHROPIC_API_KEY", "apiKeyHelper", "/login managed key"])(
+    "stops a run whose login would bill an API key (%s), as a login problem",
+    async (keySource) => {
+      const runner = makeRunner("api-key", { env: scenarioEnv("api-key", { FAKE_CLAUDE_KEY_SOURCE: keySource }) });
+      const { result, events } = await playOn(runner);
+      expect(result.outcome).toBe("auth");
+      expect(result.error).toContain(`API key (${keySource})`);
+      expect(result.error).toContain("Claude subscription");
+      expect(result.durationMs).toBeLessThan(10_000); // stopped at once, not left running until the timeout
+      expect(isAlive(recorded().pid)).toBe(false);
+      expect(ofType(events, "limit")).toEqual([]);
+    },
+  );
+
+  it("runs normally when the init event names the subscription login", async () => {
+    const { result } = await play("subscription-login");
+    expect(result).toMatchObject({ outcome: "ok", text: "Done." });
+  });
+});
+
+describe("ClaudeRunner.run: a CLI that stays alive after its result", () => {
+  const LINGER = { maxTurns: 5, timeoutMs: 20_000 };
+
+  it("is stopped after the exit grace, and the result stands", async () => {
+    const logger = recordingLogger();
+    const runner = makeRunner("linger", { exitGraceMs: 200, logger });
+    const { result } = await playOn(runner, { limits: LINGER });
+    expect(result).toMatchObject({ outcome: "ok", text: "Finished; the dev server is still running." });
+    expect(result.error).toBeUndefined();
+    expect(result.durationMs).toBeLessThan(10_000);
+    expect(isAlive(recorded().pid)).toBe(false);
+    expect(logger.lines).toContainEqual(
+      expect.objectContaining({ level: "warn", msg: "stopping claude run job-1: it did not exit within 200 ms of its result" }),
+    );
+  });
+
+  it("lets a new turn after the result run past the grace, and keeps its later result", async () => {
+    const runner = makeRunner("result-then-new-turn", { exitGraceMs: 1_500 });
+    const { result } = await playOn(runner, { limits: LINGER });
+    expect(result).toMatchObject({ outcome: "ok", text: "Second answer.", exitCode: 0 });
+  });
+
+  it("still reports a caller's abort after the result as the result", async () => {
+    const controller = new AbortController();
+    const onEvent = (e: RunEvent) => {
+      if (e.type === "usage") controller.abort();
+    };
+    const runner = makeRunner("linger", { exitGraceMs: 60_000 });
+    const { result } = await playOn(runner, { limits: LINGER }, { signal: controller.signal, onEvent });
+    expect(result.outcome).toBe("ok");
+    expect(isAlive(recorded().pid)).toBe(false);
   });
 });

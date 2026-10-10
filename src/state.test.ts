@@ -492,17 +492,18 @@ describe("acquireLock", () => {
   const lockPath = () => join(home, "mc.lock");
   const writeLock = (content: unknown) =>
     writeFileSync(lockPath(), typeof content === "string" ? content : JSON.stringify(content));
-  const readLock = () => JSON.parse(readFileSync(lockPath(), "utf8")) as { pid: number; at: string; host: string };
+  const readLock = () => JSON.parse(readFileSync(lockPath(), "utf8")) as { pid: number; at: string; host: string; start?: string };
   /** The guard a contender creates while deleting a stale lock with this content (or this successor key). */
   const guardPath = (key: string) => `${lockPath()}.${sha256(key).slice(0, 16)}.takeover`;
 
-  it("writes {pid, at, host} and removes the lock on release", () => {
+  it("writes {pid, at, host, start} and removes the lock on release", () => {
     const before = Date.now();
     const release = store.acquireLock();
     const lock = readLock();
-    expect(Object.keys(lock).sort()).toEqual(["at", "host", "pid"]);
+    expect(Object.keys(lock).sort()).toEqual(HAS_PROC ? ["at", "host", "pid", "start"] : ["at", "host", "pid"]);
     expect(lock.pid).toBe(process.pid);
     expect(lock.host).toBe(hostname());
+    if (HAS_PROC) expect(lock.start).toBe(procStart(process.pid));
     expect(Date.parse(lock.at)).toBeGreaterThanOrEqual(before);
     release();
     expect(existsSync(lockPath())).toBe(false);
@@ -576,6 +577,21 @@ describe("acquireLock", () => {
     release();
   });
 
+  it.runIf(HAS_PROC)("takes over a lock whose pid now belongs to a process that started later (pid reused)", () => {
+    // process.ppid is alive, but it is not the process that wrote this lock: that one started at another time.
+    writeLock({ pid: process.ppid, at: "2026-01-01T00:00:00.000Z", host: hostname(), start: "another-boot:12345" });
+    const release = store.acquireLock();
+    expect(readLock().pid).toBe(process.pid);
+    release();
+  });
+
+  it.runIf(HAS_PROC)("refuses while the process that wrote the lock (same pid, same start) is alive", () => {
+    const content = JSON.stringify({ pid: process.ppid, at: "2026-01-01T00:00:00.000Z", host: hostname(), start: procStart(process.ppid) });
+    writeLock(content);
+    expect(() => store.acquireLock()).toThrow(`another mc run is active (pid ${process.ppid})`);
+    expect(readFileSync(lockPath(), "utf8")).toBe(content);
+  });
+
   it("counts EPERM as a live process", () => {
     vi.spyOn(process, "kill").mockImplementation(() => {
       throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
@@ -630,6 +646,31 @@ describe("acquireLock", () => {
       expect(readLock().pid).toBe(process.pid);
       expect(kill).not.toHaveBeenCalled();
       release();
+    });
+  });
+
+  describe("activeRun (read-only probe)", () => {
+    it("is undefined without a lock, or with a stale or corrupt one, and never changes the lock", () => {
+      expect(store.activeRun()).toBeUndefined();
+      writeLock({ pid: deadPid(), at: "x", host: hostname() });
+      expect(store.activeRun()).toBeUndefined();
+      writeLock({ pid: 7, at: "x", host: "other-container" });
+      backdate(lockPath(), 5 * 60_000 + 1_000);
+      expect(store.activeRun()).toBeUndefined();
+      writeLock("{ pid: ");
+      expect(store.activeRun()).toBeUndefined();
+      expect(readFileSync(lockPath(), "utf8")).toBe("{ pid: ");
+    });
+
+    it("describes a live holder: this process, another one here, or a run in another container with a fresh heartbeat", () => {
+      const release = store.acquireLock();
+      expect(store.activeRun()).toBe(`pid ${process.pid}`);
+      release();
+      writeLock({ pid: process.ppid, at: "x", host: hostname() });
+      expect(store.activeRun()).toBe(`pid ${process.ppid}`);
+      writeLock({ pid: 7, at: "x", host: "3f2a1b2c3d4e" });
+      expect(store.activeRun()).toBe("pid 7 on host 3f2a1b2c3d4e");
+      expect(existsSync(lockPath())).toBe(true);
     });
   });
 
@@ -812,6 +853,16 @@ function dataUrl(code: string): string {
 }
 
 /** A pid that just exited (and so is almost certainly not alive). */
+/** Linux /proc, where locks record when their holder started. */
+const HAS_PROC = existsSync("/proc/self/stat");
+
+/** What the lock records as process `pid`'s start: boot id and start time in ticks (field 22 of /proc/<pid>/stat). */
+function procStart(pid: number): string {
+  const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+  const ticks = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+  return `${readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim()}:${ticks}`;
+}
+
 function deadPid(): number {
   const child = spawnSync(process.execPath, ["-e", ""]);
   expect(child.pid).toBeGreaterThan(0);

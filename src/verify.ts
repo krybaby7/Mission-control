@@ -77,7 +77,9 @@ export class Verifier {
       const spawned = isCommand(command)
         ? await runProcess({
             command: "bash",
-            args: ["-lc", command],
+            // No login or rc files: they live outside the repository, where agents can write (~/.bash_profile with
+            // "exit 0" would pass every check that night) and no diff, scan or reviewer looks. PATH comes from our env.
+            args: ["--noprofile", "--norc", "-c", command],
             cwd,
             env: { ...scrubEnv(this.opts.env ?? process.env), CI: "1", FORCE_COLOR: "0" },
             timeoutMs: this.opts.timeoutMs,

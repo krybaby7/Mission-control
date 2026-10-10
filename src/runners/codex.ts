@@ -19,6 +19,8 @@ import type {
 import { ensureDir } from "../util/fs.js";
 import { parseJsonLine } from "../util/ndjson.js";
 import { runProcess, scrubEnv, type SpawnResult } from "../util/process.js";
+import { readCodexAccount, type CodexAccountReading } from "./codex-app-server.js";
+import { restoreWorktree, snapshotWorktree, type WorktreeSnapshot } from "./worktree-guard.js";
 
 export interface CodexRunnerOptions {
   /** Default "codex". */
@@ -32,6 +34,15 @@ export interface CodexRunnerOptions {
   tmpDir?: string;
   /** How long codex may keep running once its turn has ended before it is stopped. Default 30 s. */
   exitGraceMs?: number;
+  /**
+   * How long codex may keep retrying a lost connection or an overloaded server, with no progress in between, before
+   * it is stopped and the run reported as a throttle (codex itself waits for the network indefinitely). Default 5 min.
+   */
+  stallMs?: number;
+  /** How long one question to codex's app server (how it is logged in, how much usage is left) may take. Default 15 s. */
+  appServerTimeoutMs?: number;
+  /** Usage windows are read after a run at most this often. Default 60 s. */
+  usagePollIntervalMs?: number;
 }
 
 export interface CodexRunFiles {
@@ -47,6 +58,19 @@ const PROGRESS_CHARS = 300;
 const ERROR_CHARS = 2_000;
 const STDERR_TAIL_LINES = 20;
 const DEFAULT_EXIT_GRACE_MS = 30_000;
+const DEFAULT_STALL_MS = 5 * 60_000;
+const DEFAULT_APP_SERVER_TIMEOUT_MS = 15_000;
+const DEFAULT_USAGE_POLL_INTERVAL_MS = 60_000;
+const SANDBOX_PROBE_TIMEOUT_MS = 30_000;
+/**
+ * Told to a read-only job that runs without codex's own sandbox (see readOnlySandbox): only the brief and the
+ * worktree guard keep it from changing files.
+ */
+const NO_SANDBOX_NOTICE =
+  "This is a read-only task, and nothing here technically stops you from writing, so it is up to you: do not create, " +
+  "change or delete any file, and do not run commands that do (no installs, builds, formatters, git add, commit, " +
+  "checkout or stash). Read files and run read-only commands only, such as cat, ls, rg, git log, git show or git diff. " +
+  "Anything you change is undone after the run.";
 /**
  * Login failures in codex's own error text, including an expired or reused ChatGPT refresh token. The status codes
  * are word-bounded, so a port such as :40123 is not mistaken for one.
@@ -66,6 +90,34 @@ const AUTH_PATTERN = new RegExp(
   ].join("|"),
   "i",
 );
+/**
+ * A lost connection or an overloaded or failing provider in codex's own failure text (turn.failed, or a retry notice
+ * nothing recovered from), as codex 0.162.0 words them: "stream disconnected before completion: …", "Reconnecting...
+ * waiting for network (Connection failed: error sending request)", DNS and connection errors, "unexpected status 503
+ * Service Unavailable", "exceeded retry limit, last status: 500 …", and its text for an HTTP 500: "We’re currently
+ * experiencing high demand, which may cause temporary errors."
+ */
+const NETWORK_ERROR = new RegExp(
+  [
+    "stream disconnected before completion",
+    String.raw`error sending request\b`,
+    "waiting for network",
+    "connection failed",
+    String.raw`\bdns error\b`,
+    "failed to lookup address",
+    "temporary failure in name resolution",
+    "name or service not known",
+    "connection (?:refused|reset|closed before)",
+    "(?:request|connection|operation) timed out",
+    "network is unreachable",
+    "no route to host",
+    String.raw`\bE(?:CONNRESET|CONNREFUSED|TIMEDOUT|NOTFOUND|AI_AGAIN|NETUNREACH|HOSTUNREACH)\b`,
+    String.raw`unexpected status 5\d\d\b`,
+    String.raw`exceeded retry limit, last status:? 5\d\d\b`,
+    "we.re currently experiencing high demand",
+  ].join("|"),
+  "i",
+);
 /** Stderr also logs unrelated warnings (e.g. an MCP server's OAuth), so only codex's own login wording counts there. */
 const STDERR_AUTH_PATTERN = /not logged in|codex login\b|could not be refreshed|(?:log|sign)\s+in\s+again/i;
 
@@ -77,6 +129,15 @@ export class CodexRunner implements AgentRunner {
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly tmpDir: string;
   private readonly exitGraceMs: number;
+  private readonly stallMs: number;
+  private readonly appServerTimeoutMs: number;
+  private readonly usagePollIntervalMs: number;
+  /** The first app-server reading (login type and usage), shared by every run of this runner. */
+  private firstReading: Promise<CodexAccountReading | undefined> | undefined;
+  private firstUsageReported = false;
+  private lastUsageReadAt = -Infinity;
+  /** The sandbox read-only jobs get, once probed (see readOnlySandbox). */
+  private readOnlyMode: Promise<Sandbox> | undefined;
 
   constructor(opts: CodexRunnerOptions) {
     this.command = opts.command ?? "codex";
@@ -85,14 +146,18 @@ export class CodexRunner implements AgentRunner {
     this.env = opts.env;
     this.tmpDir = opts.tmpDir ?? tmpdir();
     this.exitGraceMs = opts.exitGraceMs ?? DEFAULT_EXIT_GRACE_MS;
+    this.stallMs = opts.stallMs ?? DEFAULT_STALL_MS;
+    this.appServerTimeoutMs = opts.appServerTimeoutMs ?? DEFAULT_APP_SERVER_TIMEOUT_MS;
+    this.usagePollIntervalMs = opts.usagePollIntervalMs ?? DEFAULT_USAGE_POLL_INTERVAL_MS;
   }
 
   /**
    * `exec [options] [resume <id>] -`. Every option goes before `resume`, where the exec command accepts all of
-   * them; the sandbox goes through config on resume because `exec resume` rejects `-s`.
+   * them; the sandbox goes through config on resume because `exec resume` rejects `-s`. `readOnlySandbox` is what
+   * read-only jobs get (see readOnlySandbox).
    */
-  buildArgs(job: AgentJob, files: CodexRunFiles): string[] {
-    const sandbox = this.sandboxFor(job);
+  buildArgs(job: AgentJob, files: CodexRunFiles, readOnlySandbox: Sandbox = "read-only"): string[] {
+    const sandbox = this.sandboxFor(job, readOnlySandbox);
     const args = ["exec", "--json", "--skip-git-repo-check", "-C", job.cwd, "-m", job.model];
     args.push("-c", tomlSetting("model_reasoning_effort", job.effort), "-c", tomlSetting("approval_policy", "never"));
     if (job.resumeSessionId === undefined) args.push("-s", sandbox);
@@ -127,6 +192,12 @@ export class CodexRunner implements AgentRunner {
         this.logger?.warn("codex runner: onEvent handler threw", { job: job.id, error: errorMessage(err) });
       }
     };
+    // An aborted run starts nothing (runProcess sees the signal), so it needs no preparation either.
+    const aborted = opts.signal?.aborted === true;
+    const refusal = aborted ? undefined : await this.loginRefusal(job, emit);
+    if (refusal) return refusal;
+    const readOnlySandbox = aborted ? "read-only" : await this.readOnlySandbox();
+    const unsandboxedReadOnly = job.access === "read-only" && this.sandboxFor(job, readOnlySandbox) === "danger-full-access";
     const files: CodexRunFiles = { lastMessageFile: join(workDir, "last-message.txt") };
     if (job.outputSchema !== undefined) {
       files.schemaFile = join(workDir, "output-schema.json");
@@ -137,8 +208,10 @@ export class CodexRunner implements AgentRunner {
       }
     }
 
+    const guard = unsandboxedReadOnly ? await snapshotWorktree(job.cwd) : undefined;
     const stream = new StreamState();
-    const proc = await this.spawn(job, files, stream, emit, opts.signal);
+    const proc = await this.spawn(job, files, stream, emit, opts.signal, readOnlySandbox, unsandboxedReadOnly);
+    if (guard) await this.undoChanges(job, guard, emit);
     const text = readTextOr(files.lastMessageFile).trim() || stream.finalText;
     const callerAborted = proc.aborted && opts.signal?.aborted === true;
     const verdict = classify(job, proc, stream, text, callerAborted);
@@ -149,6 +222,7 @@ export class CodexRunner implements AgentRunner {
       exitCode: proc.exitCode,
       durationMs: proc.durationMs,
     });
+    if (!callerAborted && proc.spawnError === undefined) await this.readUsage(emit);
     return {
       outcome: verdict.outcome,
       text,
@@ -162,45 +236,159 @@ export class CodexRunner implements AgentRunner {
     };
   }
 
-  /** Runs codex, stopping it if it outlives its ended turn by the exit grace (a hung shutdown, not more work). */
+  /**
+   * Runs codex, stopping it if it outlives its ended turn by the exit grace (a hung shutdown, not more work), or once
+   * it has been retrying a lost connection or a failing server for the stall time without any progress: codex waits
+   * for the network indefinitely, and the outage is the quota's to wait out (see classify), not this run's.
+   */
   private async spawn(
     job: AgentJob,
     files: CodexRunFiles,
     stream: StreamState,
     emit: (event: RunEvent) => void,
     callerSignal: AbortSignal | undefined,
+    readOnlySandbox: Sandbox,
+    unsandboxedReadOnly: boolean,
   ): Promise<SpawnResult> {
-    const lingering = new AbortController();
+    const ourStop = new AbortController();
     let graceTimer: NodeJS.Timeout | undefined;
-    const stopLingering = (): void => {
-      const data = { job: job.id, graceMs: this.exitGraceMs };
-      this.logger?.warn("codex did not exit after its turn ended; stopping it", data);
-      lingering.abort();
+    let stallTimer: NodeJS.Timeout | undefined;
+    const stop = (message: string, data: Record<string, unknown>): void => {
+      if (ourStop.signal.aborted) return;
+      this.logger?.warn(message, { job: job.id, ...data });
+      ourStop.abort();
     };
     try {
       return await runProcess({
         command: this.command,
-        args: this.buildArgs(job, files),
+        args: this.buildArgs(job, files, readOnlySandbox),
         cwd: job.cwd,
         env: scrubEnv(this.env ?? process.env),
-        stdin: fullPrompt(job),
+        stdin: fullPrompt(job, unsandboxedReadOnly),
         timeoutMs: job.limits.timeoutMs,
-        signal: callerSignal === undefined ? lingering.signal : AbortSignal.any([callerSignal, lingering.signal]),
+        signal: callerSignal === undefined ? ourStop.signal : AbortSignal.any([callerSignal, ourStop.signal]),
         ...(job.logFile !== undefined && { teeStdoutTo: job.logFile }),
         onStdoutLine: (line) => {
           for (const event of parseJsonLine(line)) handleEvent(event, stream, emit);
-          if (stream.turnEnded) graceTimer ??= setTimeout(stopLingering, this.exitGraceMs);
+          if (stream.turnEnded) {
+            graceTimer ??= setTimeout(() => stop("codex did not exit after its turn ended; stopping it", { graceMs: this.exitGraceMs }), this.exitGraceMs);
+          }
+          if (stream.pendingError !== undefined && isTransientFailure(stream.pendingError)) {
+            const error = stream.pendingError;
+            stallTimer ??= setTimeout(() => stop("codex is stuck retrying a connection or server problem; stopping it", { stallMs: this.stallMs, error }), this.stallMs);
+          } else {
+            clearTimeout(stallTimer);
+            stallTimer = undefined;
+          }
         },
       });
     } finally {
       clearTimeout(graceTimer);
+      clearTimeout(stallTimer);
     }
   }
 
-  /** Codex has no switch that turns its shell and file tools off; for a noTools job read-only is the closest thing. */
-  private sandboxFor(job: AgentJob): Sandbox {
-    return job.access === "workspace-write" && !job.noTools ? this.writeSandbox : "read-only";
+  /**
+   * Codex has no switch that turns its shell and file tools off; for a noTools job read-only is the closest thing,
+   * and a sandbox that fails every command is closer still.
+   */
+  private sandboxFor(job: AgentJob, readOnlySandbox: Sandbox): Sandbox {
+    if (job.noTools) return "read-only";
+    return job.access === "workspace-write" ? this.writeSandbox : readOnlySandbox;
   }
+
+  /**
+   * The sandbox for read-only jobs. Codex's read-only sandbox runs every command through bubblewrap, which needs user
+   * namespaces; Docker's default seccomp profile forbids them, so inside the Mission Control container every command
+   * a read-only agent runs (cat, rg, ls) would fail and the agent would work blind. Where write jobs already rely on
+   * the container (danger-full-access), one probe tells whether the read-only sandbox works; if not, read-only jobs
+   * run without it, told so in the brief, and the worktree guard undoes whatever they change.
+   */
+  private readOnlySandbox(): Promise<Sandbox> {
+    if (this.writeSandbox !== "danger-full-access") return Promise.resolve("read-only");
+    this.readOnlyMode ??= this.probeReadOnlySandbox();
+    return this.readOnlyMode;
+  }
+
+  private async probeReadOnlySandbox(): Promise<Sandbox> {
+    const probe = await runProcess({
+      command: this.command,
+      args: ["sandbox", "-c", tomlSetting("sandbox_mode", "read-only"), "--", "true"],
+      cwd: ensureDir(this.tmpDir),
+      env: scrubEnv(this.env ?? process.env),
+      timeoutMs: SANDBOX_PROBE_TIMEOUT_MS,
+    });
+    // A missing codex is reported by the run itself.
+    if (probe.exitCode === 0 || probe.spawnError !== undefined) return "read-only";
+    const detail = clip(lastLines(probe.stderr, 3).trim() || (probe.timedOut ? "it did not answer" : `exit code ${probe.exitCode}`), 500);
+    this.logger?.warn("codex's read-only sandbox does not work here; read-only jobs run without it, and changes they make are undone", { detail });
+    return "danger-full-access";
+  }
+
+  /** Puts back whatever an unsandboxed read-only run changed in its worktree. */
+  private async undoChanges(job: AgentJob, guard: WorktreeSnapshot, emit: (event: RunEvent) => void): Promise<void> {
+    try {
+      const undone = await restoreWorktree(guard);
+      if (undone.length === 0) return;
+      const paths = undone.slice(0, 20).join(", ") + (undone.length > 20 ? `, … (${undone.length} in all)` : "");
+      this.logger?.warn("a read-only codex run changed files; they were put back", { job: job.id, paths });
+      emit({ type: "progress", text: clip(`read-only run changed files, put back: ${paths}`, PROGRESS_CHARS) });
+    } catch (err) {
+      this.logger?.warn("could not check what a read-only codex run changed", { job: job.id, error: errorMessage(err) });
+    }
+  }
+
+  /**
+   * Before the first run: how codex is logged in, from its app server. An API-key (or Bedrock) login bills
+   * pay-per-use credits, not the ChatGPT plan, so no run starts on it; it needs a human, like a lost login. The same
+   * reading gives the first usage windows. Unknown (an older codex, a timeout) lets the run go ahead.
+   */
+  private async loginRefusal(job: AgentJob, emit: (event: RunEvent) => void): Promise<RunResult | undefined> {
+    this.firstReading ??= this.askAppServer(true);
+    const reading = await this.firstReading;
+    if (!this.firstUsageReported) {
+      this.firstUsageReported = true;
+      for (const info of reading?.utilization ?? []) emit({ type: "utilization", info });
+    }
+    const error = billingLoginError(reading?.accountType);
+    if (error === undefined) return undefined;
+    this.logger?.warn("codex run refused: its login bills pay-per-use credits", { job: job.id, account: reading?.accountType });
+    return { outcome: "auth", text: "", usage: emptyUsage(), error, durationMs: 0, exitCode: null };
+  }
+
+  /** After a run, at most every usagePollIntervalMs: how full codex's usage windows are, for pacing. */
+  private async readUsage(emit: (event: RunEvent) => void): Promise<void> {
+    if (Date.now() - this.lastUsageReadAt < this.usagePollIntervalMs) return;
+    const reading = await this.askAppServer(false);
+    for (const info of reading?.utilization ?? []) emit({ type: "utilization", info });
+  }
+
+  private async askAppServer(account: boolean): Promise<CodexAccountReading | undefined> {
+    this.lastUsageReadAt = Date.now();
+    try {
+      return await readCodexAccount({
+        command: this.command,
+        env: scrubEnv(this.env ?? process.env),
+        cwd: ensureDir(this.tmpDir),
+        timeoutMs: this.appServerTimeoutMs,
+        account,
+      });
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+/** Why a login that bills somewhere other than the ChatGPT plan must not run, or undefined for any other login. */
+function billingLoginError(accountType: string | null | undefined): string | undefined {
+  const fix = "Log out of Codex (codex logout) and log in with your ChatGPT account (codex login --device-auth).";
+  if (accountType === "apiKey") {
+    return `Codex is logged in with an API key, which bills pay-per-use API credits instead of your ChatGPT plan, so the run was not started. ${fix}`;
+  }
+  if (accountType === "amazonBedrock") {
+    return `Codex is set up to use Amazon Bedrock, which bills your AWS account instead of your ChatGPT plan, so the run was not started. ${fix}`;
+  }
+  return undefined;
 }
 
 /** A `-c` override with a TOML string value: key="value". */
@@ -208,8 +396,9 @@ function tomlSetting(key: string, value: string): string {
   return `${key}=${JSON.stringify(value)}`; // JSON string escapes are valid TOML basic-string escapes
 }
 
-function fullPrompt(job: AgentJob): string {
-  return job.systemPrompt.trim() === "" ? job.prompt : `${job.systemPrompt}${PROMPT_SEPARATOR}${job.prompt}`;
+function fullPrompt(job: AgentJob, unsandboxedReadOnly = false): string {
+  const instructions = unsandboxedReadOnly ? [job.systemPrompt.trim(), NO_SANDBOX_NOTICE].filter(Boolean).join("\n\n") : job.systemPrompt;
+  return instructions.trim() === "" ? job.prompt : `${instructions}${PROMPT_SEPARATOR}${job.prompt}`;
 }
 
 // ───────────────────────────── Event stream ─────────────────────────────
@@ -347,7 +536,19 @@ function failureTextVerdict(text: string): Verdict | undefined {
   const limit = detectLimitText(text, "codex", Date.now());
   if (limit) return { outcome: "limited", limit, error: limit.raw };
   if (AUTH_PATTERN.test(text)) return { outcome: "auth", error: lineMatching(text, AUTH_PATTERN) };
+  if (NETWORK_ERROR.test(text)) {
+    // A lost connection or a server error says nothing about the job: a throttle, as the Claude runner reports it,
+    // so the quota backs off and the executor retries without counting the attempt against the work.
+    const raw = lineMatching(text, NETWORK_ERROR);
+    return { outcome: "limited", limit: { provider: "codex", kind: "throttle", raw }, error: raw };
+  }
   return undefined;
+}
+
+/** A retry notice about the connection or an overloaded provider, which waiting may fix: not a limit, not a login. */
+function isTransientFailure(text: string): boolean {
+  const verdict = failureTextVerdict(text);
+  return verdict?.outcome === "limited" && verdict.limit?.kind === "throttle";
 }
 
 /**

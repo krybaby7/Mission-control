@@ -1,5 +1,5 @@
 // Git operations for missions (repos, branches, worktrees, commits, merges, pushes), shelling out to the `git` CLI.
-import { createReadStream, existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, type Stats } from "node:fs";
+import { accessSync, constants as fsConstants, createReadStream, existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, type Stats } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -14,11 +14,15 @@ const FALLBACK_IDENTITY: ReadonlyArray<readonly [key: string, value: string]> = 
   ["user.name", "Mission Control"],
   ["user.email", "mission-control@localhost"],
 ];
-/** Prepended to every command: raw (unquoted) non-ASCII paths, and no color codes in output we parse. */
-const BASE_ARGS = ["-c", "core.quotepath=off", "-c", "color.ui=false"];
 /**
- * Also prepended unless a command opts in to hooks. `--no-verify` leaves post-checkout, post-commit, post-merge and
- * reference-transaction hooks running, and one that fails or hangs would fail an operation that already happened.
+ * Prepended to every command: raw (unquoted) non-ASCII paths, and no color codes in output we parse. No fsmonitor
+ * either: `core.fsmonitor` names a command git runs on status, add and commit, and agents can write the repo's config.
+ */
+const BASE_ARGS = ["-c", "core.quotepath=off", "-c", "color.ui=false", "-c", "core.fsmonitor=false"];
+/**
+ * Also prepended (except to read where the hooks are): no command runs a hook. `--no-verify` leaves post-checkout,
+ * post-commit, post-merge and reference-transaction hooks running, and one that fails or hangs would fail an operation
+ * that already happened; and agents can write the hooks, and the config naming their folder.
  */
 const NO_HOOKS = ["-c", "core.hooksPath=/dev/null"];
 /** Variables that pin git to one repository (they are set inside git hooks, for example); every call names its cwd instead. */
@@ -68,8 +72,11 @@ interface RunOptions {
   onStdoutLine?: (line: string) => void;
   /** Exit codes that are not a failure. Default [0]. */
   allow?: number[] | "any";
-  /** Run the repository's hooks, which are disabled by default. */
-  hooks?: boolean;
+  /**
+   * Leave `core.hooksPath` as the repository sets it, for reading where its hooks are. No command Mission Control
+   * runs may run a hook: agents can write them.
+   */
+  repoHooksPath?: boolean;
   /** Only `cwd` itself may hold the repository: a worktree that lost its .git never reaches an enclosing one. */
   rootOnly?: boolean;
 }
@@ -129,6 +136,20 @@ export class Git {
     const ref = result.stdout.trim();
     if (!ref.startsWith("refs/heads/")) throw new GitError(`${repo} is not on a branch (detached HEAD)`, result.stderr);
     return ref.slice("refs/heads/".length);
+  }
+
+  /**
+   * Puts the worktree at `cwd` back on `branch` when HEAD is on another branch or detached (an agent ran `git checkout
+   * -b`, `git switch` or checked out a commit), without touching its files or index: the next commit records the files
+   * as they are, on top of `branch`. A missing `branch` is created at HEAD. Returns false when HEAD was on `branch`.
+   */
+  async keepOnBranch(cwd: string, branch: string): Promise<boolean> {
+    const ref = `refs/heads/${refArg(branch)}`;
+    const head = await this.run(cwd, ["symbolic-ref", "-q", "HEAD"], { allow: [0, 1], rootOnly: true });
+    if (head.stdout.trim() === ref) return false;
+    if (!(await this.branchExists(cwd, branch))) await this.git(cwd, ["branch", "--no-track", refArg(branch), "HEAD"], { rootOnly: true });
+    await this.git(cwd, ["symbolic-ref", "HEAD", ref], { rootOnly: true });
+    return true;
   }
 
   async headSha(cwd: string, ref = "HEAD"): Promise<string> {
@@ -328,7 +349,9 @@ export class Git {
 
   /**
    * Pushes `branch` to origin under the same name. Only `<prefix>/…` branches, never forced; failures are returned.
-   * The repository's pre-push hook runs (Git LFS uploads objects there); a failing one fails the push.
+   * No hook runs: agents can write the hooks and the config naming their folder, and a hook would run with the push's
+   * credentials in reach. A repository with a pre-push hook (Git LFS uploads files there, husky runs checks) is not
+   * pushed, since skipping the hook could push something it would have stopped; the error says how to push by hand.
    */
   async push(repo: string, branch: string, prefix: string): Promise<{ ok: boolean; error?: string }> {
     if (prefix === "" || !branch.startsWith(`${prefix}/`)) {
@@ -336,8 +359,15 @@ export class Git {
     }
     try {
       if (!(await this.hasRemote(repo))) return { ok: false, error: "no remote" };
+      const hook = await this.prePushHook(repo);
+      if (hook !== undefined) {
+        return {
+          ok: false,
+          error: `the repository has a pre-push hook (${hook}), which Mission Control does not run, so it did not push. To push, run in the app's folder: git push origin ${branch}`,
+        };
+      }
       const refspec = `refs/heads/${branch}:refs/heads/${branch}`; // no "+": a non-fast-forward push is rejected
-      const result = await this.run(repo, ["push", "--quiet", "origin", refspec], { allow: "any", hooks: true });
+      const result = await this.run(repo, ["push", "--quiet", "origin", refspec], { allow: "any" });
       return result.exitCode === 0 ? { ok: true } : { ok: false, error: outputTail(result) };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
@@ -371,7 +401,7 @@ export class Git {
     const captureBytes = opts.stdoutFile === undefined ? this.maxOutputBytes : DIFF_CAPTURE_BYTES;
     const result = await runProcess({
       command: "git",
-      args: [...BASE_ARGS, ...(opts.hooks ? [] : NO_HOOKS), ...args],
+      args: [...BASE_ARGS, ...(opts.repoHooksPath ? [] : NO_HOOKS), ...args],
       cwd,
       env: gitEnv(opts.rootOnly ? cwd : undefined),
       stdin: opts.stdin,
@@ -396,7 +426,25 @@ export class Git {
     return result.exitCode === 0 ? result.stdout.trim() : undefined;
   }
 
-  private async isAncestor(repo: string, ancestor: string, descendant: string): Promise<boolean> {
+  /**
+   * The executable pre-push hook git would run in `repo` (in the folder `core.hooksPath` names, else `.git/hooks`), as
+   * git prints its path (relative to `repo` when inside it); undefined when there is none.
+   */
+  private async prePushHook(repo: string): Promise<string | undefined> {
+    const path = (await this.git(repo, ["rev-parse", "--git-path", "hooks/pre-push"], { repoHooksPath: true })).trim();
+    if (path === "") return undefined;
+    try {
+      const full = resolve(repo, path);
+      if (!statSync(full).isFile()) return undefined;
+      accessSync(full, fsConstants.X_OK);
+      return path;
+    } catch {
+      return undefined; // none, or not executable (git skips it too)
+    }
+  }
+
+  /** True when `ancestor` is `descendant` or one of its ancestors. */
+  async isAncestor(repo: string, ancestor: string, descendant: string): Promise<boolean> {
     const result = await this.run(repo, ["merge-base", "--is-ancestor", ancestor, descendant], { allow: [0, 1] });
     return result.exitCode === 0;
   }

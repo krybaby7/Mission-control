@@ -108,7 +108,7 @@ describe("defaultConfig", () => {
       maxAgentRunsPerMission: 150,
     });
     expect(c.failover).toEqual({ enabled: true });
-    expect(c.pacing).toEqual({ maxFiveHourUtilization: 0.97, maxWeeklyUtilization: 0.85 });
+    expect(c.pacing).toEqual({ maxFiveHourUtilization: 0.97, maxWeeklyUtilization: 0.85, maxWeeklySharePerNight: 0.35 });
     expect(c.notify).toEqual({ ntfyUrl: "" });
     expect(c.git).toEqual({ push: false, branchPrefix: "mc" });
     expect(c.permissions).toEqual({
@@ -531,6 +531,16 @@ describe("validateConfig", () => {
       const problems = problemsAfter((c) => (c.pacing.maxFiveHourUtilization = bad));
       expect(problems, String(bad)).toHaveLength(1);
       expect(problems[0]).toMatch(/^pacing\.maxFiveHourUtilization must be a number above 0 and at most 1\.5/);
+    }
+  });
+
+  it("accepts a per-night share of the weekly limit in (0, 1], or none", () => {
+    expect(problemsAfter((c) => (c.pacing.maxWeeklySharePerNight = 1))).toEqual([]);
+    expect(problemsAfter((c) => delete c.pacing.maxWeeklySharePerNight)).toEqual([]);
+    for (const bad of [0, -0.1, 1.01, "35%", Number.NaN]) {
+      const problems = problemsAfter((c) => ((c.pacing as Record<string, unknown>).maxWeeklySharePerNight = bad));
+      expect(problems, String(bad)).toHaveLength(1);
+      expect(problems[0]).toMatch(/^pacing\.maxWeeklySharePerNight must be a number above 0 and at most 1/);
     }
   });
 

@@ -248,7 +248,8 @@ describe("Dispatcher: greenfield", () => {
     expect(m.integrationWorktree).toBeUndefined();
     expect(existsSync(join(hh.store.worktreesDir(m.id), "_integration"))).toBe(false);
     expect(readReport(hh, m.id)).toContain("Tonight I built the fixture app.");
-    expect(hh.notifications).toEqual([{ title: "Fixture app: done (2/2 features)", message: `Report: ${hh.store.reportPath(m.id)}`, opts: { priority: "default" } }]);
+    // The report's own path is inside the container: the phone gets the command that shows it.
+    expect(hh.notifications).toEqual([{ title: "Fixture app: done (2/2 features)", message: `Read the report: mc report ${m.id}`, opts: { priority: "default" } }]);
 
     expect(events(hh, m.id, "stage").map((e) => e.data.to)).toEqual(["gate_a", "init", "features", "gate_c", "finalize", "complete"]);
     expect(events(hh, m.id, "feature.status").map((e) => `${e.data.feature}:${e.data.to}`)).toEqual([
@@ -536,13 +537,18 @@ describe("Dispatcher: escalation", () => {
     expect(gamma?.status).toBe("done");
     expect(hh.jobs.some((j) => labelOf(j).endsWith("-beta"))).toBe(false);
 
-    // Partly done: main still gets the finished work, the integration worktree stays, the report explains.
+    // Partly done: main still gets the finished work, the report explains. Nothing runs a finished mission again, so
+    // its integration checkout (and its node_modules) goes too; the branch keeps the work.
     expect(existsSync(join(m.repoPath, "src/gamma.mjs"))).toBe(true);
-    expect(m.integrationWorktree).toBeDefined();
+    expect(m.integrationWorktree).toBeUndefined();
+    expect(existsSync(join(hh.store.worktreesDir(m.id), "_integration"))).toBe(false);
+    expect(await hh.git.branchExists(m.repoPath, m.integrationBranch)).toBe(true);
     const report = readReport(hh, m.id);
     expect(report).toContain("Stuck: tried every escalation step, but its checks still failed (tried 2 times)");
     expect(report).toContain('Skipped: waiting on "Feature alpha", which was blocked');
-    expect(hh.notifications).toEqual([expect.objectContaining({ title: "Fixture app: partly done (1/3 features)", opts: { priority: "high" } })]);
+    expect(hh.notifications).toEqual([
+      { title: "Fixture app: partly done (1/3 features)", message: `Stuck: Feature alpha\nRead the report: mc report ${m.id}`, opts: { priority: "high" } },
+    ]);
   });
 
   it("blocks a feature the diagnosis says needs its owner, and asks for that decision", async () => {
@@ -605,7 +611,8 @@ describe("Dispatcher: escalation", () => {
   it.each([true, false])(
     "still rejects a failed attempt's test weakening after the diagnosis amends the tests (rewrite usable: %s)",
     async (usable) => {
-      const skipped = 'import test from "node:test";\n\ntest.skip("the app has a name", () => {});\n';
+      // A new test file: the guard puts back changes to test files that were already there, but new ones are the scan's.
+      const skipped = 'import test from "node:test";\n\ntest.skip("an extra check", () => {});\n';
       const hh = harness({
         features: [feature("greet")],
         agents: {
@@ -617,18 +624,18 @@ describe("Dispatcher: escalation", () => {
               return {
                 edit: (cwd) => {
                   implementFeature(cwd, "greet", "wrong");
-                  writeFile(cwd, "tests/smoke.test.mjs", skipped);
+                  writeFile(cwd, "tests/extra.test.mjs", skipped);
                 },
                 structured: buildOutput("tried", dispute),
               };
             }
-            if (call.n === 2) return byDefault("engineer")(job, call); // right code, but the skipped smoke test stays
+            if (call.n === 2) return byDefault("engineer")(job, call); // right code, but the skipped extra test stays
             return {
               edit: (cwd) => {
                 implementFeature(cwd, "greet");
-                writeScaffold(cwd);
+                rmSync(join(cwd, "tests/extra.test.mjs"));
               },
-              structured: buildOutput("restored the smoke test"),
+              structured: buildOutput("removed the skipped test"),
             };
           },
           architect: (job, call) =>
@@ -644,8 +651,8 @@ describe("Dispatcher: escalation", () => {
         [3, "build", OPUS, "high", "fail"],
         [4, "build", ASTRA, "high", "pass"],
       ]);
-      expect(m.features[0]?.attempts[2]?.summary).toMatch(/^weakened the tests: tests\/smoke\.test\.mjs: test-skip/);
-      expect(readFileSync(join(m.repoPath, "tests/smoke.test.mjs"), "utf8")).not.toContain("skip");
+      expect(m.features[0]?.attempts[2]?.summary).toMatch(/^weakened the tests: tests\/extra\.test\.mjs: test-skip/);
+      expect(existsSync(join(m.repoPath, "tests/extra.test.mjs"))).toBe(false);
       expect(events(hh, m.id, "tests.frozen")).toHaveLength(usable ? 2 : 1);
       const testsCommit = m.features[0]?.testsCommit ?? "";
       // The tests commit holds tests only: the attempt's code sits on top of it, where the scan sees it.
@@ -779,7 +786,11 @@ describe("Dispatcher: tests, review and gate C", () => {
     });
     const m = await hh.run(hh.createMission("greenfield").id);
 
-    expect(m.status).toBe("done");
+    // Every feature passed its checks, but farewell's blocker is still open: not "done", and the owner is told.
+    expect(m.status).toBe("partial");
+    expect(m.decisionsNeeded).toEqual([
+      "Have someone check the app before you rely on it: the reviewers' 1 serious finding on Feature farewell was not fixed. “Review notes” and “Technical details” list what the reviewers found.",
+    ]);
     const [greet, farewell] = m.features;
     expect(greet).toMatchObject({ reviewRounds: 1, openFindings: [finding("minor", "name could be clearer")] });
     expect(greet?.attempts.map((a) => [a.action, a.model, a.effort, a.outcome])).toEqual([
@@ -810,7 +821,7 @@ describe("Dispatcher: tests, review and gate C", () => {
       },
     });
     const m = await hh.run(hh.createMission("greenfield").id);
-    expect(m.status).toBe("done");
+    expect(m.status).toBe("partial"); // a major finding is still open
     expect(m.features[0]).toMatchObject({ status: "done", reviewRounds: 1, openFindings: [major] });
     expect(hh.jobsLabeled("review-greet")).toHaveLength(2);
     expect(hh.jobsLabeled("fix-greet")).toHaveLength(1);
@@ -847,7 +858,8 @@ describe("Dispatcher: tests, review and gate C", () => {
     expect(m.features[0]).toMatchObject({ status: "blocked", blockedReason: "its changes conflicted with work merged earlier (merge conflict)", worktree: undefined });
     expect(await hh.git.branchExists(m.repoPath, `mc/${m.id}--greet`)).toBe(true);
     expect(readFileSync(join(m.repoPath, "app.mjs"), "utf8")).toBe(motto("hello"));
-    expect(await hh.git.isClean(join(hh.store.worktreesDir(m.id), "_integration"))).toBe(true); // the merge was aborted
+    // The merge was aborted: the mission branch ends at the change made meanwhile.
+    expect((await hh.git.log(m.repoPath, m.integrationBranch, 1)).map((c) => c.subject)).toEqual(["a change made meanwhile"]);
   });
 
   it("turns blocking gate C findings into one more feature, then reviews again", async () => {
@@ -918,9 +930,13 @@ describe("Dispatcher: tests, review and gate C", () => {
       },
     });
     const m = await hh.run(hh.createMission("greenfield").id);
-    expect(m.status).toBe("done");
+    // The feature is done and the checks pass, but the final review's major finding was never fixed.
+    expect(m.status).toBe("partial");
     expect(m.features).toHaveLength(1);
     expect(m.notes).toContain("Final review (major): no input validation (app.mjs)");
+    expect(m.decisionsNeeded).toEqual([
+      "Have someone check the app before you rely on it: the final review found 1 serious problem that was not fixed. “Review notes” and “Technical details” list what the reviewers found.",
+    ]);
   });
 
   it("blocks only the feature whose step throws, and carries on with the others", async () => {
@@ -1117,8 +1133,14 @@ describe("Dispatcher: stopping, limits and budget", () => {
     const hh = harness({ configure: (c) => (c.failover.enabled = false), agents: { architect: () => ({ outcome: "auth", error: "Please run /login" }) } });
     const m = await hh.run(hh.createMission("greenfield").id);
     expect(m).toMatchObject({ status: "failed", stage: "spec", agentRuns: 0 });
-    expect(m.decisionsNeeded).toEqual(["Log in again: claude needs a new login. Then run the mission again."]);
-    expect(hh.notifications).toEqual([expect.objectContaining({ title: "Fixture app: failed", opts: { priority: "high", tags: ["warning"] } })]);
+    const decision =
+      "Log in again: claude needs a new login. In the Ubuntu window run `mc login-claude`. " +
+      `The next \`mc run\` then carries on with this mission by itself; to carry on right away, run \`mc run --mission ${m.id}\`.`;
+    expect(m.decisionsNeeded).toEqual([decision]);
+    expect(m.failure).toEqual({ reason: "No model could run: claude needs a new login.", decision, retryable: true });
+    expect(hh.notifications).toEqual([
+      { title: "Fixture app: failed", message: `${decision}\nRead the report: mc report ${m.id}`, opts: { priority: "high", tags: ["warning"] } },
+    ]);
     expect(existsSync(hh.store.reportPath(m.id))).toBe(true);
   });
 

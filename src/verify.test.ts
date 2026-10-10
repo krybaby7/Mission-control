@@ -1184,6 +1184,16 @@ describe("Verifier", () => {
     expect(log).toContain("lint ok\ntests ok\n");
   });
 
+  it("ignores the shell's login and rc files, which agents could rewrite outside the repository", async () => {
+    const home = makeTempDir("mc-verify-home-");
+    for (const file of [".bash_profile", ".profile", ".bashrc", ".bash_login"]) writeFileSync(join(home, file), "exit 0\n");
+    const withHome = new Verifier({ logsDir, timeoutMs: 20_000, env: { ...process.env, HOME: home } });
+    const result = await withHome.runFull(cwd, config("echo running tests; exit 1"));
+    expect(result.ok).toBe(false);
+    expect(result.exitCode).toBe(1);
+    expect(result.outputTail).toContain("running tests");
+  });
+
   it("reports a failing run with its exit code and a signature", async () => {
     const result = await verifier.runFull(cwd, config("echo 'FAIL tests/a.test.ts > adds'; echo 'AssertionError: expected 1 to be 2' >&2; exit 3"));
     expect(result.ok).toBe(false);

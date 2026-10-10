@@ -3,10 +3,20 @@
 // so it blocks forever when the caller leaves stdin open, exactly like the real CLI does.
 //
 // Environment:
-//   FAKE_CODEX_SCENARIO  steps to play, joined by "+" (see STEPS), e.g. "start+work+finish" (the default)
-//   FAKE_CODEX_RECORD    if set, write {argv, cwd, stdin, env, schema, pid} here as JSON
-//   FAKE_CODEX_MESSAGE   overrides the final agent message (and the -o file content)
-import { readFileSync, writeFileSync } from "node:fs";
+//   FAKE_CODEX_SCENARIO     steps to play, joined by "+" (see STEPS), e.g. "start+work+finish" (the default)
+//   FAKE_CODEX_RECORD       if set, write {argv, cwd, stdin, env, schema, pid} here as JSON
+//   FAKE_CODEX_MESSAGE      overrides the final agent message (and the -o file content)
+//   FAKE_CODEX_CALLS        if set, append one line per `sandbox` probe and app-server request here
+//   FAKE_CODEX_SANDBOX      "broken": `codex sandbox` fails as bubblewrap does in a default Docker container
+//   FAKE_CODEX_APP_SERVER   "missing" (no app-server subcommand) or "hang" (never answers); default answers
+//   FAKE_CODEX_ACCOUNT      account/read: "chatgpt" (default), "apiKey", "amazonBedrock" or "none" (not logged in)
+//   FAKE_CODEX_RATE_LIMITS  account/rateLimits/read's rateLimits snapshot as JSON; unset: an error, as for API keys
+//   FAKE_CODEX_WRITE_FILE   the "write-file" step writes "changed by codex" to this path (relative to the cwd)
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { createInterface } from "node:readline";
+
+if (process.argv[2] === "sandbox") sandboxProbe();
+if (process.argv[2] === "app-server") await appServer();
 
 const DEFAULT_MESSAGE =
   'Added the quota banner. It reads:\nYou\'ve hit your usage limit. Try again at 3:45 PM.\n' +
@@ -14,6 +24,7 @@ const DEFAULT_MESSAGE =
 const USAGE_LIMIT =
   "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit " +
   "https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:45 PM.";
+const NETWORK_WAIT = "Reconnecting... waiting for network (Connection failed: error sending request)";
 const AUTH_FAILURE =
   "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header";
 const REFRESH_FAILURE =
@@ -95,6 +106,37 @@ const STEPS = {
     process.exitCode = 1;
   },
   "turn-failed": () => turnFailed("The model produced an invalid tool call"),
+  /** The network went away: codex's retries give up (as codex 0.162.0 words it). */
+  offline: () => {
+    const lost = "stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)";
+    emit({ type: "error", message: `Reconnecting... 5/5 (${lost})` });
+    turnFailed(lost);
+  },
+  "server-error": () => turnFailed("unexpected status 503 Service Unavailable: upstream connect error"),
+  /** How codex 0.162.0 reports an HTTP 500 once its retries are spent. */
+  "high-demand": () => {
+    const text = "We’re currently experiencing high demand, which may cause temporary errors.";
+    emit({ type: "error", message: `Reconnecting... 1/1 (${text})` });
+    emit({ type: "error", message: text });
+    turnFailed(text);
+  },
+  "retry-limit-500": () => turnFailed("exceeded retry limit, last status: 500 Internal Server Error"),
+  /** The network is gone: codex 0.162.0 waits for it indefinitely, printing this every few seconds. */
+  "waiting-for-network": () => {
+    const waiting = () => emit({ type: "error", message: NETWORK_WAIT });
+    waiting();
+    setInterval(waiting, 50);
+  },
+  /** A short outage that codex rides out: two waiting notices, 250 ms without progress, then work goes on. */
+  "brief-outage": () => {
+    emit({ type: "error", message: NETWORK_WAIT });
+    emit({ type: "error", message: NETWORK_WAIT });
+    sleep(250);
+  },
+  /** 1.8 s of quiet work (a long command), with no error pending. */
+  pause: () => sleep(1_800),
+  /** Changes a file in the working directory, as an agent ignoring a read-only brief would. */
+  "write-file": () => writeFileSync(process.env.FAKE_CODEX_WRITE_FILE ?? "codex-was-here.txt", "changed by codex\n"),
   panic: () => {
     process.stderr.write("mcp server listening on 127.0.0.1:40123\n");
     process.stderr.write("thread 'main' panicked at core/src/codex.rs:42: boom\n");
@@ -130,6 +172,53 @@ function work() {
   });
 }
 
+/** `codex sandbox -c sandbox_mode="read-only" -- true`: works, or fails as bubblewrap does without user namespaces. */
+function sandboxProbe() {
+  logCall(`sandbox ${process.argv.slice(3).join(" ")}`);
+  if (process.env.FAKE_CODEX_SANDBOX === "broken") {
+    process.stderr.write(
+      "bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces.\n",
+    );
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+/** JSON-RPC over stdio, one message per line, answering as codex 0.162.0 does; it quits when stdin closes. */
+async function appServer() {
+  const mode = process.env.FAKE_CODEX_APP_SERVER ?? "answer";
+  if (mode === "missing") {
+    process.stderr.write("error: unrecognized subcommand 'app-server'\n");
+    process.exit(2);
+  }
+  for await (const line of createInterface({ input: process.stdin })) {
+    const request = JSON.parse(line);
+    if (request.method !== undefined) logCall(`app-server ${request.method}`);
+    if (mode === "hang" || request.id === undefined) continue;
+    process.stdout.write(`${JSON.stringify({ id: request.id, ...appServerAnswer(request.method) })}\n`);
+  }
+  process.exit(0);
+}
+
+function appServerAnswer(method) {
+  if (method === "initialize") return { result: { userAgent: "fake-codex/0.162.0", platformFamily: "unix" } };
+  if (method === "account/read") {
+    const type = process.env.FAKE_CODEX_ACCOUNT ?? "chatgpt";
+    const account = type === "none" ? null : type === "chatgpt" ? { type, email: null, planType: "plus" } : { type };
+    return { result: { account, requiresOpenaiAuth: true, workspaceRouting: null } };
+  }
+  if (method === "account/rateLimits/read") {
+    const limits = process.env.FAKE_CODEX_RATE_LIMITS;
+    if (limits === undefined) return { error: { code: -32600, message: "chatgpt authentication required to read rate limits" } };
+    return { result: { ordinaryUsageAllowed: true, rateLimits: JSON.parse(limits), rateLimitsByLimitId: null } };
+  }
+  return { error: { code: -32601, message: `unknown method ${method}` } };
+}
+
+function logCall(text) {
+  if (process.env.FAKE_CODEX_CALLS) appendFileSync(process.env.FAKE_CODEX_CALLS, `${text}\n`);
+}
+
 function turnFailed(text) {
   emit({ type: "turn.failed", error: { message: text } });
   process.exitCode = 1;
@@ -140,7 +229,12 @@ function agentMessage(text) {
 }
 
 function emit(event) {
-  process.stdout.write(`${JSON.stringify(event)}\n`);
+  process.stdout.write(`${JSON.stringify(event)}\n`); // synchronous for pipes on Linux, so sleep() keeps the order
+}
+
+/** Blocks the fake for `ms`, as codex is quiet while it waits; later steps' events come after the pause. */
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function writeLastMessage(text) {
