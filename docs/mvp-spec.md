@@ -1004,3 +1004,22 @@ Scenarios:
 3. **Limits:** the codex runner returns `limited` (resetsAt +10 min) → the executor fails over to claude (failover on), and the quota shows codex limited. With failover off and a FakeClock: it waits, then resumes after `advance`.
 4. **Stop & resume:** STOP during building → status `stopped`. Clear STOP, `runMission` again → completes.
 5. **Blocked feature:** the ladder is exhausted → the feature is blocked, its dependents are skipped, the mission is `partial`, and the report lists the reasons.
+
+---
+
+## Decisions after wave 1 (binding for W2/W3)
+
+1. **Limit detection only on error text.**
+   - Runners call `detectLimitText` only on: failed or `is_error` result text, `errors[]`, stderr, `turn.failed.error.message`, and Codex `error` events once the run has failed.
+   - Never call it on a successful result or agent message: "added rate limiting, returns 429" must not read as a limit.
+   - A rejected `rate_limit_event` is authoritative on its own.
+2. **Agent verify output is `VerifyConfigOutput`** (nullable fields, in `types.ts`). `OnboardOutput.verify` and `InitOutput.verify` use it. Always convert with `normalizeVerifyConfig` before storing `Mission.verify`.
+3. **Branch names honor `config.git.branchPrefix`.**
+   - `MissionStore.createMission` sets `mc/<id>`. When the dispatcher first runs a mission, it sets `m.integrationBranch = <prefix>/<id>` if that differs.
+   - Unit branches are `<integrationBranch>--<featureId>`.
+4. **`MC_HOME`** sets both the config location and `config.home` (`loadConfig` handles this). Tests must set `MC_HOME` to a temp dir and never touch the real home.
+5. **Git identity:** `Git.commitAll` and `Git.merge` already pass a fallback identity, so feature missions work without a global git config.
+6. **Reports in Docker:** `scripts/mc-docker.sh copy-reports` copies reports out of the volume, so the CLI doesn't need that command. Night summary links must be relative to `<home>/reports/`, e.g. `../missions/<id>/report.md`.
+7. **The lock** is pid-based. The Docker wrapper gives the `run` container a fixed name, so only one runs. No extra work is needed in `run.ts`.
+8. **`renderReport` / `buildReportFacts`** filter usage by `m.id` themselves. Pass the whole ledger.
+9. **`Verifier.install`** returns `ok:true` with `logFile:""` when there is no install command.
