@@ -22,12 +22,13 @@ export function createLogger(opts: LoggerOptions): LevelLogger {
   const minRank = LEVEL_RANK[opts.level ?? "info"];
   const file = opts.file;
   if (file) tryMkdir(dirname(file));
+  if (opts.console) ignoreStderrErrors();
 
   const log = (level: LogLevel, msg: string, data?: LogData): void => {
     if (LEVEL_RANK[level] < minRank) return;
     const now = new Date();
     if (file) appendQuietly(file, fileLine(now, level, msg, data));
-    if (opts.console) process.stderr.write(consoleLine(now, level, msg));
+    if (opts.console) writeConsole(consoleLine(now, level, msg));
   };
 
   return {
@@ -69,7 +70,21 @@ function consoleLine(now: Date, level: LogLevel, msg: string): string {
   return `${time} ${level} ${msg.replace(/\s*\r?\n\s*/g, " ")}\n`;
 }
 
-// Logging must never take the orchestrator down, so file errors are ignored.
+// Logging must never take the orchestrator down, so console and file errors are ignored.
+
+function ignoreError(): void {}
+
+/** A vanished reader (e.g. `mc run 2>&1 | tee night.log` after tee dies) makes stderr emit EPIPE, fatal without a listener. */
+function ignoreStderrErrors(): void {
+  if (!process.stderr.listeners("error").includes(ignoreError)) process.stderr.on("error", ignoreError);
+}
+
+function writeConsole(line: string): void {
+  // After an error the stream is destroyed; writing to it would only raise another one.
+  if (process.stderr.destroyed || !process.stderr.writable) return;
+  process.stderr.write(line);
+}
+
 function appendQuietly(file: string, line: string): void {
   try {
     appendFileSync(file, line);

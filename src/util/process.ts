@@ -1,5 +1,5 @@
 // Child processes: spawn in a fresh process group, stream lines, cap output, and kill whole trees.
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, type WriteStream } from "node:fs";
 import { dirname } from "node:path";
 import { finished } from "node:stream/promises";
@@ -16,7 +16,10 @@ export interface SpawnSpec {
   stdin?: string;
   timeoutMs: number;
   signal?: AbortSignal;
-  /** Complete lines, without the trailing "\n" ("\r\n" handled). An unterminated last line is delivered at exit. */
+  /**
+   * Complete lines, without the trailing "\n" ("\r\n" handled). An unterminated last line is delivered at exit.
+   * A line over 16 Mi characters is cut to its start (see LineSplitter). Errors thrown (or rejected) are ignored.
+   */
   onStdoutLine?: (line: string) => void;
   onStderrLine?: (line: string) => void;
   /** Append raw stdout to this file (its directory is created if needed). */
@@ -75,12 +78,18 @@ export function scrubEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
  * that moved to another group (e.g. via setsid). Never throws.
  */
 export function killTree(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
+  signalTree(pid, signal);
+}
+
+/** killTree, returning the escaped descendants it signalled so an escalation can still find them once orphaned. */
+function signalTree(pid: number, signal: NodeJS.Signals): ProcEntry[] {
   // 0, 1 and negative ids address our own group or every process: never allowed.
-  if (!Number.isInteger(pid) || pid <= 1) return;
+  if (!Number.isInteger(pid) || pid <= 1) return [];
   const escaped = descendantsOutsideGroup(pid); // snapshot before the tree falls apart
   if (!sendSignal(-pid, signal)) sendSignal(pid, signal);
   // Group members already got the signal; signalling them twice can trigger "second signal = force quit" handlers.
-  for (const child of escaped) sendSignal(child, signal);
+  for (const child of escaped) sendSignal(child.pid, signal);
+  return escaped;
 }
 
 function sendSignal(target: number, signal: NodeJS.Signals | 0): boolean {
@@ -100,22 +109,24 @@ interface ProcEntry {
   pid: number;
   ppid: number;
   pgrp: number;
+  /** Clock ticks after boot; tells a process apart from a later one that reuses its pid. */
+  startTime: string;
 }
 
 /** Descendants of rootPid whose process group is not rootPid's. Linux /proc only; [] elsewhere. */
-function descendantsOutsideGroup(rootPid: number): number[] {
+function descendantsOutsideGroup(rootPid: number): ProcEntry[] {
   const childrenOf = new Map<number, ProcEntry[]>();
   for (const entry of readProcTable()) {
     const siblings = childrenOf.get(entry.ppid) ?? [];
     siblings.push(entry);
     childrenOf.set(entry.ppid, siblings);
   }
-  const escaped: number[] = [];
+  const escaped: ProcEntry[] = [];
   const queue = [rootPid];
   for (let parent = queue.shift(); parent !== undefined; parent = queue.shift()) {
     for (const child of childrenOf.get(parent) ?? []) {
       queue.push(child.pid);
-      if (child.pgrp !== rootPid) escaped.push(child.pid);
+      if (child.pgrp !== rootPid) escaped.push(child);
     }
   }
   return escaped;
@@ -130,27 +141,37 @@ function readProcTable(): ProcEntry[] {
   }
   const table: ProcEntry[] = [];
   for (const name of names) {
-    if (!/^\d+$/.test(name)) continue;
-    try {
-      const stat = readFileSync(`/proc/${name}/stat`, "utf8");
-      // "pid (comm) state ppid pgrp …": comm may contain spaces and parentheses.
-      const [, ppid, pgrp] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-      table.push({ pid: Number(name), ppid: Number(ppid), pgrp: Number(pgrp) });
-    } catch {
-      // the process exited while we were scanning
-    }
+    const entry = /^\d+$/.test(name) ? readProcEntry(Number(name)) : undefined;
+    if (entry) table.push(entry);
   }
   return table;
+}
+
+function readProcEntry(pid: number): ProcEntry | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    // "pid (comm) state ppid pgrp … starttime …" (starttime is field 22): comm may contain spaces and parentheses.
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    return { pid, ppid: Number(fields[1]), pgrp: Number(fields[2]), startTime: fields[19] ?? "" };
+  } catch {
+    return undefined; // the process has exited
+  }
+}
+
+/** True while the recorded process exists, and its pid has not been reused by another one. */
+function stillRunning(entry: ProcEntry): boolean {
+  return readProcEntry(entry.pid)?.startTime === entry.startTime;
 }
 
 /**
  * Runs a command without a shell, in its own process group. Never rejects: spawn failures are
  * reported in `spawnError`. On timeout or abort the whole group is sent SIGTERM, then SIGKILL after 5 s.
+ * Members of the group still running when the command finishes (e.g. a backgrounded dev server) get the same.
  */
 export function runProcess(spec: SpawnSpec): Promise<SpawnResult> {
   const startedAt = Date.now();
   if (spec.signal?.aborted) return Promise.resolve(emptyResult({ aborted: true }));
-  let child: ChildProcessWithoutNullStreams;
+  let child: ChildProcess;
   try {
     child = spawn(spec.command, spec.args, {
       cwd: spec.cwd,
@@ -170,7 +191,7 @@ function emptyResult(fields: Partial<SpawnResult>): SpawnResult {
 }
 
 function supervise(
-  child: ChildProcessWithoutNullStreams,
+  child: ChildProcess,
   spec: SpawnSpec,
   startedAt: number,
   resolve: (result: SpawnResult) => void,
@@ -179,6 +200,8 @@ function supervise(
   const stderr = new StreamCapture(spec.maxBufferBytes ?? DEFAULT_MAX_STDERR_BYTES, spec.onStderrLine);
   const tee = spec.teeStdoutTo === undefined ? undefined : openTee(spec.teeStdoutTo);
   const pid = child.pid;
+  /** Descendants that left the group, as first signalled; orphaned later, so only this snapshot can find them. */
+  let escaped: ProcEntry[] = [];
   let stopReason: "timeout" | "abort" | undefined;
   let exit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
   let killTimer: NodeJS.Timeout | undefined;
@@ -189,11 +212,13 @@ function supervise(
   // so a stale pid can never hit an unrelated process.
   const terminate = () => {
     if (pid === undefined || killTimer || !groupAlive(pid)) return;
-    killTree(pid, "SIGTERM");
+    escaped = signalTree(pid, "SIGTERM");
     killTimer = setTimeout(() => {
       if (groupAlive(pid)) killTree(pid, "SIGKILL");
+      for (const proc of escaped) if (stillRunning(proc)) sendSignal(proc.pid, "SIGKILL");
     }, KILL_GRACE_MS);
   };
+  const anythingLeftToKill = () => (pid !== undefined && groupAlive(pid)) || escaped.some(stillRunning);
   const stop = (reason: "timeout" | "abort") => {
     stopReason ??= reason;
     terminate();
@@ -210,8 +235,9 @@ function supervise(
     clearTimeout(timeoutTimer);
     clearTimeout(pipeTimer);
     spec.signal?.removeEventListener("abort", onAbort);
+    terminate(); // leftover group members outlive their parent otherwise
     // Don't hold the event loop open for a SIGKILL that has nothing left to kill.
-    if (killTimer && pid !== undefined && !groupAlive(pid)) clearTimeout(killTimer);
+    if (killTimer && !anythingLeftToKill()) clearTimeout(killTimer);
     const result: SpawnResult = {
       exitCode: exit?.code ?? null,
       signal: exit?.signal ?? null,
@@ -225,28 +251,31 @@ function supervise(
     void (tee ? tee.close() : Promise.resolve()).then(() => resolve(result));
   };
 
-  child.stdout.on("data", (chunk: Buffer) => {
-    stdout.push(chunk);
-    tee?.write(chunk);
-  });
-  child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-  // EPIPE when the child exits without reading its input: expected, not a failure of ours.
-  child.stdin.on("error", () => {});
-  child.stdin.end(spec.stdin);
-
   child.on("error", (err) => {
     // Without a pid the process never started; other errors (e.g. a failed kill) are not fatal.
     if (child.pid === undefined) settle(describeSpawnError(err, spec));
   });
+  // On EMFILE/ENFILE Node gives up before creating the stdio streams; the "error" handler above reports it.
+  const { stdin: stdinPipe, stdout: stdoutPipe, stderr: stderrPipe } = child;
+  if (!stdinPipe || !stdoutPipe || !stderrPipe) return;
+
+  stdoutPipe.on("data", (chunk: Buffer) => {
+    stdout.push(chunk);
+    tee?.write(chunk);
+  });
+  stderrPipe.on("data", (chunk: Buffer) => stderr.push(chunk));
+  // EPIPE when the child exits without reading its input: expected, not a failure of ours.
+  stdinPipe.on("error", () => {});
+  stdinPipe.end(spec.stdin);
+
   child.on("exit", (code, signal) => {
     exit = { code, signal };
     clearTimeout(timeoutTimer);
     spec.signal?.removeEventListener("abort", onAbort);
     // A leftover background descendant may hold stdout/stderr open forever; don't wait on it.
     pipeTimer = setTimeout(() => {
-      terminate();
-      child.stdout.destroy();
-      child.stderr.destroy();
+      stdoutPipe.destroy();
+      stderrPipe.destroy();
       settle();
     }, STDIO_GRACE_MS);
   });
@@ -309,10 +338,13 @@ class StreamCapture {
 
   private deliver(lines: string[]): void {
     for (const line of lines) {
+      // A callback error surfaces inside a stream event and would crash the process; drop it. The callback is
+      // typed `void`, but an async one returns a promise whose rejection would be just as fatal.
       try {
-        this.onLine?.(line);
+        const result: unknown = this.onLine?.(line);
+        if (result instanceof Promise) result.catch(() => {});
       } catch {
-        // A throwing callback runs inside a stream event and would crash the process; drop the error.
+        // dropped: see above
       }
     }
   }

@@ -226,6 +226,27 @@ describe("runProcess: line callbacks", () => {
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toBe("a\nb\n");
   });
+
+  it("survives an async callback that rejects (no unhandled rejection)", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const seen: string[] = [];
+      const r = await runNode(`console.log("a"); console.log("b")`, {
+        onStdoutLine: async (line) => {
+          seen.push(line);
+          throw new Error("async callback bug");
+        },
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(r.exitCode).toBe(0);
+      expect(seen).toEqual(["a", "b"]);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
 });
 
 describe("runProcess: output caps", () => {
@@ -332,6 +353,25 @@ describe("runProcess: timeout and abort kill the whole tree", () => {
     expect(await waitUntilDead(pidFrom(r.stdout, "escaped"))).toBe(true);
   });
 
+  it.runIf(hasProc)("SIGKILLs an escaped descendant that ignores SIGTERM, though the group is gone by then", async () => {
+    const ac = new AbortController();
+    const grandchild = `process.on("SIGTERM", () => {}); console.log("ready"); ${HANG}`;
+    const script = `
+      const g = require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(grandchild)}], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
+      g.stdout.once("data", () => console.log("escaped " + g.pid));
+      ${HANG}`;
+    const r = await runNode(script, {
+      signal: ac.signal,
+      onStdoutLine: (line) => {
+        if (line.startsWith("escaped")) ac.abort();
+      },
+    });
+    const escaped = pidFrom(r.stdout, "escaped");
+    expect(r).toMatchObject({ aborted: true, signal: "SIGTERM" });
+    expect(isAlive(escaped)).toBe(true); // it ignored the SIGTERM
+    expect(await waitUntilDead(escaped, 8_000)).toBe(true);
+  }, 20_000);
+
   it("escalates to SIGKILL after 5 s when SIGTERM is ignored", async () => {
     const r = await runNode(`process.on("SIGTERM", () => console.log("ignoring SIGTERM")); ${HANG}`, { timeoutMs: 200 });
     expect(r).toMatchObject({ timedOut: true, signal: "SIGKILL", exitCode: null });
@@ -376,6 +416,25 @@ describe("runProcess: timeout and abort kill the whole tree", () => {
     expect(r.durationMs).toBeLessThan(10_000);
     expect(await waitUntilDead(pidFrom(r.stdout, "background"))).toBe(true);
   }, 30_000);
+
+  it("terminates leftover group members that do not hold our pipes once the command exits", async () => {
+    const script = `${spawnGrandchild("background", `{ stdio: "ignore" }`)} process.exit(0);`;
+    const r = await runNode(script);
+    expect(r).toMatchObject({ exitCode: 0, signal: null, timedOut: false, aborted: false });
+    expect(r.durationMs).toBeLessThan(2_000);
+    expect(await waitUntilDead(pidFrom(r.stdout, "background"))).toBe(true);
+  });
+
+  it("escalates to SIGKILL for a leftover group member that ignores SIGTERM", async () => {
+    const stubborn = `process.on("SIGTERM", () => {}); console.log("ready"); ${HANG}`;
+    const script = `
+      const g = require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(stubborn)}], { stdio: ["ignore", "pipe", "ignore"] });
+      g.stdout.once("data", () => { console.log("background " + g.pid); process.exit(0); });`;
+    const r = await runNode(script);
+    const leftover = pidFrom(r.stdout, "background");
+    expect(r.exitCode).toBe(0);
+    expect(await waitUntilDead(leftover, 8_000)).toBe(true);
+  }, 20_000);
 });
 
 describe("scrubEnv", () => {

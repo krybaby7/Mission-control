@@ -12,12 +12,15 @@ export const systemClock: Clock = {
   now: () => Date.now(),
   // node:timers/promises rejects with an Error named "AbortError" when the signal fires.
   sleep: async (ms, signal) => {
-    await delay(clampDelay(ms), undefined, { signal });
+    if (Number.isNaN(ms)) throw nanDurationError();
+    // Infinity waits as long as a timer can (~24.8 days), i.e. until aborted in practice.
+    await delay(Math.min(Math.max(ms, 0), MAX_TIMER_MS), undefined, { signal });
   },
 };
 
-function clampDelay(ms: number): number {
-  return Number.isFinite(ms) ? Math.min(Math.max(ms, 0), MAX_TIMER_MS) : MAX_TIMER_MS;
+/** A NaN duration is a caller bug (e.g. arithmetic on an unparsed date); both clocks reject it the same way. */
+function nanDurationError(): RangeError {
+  return new RangeError("sleep: ms must be a number, got NaN");
 }
 
 interface Sleeper {
@@ -40,10 +43,11 @@ export class FakeClock implements Clock {
     return this.current;
   }
 
-  /** Resolves once advance() reaches now()+ms. A non-positive ms resolves immediately. */
+  /** Resolves once advance() reaches now()+ms. A non-positive ms resolves immediately; NaN rejects. */
   sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    if (Number.isNaN(ms)) return Promise.reject(nanDurationError());
     if (signal?.aborted) return Promise.reject(abortError(signal));
-    if (!(ms > 0)) return Promise.resolve();
+    if (ms <= 0) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const onAbort = () => {
         this.sleepers = this.sleepers.filter((s) => s !== sleeper);

@@ -26,6 +26,17 @@ describe("systemClock", () => {
     await expect(systemClock.sleep(10_000, ac.signal)).rejects.toMatchObject({ name: "AbortError" });
   });
 
+  it("rejects a NaN duration with a RangeError instead of sleeping for weeks", async () => {
+    await expect(systemClock.sleep(Number.NaN)).rejects.toBeInstanceOf(RangeError);
+  });
+
+  it("treats an infinite duration as 'until aborted'", async () => {
+    const ac = new AbortController();
+    const sleeping = systemClock.sleep(Number.POSITIVE_INFINITY, ac.signal);
+    setTimeout(() => ac.abort(), 20);
+    await expect(sleeping).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("rejects with an AbortError when aborted mid-sleep", async () => {
     const ac = new AbortController();
     const started = Date.now();
@@ -115,6 +126,21 @@ describe("FakeClock", () => {
     await expect(clock.sleep(0)).resolves.toBeUndefined();
     await expect(clock.sleep(-10)).resolves.toBeUndefined();
     expect(clock.pendingSleeps()).toBe(0);
+  });
+
+  it("rejects a NaN duration with a RangeError, like systemClock", async () => {
+    const clock = new FakeClock(0);
+    await expect(clock.sleep(Number.NaN)).rejects.toBeInstanceOf(RangeError);
+    expect(clock.pendingSleeps()).toBe(0);
+  });
+
+  it("never wakes an infinite sleep on a finite advance", async () => {
+    const clock = new FakeClock(0);
+    let woke = false;
+    void clock.sleep(Number.POSITIVE_INFINITY).then(() => (woke = true));
+    await clock.advance(1e12);
+    expect(woke).toBe(false);
+    expect(clock.pendingSleeps()).toBe(1);
   });
 
   it("rejects an aborted sleep with an AbortError and forgets it", async () => {

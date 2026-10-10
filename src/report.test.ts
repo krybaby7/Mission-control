@@ -1,0 +1,780 @@
+import { execFileSync, execSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildReportFacts, collectScreenshots, howToRun, renderReport, usageSummary } from "./report.js";
+import type { Feature, Mission, ReportProseOutput, UsageRecord } from "./types.js";
+
+// ───────────────────────────── Fixtures ─────────────────────────────
+
+const MISSION_ID = "2026-10-09-habit-tracker";
+
+function feature(f: Partial<Feature> & Pick<Feature, "id" | "title">): Feature {
+  return {
+    story: `You can ${f.title.toLowerCase()}.`,
+    acceptance: [],
+    kind: "standard",
+    deps: [],
+    status: "pending",
+    rung: 0,
+    attempts: [],
+    frozenTests: [],
+    reviewRounds: 0,
+    openFindings: [],
+    ...f,
+  };
+}
+
+/** A night with two features done, one stuck, one skipped, a decision, review findings and usage. */
+function realisticMission(): Mission {
+  const assumptions = ["No login: it is a single-user app on your computer.", "Your habits are saved in a file on this computer."];
+  return {
+    id: MISSION_ID,
+    kind: "greenfield",
+    title: "Habit tracker",
+    request: "Build me a habit tracker where I can add habits and tick them off each day.",
+    repoPath: "/home/pwuser/mc-apps/habit-tracker",
+    baseBranch: "main",
+    integrationBranch: `mc/${MISSION_ID}`,
+    integrationWorktree: `/home/pwuser/.mission-control/worktrees/${MISSION_ID}/_integration`,
+    baseSha: "0123456789abcdef0123456789abcdef01234567",
+    profile: "mixed",
+    roleOverrides: [],
+    status: "partial",
+    stage: "complete",
+    createdAt: "2026-10-09T21:00:00.000Z",
+    updatedAt: "2026-10-10T05:00:00.000Z",
+    spec: {
+      appName: "Habit Tracker",
+      summary: "A simple app to keep track of your daily habits",
+      features: [],
+      assumptions,
+      uiContract: "Home page at /, button 'Add habit' (data-testid=add-habit)",
+    },
+    features: [
+      feature({
+        id: "add-habit",
+        title: "Add a habit",
+        story: "You can add a new habit with a name.",
+        status: "done",
+        commit: "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd",
+        builtBy: "codex",
+        attempts: [attempt({ outcome: "pass" })],
+        openFindings: [
+          { severity: "minor", file: null, description: "The button label could be clearer.", suggestedTest: null },
+          {
+            severity: "major",
+            file: "src/app/page.tsx",
+            description: "Empty habit names are accepted.",
+            suggestedTest: "Submitting an empty name shows an error.",
+          },
+        ],
+      }),
+      feature({
+        id: "tick-habit",
+        title: "Tick off a habit",
+        status: "done",
+        commit: "1111111111222222222233333333334444444444",
+        builtBy: "claude",
+        attempts: [attempt({ outcome: "pass" })],
+      }),
+      feature({
+        id: "streaks",
+        title: "Streaks",
+        status: "blocked",
+        deps: ["tick-habit"],
+        branch: `mc/${MISSION_ID}--streaks`,
+        blockedReason: "the streak counter kept getting the dates wrong around midnight",
+        attempts: [
+          attempt({ rung: 0, outcome: "fail", signature: "abc123def456", summary: "2 tests failed" }),
+          attempt({ rung: 1, outcome: "fail", signature: "abc123def456", summary: "2 tests failed" }),
+          attempt({ rung: 2, action: "diagnose", outcome: "error", summary: "decided to block" }),
+        ],
+      }),
+      feature({
+        id: "share-progress",
+        title: "Share progress",
+        status: "skipped",
+        deps: ["streaks"],
+        blockedReason: "waiting on streaks, which was blocked",
+      }),
+    ],
+    baselineBroken: false,
+    baselineFailures: [],
+    verify: { install: "npm install", full: "npm run verify", tests: "node scripts/mc-test.mjs {files}", testGlobs: ["tests/**"] },
+    decisionsNeeded: ["Should a streak survive a skipped weekend?"],
+    gateCRounds: 0,
+    agentRuns: 14,
+    notes: [...assumptions, "Restored src/app/page.tsx, which the test author changed."],
+  };
+}
+
+function attempt(a: Partial<Feature["attempts"][number]>): Feature["attempts"][number] {
+  return {
+    rung: 0,
+    action: "build",
+    provider: "codex",
+    model: "gpt-6.1-sol",
+    effort: "medium",
+    outcome: "pass",
+    summary: "",
+    at: "2026-10-10T01:00:00.000Z",
+    ...a,
+  };
+}
+
+function usageRecord(r: Partial<UsageRecord> & Pick<UsageRecord, "provider" | "model">): UsageRecord {
+  return {
+    at: "2026-10-10T01:00:00.000Z",
+    missionId: MISSION_ID,
+    role: "engineer",
+    effort: "medium",
+    outcome: "ok",
+    durationMs: 10 * 60_000,
+    usage: { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ...r,
+  };
+}
+
+function realisticUsage(): UsageRecord[] {
+  return [
+    usageRecord({
+      provider: "claude",
+      model: "claude-opus-5-5",
+      role: "architect",
+      usage: { inputTokens: 50_000, outputTokens: 8_000, cacheReadTokens: 0, cacheWriteTokens: 0, estCostUsd: 1.25 },
+    }),
+    usageRecord({ provider: "codex", model: "gpt-6.1-sol", usage: { inputTokens: 120_000, outputTokens: 30_000, cacheReadTokens: 0, cacheWriteTokens: 0 } }),
+    usageRecord({ provider: "codex", model: "gpt-6.1-sol", outcome: "limited", durationMs: 60_000 }),
+    usageRecord({ provider: "codex", model: "gpt-6.1-sol", usage: { inputTokens: 80_000, outputTokens: 20_000, cacheReadTokens: 0, cacheWriteTokens: 0 } }),
+    usageRecord({
+      provider: "claude",
+      model: "claude-haiku-5-5",
+      role: "scout",
+      durationMs: 30_000,
+      usage: { inputTokens: 4_000, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0, estCostUsd: 0.004 },
+    }),
+    // another mission's run: must not appear in this report
+    usageRecord({ missionId: "2026-10-08-other", provider: "claude", model: "claude-sonnet-5-5" }),
+  ];
+}
+
+const PROSE: ReportProseOutput = {
+  narrative: "Good morning! Your habit tracker is up and running. You can add habits and tick them off.",
+  whatYouCanDo: ["Add a habit by typing its name", "Tick off a habit when you've done it today"],
+};
+
+const GENERATED_AT = "2026-10-10T05:00:00.000Z";
+
+function render(m: Mission, opts: Partial<Parameters<typeof renderReport>[1]> = {}): string {
+  return renderReport(m, { prose: PROSE, usage: realisticUsage(), screenshots: [], generatedAt: GENERATED_AT, ...opts });
+}
+
+/** The text of one "## <title>" section, without its heading. */
+function sectionText(report: string, title: string): string {
+  const start = report.indexOf(`\n## ${title}\n`);
+  expect(start, `section "${title}" is missing`).toBeGreaterThanOrEqual(0);
+  const bodyStart = start + `\n## ${title}\n`.length;
+  const next = report.indexOf("\n## ", bodyStart);
+  return report.slice(bodyStart, next === -1 ? undefined : next).trim();
+}
+
+// ───────────────────────────── usageSummary ─────────────────────────────
+
+describe("usageSummary", () => {
+  it("groups runs per provider and model, most-used first, and counts limited runs", () => {
+    const summary = usageSummary(realisticUsage());
+    expect(summary.totalRuns).toBe(6);
+    expect(summary.limitedRuns).toBe(1);
+    expect(summary.byModel.map((r) => r.model)).toEqual(["gpt-6.1-sol", "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5"]);
+    expect(summary.byModel[0]).toEqual({
+      provider: "codex",
+      model: "gpt-6.1-sol",
+      runs: 3,
+      inputTokens: 201_000,
+      outputTokens: 50_200,
+      estCostUsd: 0,
+    });
+    expect(summary.byModel.find((r) => r.model === "claude-opus-5-5")?.estCostUsd).toBeCloseTo(1.25);
+  });
+
+  it("returns empty totals for no usage", () => {
+    expect(usageSummary([])).toEqual({ byModel: [], totalRuns: 0, limitedRuns: 0 });
+  });
+
+  it("keeps the same model id from different providers apart", () => {
+    const summary = usageSummary([
+      usageRecord({ provider: "mock", model: "m" }),
+      usageRecord({ provider: "claude", model: "m" }),
+    ]);
+    expect(summary.byModel.map((r) => r.provider)).toEqual(["claude", "mock"]);
+  });
+
+  it("tolerates partial ledger records", () => {
+    const broken = { ...usageRecord({ provider: "codex", model: "x" }), usage: undefined } as unknown as UsageRecord;
+    const nan = usageRecord({ provider: "codex", model: "x", usage: { inputTokens: Number.NaN, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 } });
+    const summary = usageSummary([broken, nan]);
+    expect(summary.byModel).toEqual([{ provider: "codex", model: "x", runs: 2, inputTokens: 0, outputTokens: 5, estCostUsd: 0 }]);
+  });
+
+  it("survives ledger lines without a model or provider, and lines that aren't records", () => {
+    const noModel = { ...usageRecord({ provider: "claude", model: "x" }), model: undefined } as unknown as UsageRecord;
+    const numericModel = { ...usageRecord({ provider: "claude", model: "x" }), model: 7 } as unknown as UsageRecord;
+    const noProvider = { ...usageRecord({ provider: "claude", model: "y" }), provider: undefined } as unknown as UsageRecord;
+    const junk = [null, 5, "text"] as unknown as UsageRecord[];
+    const summary = usageSummary([noModel, numericModel, noProvider, ...junk]);
+    expect(summary.totalRuns).toBe(3);
+    expect(summary.byModel.map((r) => [r.provider, r.model, r.runs])).toEqual([
+      ["claude", "unknown model", 2],
+      [undefined, "y", 1],
+    ]);
+  });
+});
+
+// ───────────────────────────── howToRun ─────────────────────────────
+
+describe("howToRun", () => {
+  it("gives the house-stack commands for a greenfield app", () => {
+    expect(howToRun(realisticMission())).toEqual([
+      "cd /home/pwuser/mc-apps/habit-tracker",
+      "npm install",
+      "npm run dev",
+      "open http://localhost:3000",
+    ]);
+  });
+
+  it("checks out the mission branch for a done feature mission, then installs and runs the checks", () => {
+    const m: Mission = {
+      ...realisticMission(),
+      kind: "feature",
+      status: "done",
+      repoPath: "/work/shop",
+      verify: { install: "npm ci", full: "npm test", testGlobs: ["test/**"] },
+    };
+    expect(howToRun(m)).toEqual(["cd /work/shop", `git checkout mc/${MISSION_ID}`, "npm ci", "npm test"]);
+  });
+
+  it("uses a detached checkout while an unfinished feature mission still has its branch checked out", () => {
+    for (const status of ["partial", "stopped", "failed"] as const) {
+      const m: Mission = { ...realisticMission(), kind: "feature", status, repoPath: "/work/shop", verify: undefined };
+      expect(howToRun(m), status).toEqual(["cd /work/shop", `git checkout --detach mc/${MISSION_ID}`]);
+    }
+  });
+
+  it("checks out the work of a greenfield app that stopped before main was moved up to it", () => {
+    const m: Mission = { ...realisticMission(), status: "stopped", stage: "features" };
+    expect(howToRun(m)).toEqual([
+      "cd /home/pwuser/mc-apps/habit-tracker",
+      `git checkout --detach mc/${MISSION_ID}`,
+      "npm install",
+      "npm run dev",
+      "open http://localhost:3000",
+    ]);
+    expect(howToRun({ ...m, stage: "finalize" })[1]).toBe("npm install");
+  });
+
+  it("quotes paths that the shell would split", () => {
+    const m: Mission = { ...realisticMission(), repoPath: "/home/me/my apps/bob's app" };
+    expect(howToRun(m)[0]).toBe(`cd '/home/me/my apps/bob'\\''s app'`);
+  });
+
+  it("has nothing to run when the app was never created", () => {
+    expect(howToRun({ ...realisticMission(), repoPath: "" })).toEqual([]);
+  });
+
+  it("has nothing to run when no feature was finished", () => {
+    const m = realisticMission();
+    const unfinished = m.features.map((f) => ({ ...f, status: f.status === "done" ? ("blocked" as const) : f.status }));
+    const pending = m.features.map((f) => ({ ...f, status: "pending" as const }));
+    // greenfield whose scaffolding never went green: the folder holds only an empty first commit
+    expect(howToRun({ ...m, status: "failed", stage: "init", features: pending })).toEqual([]);
+    expect(howToRun({ ...m, features: unfinished })).toEqual([]);
+    expect(howToRun({ ...m, kind: "feature", features: unfinished })).toEqual([]);
+  });
+
+  describe("against real git", () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "mc-report-git-"));
+    });
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, stdio: "pipe" });
+
+    it("gives a checkout that works while the mission's own worktree holds the branch", () => {
+      const repo = join(dir, "shop");
+      git(dir, "init", "-q", "-b", "main", repo);
+      git(repo, "commit", "-q", "--allow-empty", "-m", "init");
+      const branch = `mc/${MISSION_ID}`;
+      git(repo, "worktree", "add", "-q", "-b", branch, join(dir, "_integration"));
+      git(join(dir, "_integration"), "commit", "-q", "--allow-empty", "-m", "feat: work");
+
+      const m: Mission = { ...realisticMission(), kind: "feature", status: "partial", repoPath: repo, verify: undefined };
+      const [cd, checkout] = howToRun(m);
+      expect(cd).toBe(`cd ${repo}`);
+      expect(() => git(repo, "checkout", branch)).toThrow(/already (used|checked out)/);
+      execSync(checkout!, { cwd: repo, stdio: "pipe" });
+      expect(git(repo, "log", "-1", "--format=%s").toString().trim()).toBe("feat: work");
+    });
+  });
+});
+
+// ───────────────────────────── buildReportFacts ─────────────────────────────
+
+describe("buildReportFacts", () => {
+  it("lists features with status and reasons, choices, decisions, findings and totals", () => {
+    const facts = buildReportFacts(realisticMission(), realisticUsage());
+    expect(facts).toContain("Mission: Habit tracker");
+    expect(facts).toContain("Request: Build me a habit tracker where I can add habits and tick them off each day.");
+    expect(facts).toContain("Status: Partly done (partial). 2 of 4 features done, 1 blocked, 1 skipped, 0 unfinished.");
+    expect(facts).toContain("Plan summary: A simple app to keep track of your daily habits");
+    expect(facts).toContain(`- add-habit "Add a habit" [done]: You can add a new habit with a name.`);
+    expect(facts).toContain(
+      `- streaks "Streaks" [blocked]: the streak counter kept getting the dates wrong around midnight (after 3 attempts)`,
+    );
+    expect(facts).toContain(`- share-progress "Share progress" [skipped]: waiting on streaks, which was blocked`);
+    expect(facts).toContain("- No login: it is a single-user app on your computer.");
+    expect(facts).toContain("- Should a streak survive a skipped weekend?");
+    expect(facts).toContain("- [major] add-habit (src/app/page.tsx): Empty habit names are accepted.");
+    expect(facts).toContain("- [minor] add-habit: The button label could be clearer.");
+    // only this mission's 5 runs count
+    expect(facts).toContain("Totals: 5 agent runs (1 stopped by usage limits)");
+    expect(facts).toContain("estimated list-price cost $1.25");
+    expect(facts).toContain("- npm run dev");
+  });
+
+  it("keeps run notes but drops the assumptions the dispatcher copied into them", () => {
+    const facts = buildReportFacts(realisticMission(), []);
+    const notes = facts.slice(facts.indexOf("Run notes:"));
+    expect(notes).toContain("Restored src/app/page.tsx");
+    expect(notes).not.toContain("No login");
+  });
+
+  it("says (none) for empty lists so the writer doesn't invent anything", () => {
+    const m: Mission = {
+      ...realisticMission(),
+      status: "failed",
+      spec: undefined,
+      features: [],
+      decisionsNeeded: [],
+      notes: [],
+      repoPath: "",
+    };
+    const facts = buildReportFacts(m, []);
+    expect(facts).toContain("Status: Stopped (failed). 0 of 0 features done");
+    expect(facts.match(/- \(none\)/g)).toHaveLength(6);
+    expect(facts).toContain("Totals: 0 agent runs");
+  });
+
+  it("explains a partial mission whose features are all done", () => {
+    const m = realisticMission();
+    m.features = m.features.slice(0, 2);
+    expect(buildReportFacts(m, [])).toContain(
+      "Why partly done: every feature is done, but the final check of the whole app did not fully pass (see Run notes).",
+    );
+    expect(buildReportFacts(realisticMission(), [])).not.toContain("Why partly done");
+  });
+
+  it("mentions checks that were failing before a feature mission started", () => {
+    const m: Mission = {
+      ...realisticMission(),
+      kind: "feature",
+      baselineBroken: true,
+      baselineFailures: ["FAIL tests/legacy.test.ts > old thing"],
+    };
+    const facts = buildReportFacts(m, []);
+    expect(facts).toContain("Kind: a change to an existing app (/home/pwuser/mc-apps/habit-tracker)");
+    expect(facts).toContain("Checks that were already failing before the mission started:\n- FAIL tests/legacy.test.ts > old thing");
+  });
+});
+
+// ───────────────────────────── renderReport ─────────────────────────────
+
+describe("renderReport", () => {
+  it("puts the plain-language sections first, in the agreed order, and technical details last", () => {
+    const report = render(realisticMission(), { screenshots: ["/x/missions/m/screenshots/home.png"] });
+    const headings = [
+      "# Habit tracker",
+      "**Partly done**",
+      PROSE.narrative,
+      "## What you can do now",
+      "## How to try it",
+      "## What it looks like",
+      "## Needs your decision",
+      "## Features",
+      "## Choices I made for you",
+      "## Review notes",
+      "## Usage",
+      "## Technical details",
+    ];
+    const positions = headings.map((h) => report.indexOf(h));
+    positions.forEach((p, i) => expect(p, headings[i]).toBeGreaterThanOrEqual(0));
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    expect(report.startsWith("# Habit tracker\n\n**Partly done** · 2 of 4 features done · report written ")).toBe(true);
+    expect(report.endsWith("\n")).toBe(true);
+    expect(report).not.toMatch(/\n{3,}/);
+  });
+
+  it("keeps jargon out of everything above the features table", () => {
+    for (const prose of [PROSE, null]) {
+      const report = render(realisticMission(), { prose, screenshots: ["/x/missions/m/screenshots/home.png"] });
+      const top = report.slice(0, report.indexOf("## Features"));
+      expect(top).not.toMatch(/\b(worktree|rung|sha|commit|stage|gate|verify|frozen|anti-?cheat|integration|profile|mc\/)\b/i);
+      expect(top).not.toContain(MISSION_ID);
+    }
+  });
+
+  it("uses the scout's narrative and bullets when given", () => {
+    const report = render(realisticMission());
+    expect(report).toContain(PROSE.narrative);
+    expect(sectionText(report, "What you can do now")).toBe(
+      "- Add a habit by typing its name\n- Tick off a habit when you've done it today",
+    );
+  });
+
+  it("falls back to a template narrative and the done features when prose is null", () => {
+    const report = render(realisticMission(), { prose: null });
+    expect(report).toContain(
+      "I worked on your new app, “Habit tracker”. The plan: A simple app to keep track of your daily habits. " +
+        "2 of the 4 features are built and checked. 1 feature got stuck; the table below says why. " +
+        "1 feature depended on a stuck feature, so I skipped it. " +
+        "There is one thing I need you to decide; see “Needs your decision”.",
+    );
+    expect(sectionText(report, "What you can do now")).toBe(
+      "- **Add a habit**: You can add a new habit with a name.\n- **Tick off a habit**: You can tick off a habit.",
+    );
+  });
+
+  it("falls back per part when the prose is blank", () => {
+    const report = render(realisticMission(), { prose: { narrative: "  ", whatYouCanDo: [" ", ""] } });
+    expect(report).toContain("I worked on your new app, “Habit tracker”.");
+    expect(sectionText(report, "What you can do now")).toContain("**Add a habit**");
+  });
+
+  it("numbers the commands to try the app, with a plain note on each", () => {
+    expect(sectionText(render(realisticMission()), "How to try it")).toBe(
+      [
+        "Open a terminal and run these one at a time:",
+        "",
+        "1. `cd /home/pwuser/mc-apps/habit-tracker`: go to the app's folder",
+        "2. `npm install`: download what the app needs (slow the first time)",
+        "3. `npm run dev`: start the app (leave this window open while you try it)",
+        "4. Open http://localhost:3000 in your browser.",
+      ].join("\n"),
+    );
+  });
+
+  it("shows the decisions the user needs to make", () => {
+    expect(sectionText(render(realisticMission()), "Needs your decision")).toBe("- Should a streak survive a skipped weekend?");
+  });
+
+  it("shows every feature with ✅ or ⛔ and a plain reason", () => {
+    expect(sectionText(render(realisticMission()), "Features")).toBe(
+      [
+        "|  | Feature | What happened |",
+        "|---|---|---|",
+        "| ✅ | Add a habit | Built and checked (2 review notes below) |",
+        "| ✅ | Tick off a habit | Built and checked |",
+        "| ⛔ | Streaks | Stuck: the streak counter kept getting the dates wrong around midnight (tried 3 times) |",
+        "| ⛔ | Share progress | Skipped: waiting on streaks, which was blocked |",
+      ].join("\n"),
+    );
+  });
+
+  it("marks unfinished features as in progress instead of failed", () => {
+    const m = realisticMission();
+    m.status = "stopped";
+    m.features[2] = { ...m.features[2]!, status: "building", blockedReason: undefined };
+    m.features[3] = { ...m.features[3]!, status: "pending", blockedReason: undefined };
+    const report = render(m, { prose: null });
+    expect(report).toContain("| ⏳ | Streaks | Started but not finished |");
+    expect(report).toContain("| ⏳ | Share progress | Not started yet |");
+    expect(report).toContain("**Stopped** · 2 of 4 features done");
+    expect(report).toContain("2 features aren't finished yet. The run stopped before I could finish.");
+  });
+
+  it("escapes table separators and flattens multi-line reasons", () => {
+    const m = realisticMission();
+    m.features[2] = { ...m.features[2]!, title: "Import | export", blockedReason: "the file format\nwas unclear" };
+    expect(render(m)).toContain("| ⛔ | Import \\| export | Stuck: the file format was unclear (tried 3 times) |");
+  });
+
+  it("lists the assumptions as choices made for the user", () => {
+    expect(sectionText(render(realisticMission()), "Choices I made for you")).toBe(
+      "- No login: it is a single-user app on your computer.\n- Your habits are saved in a file on this computer.",
+    );
+  });
+
+  it("lists open review findings, most serious first", () => {
+    expect(sectionText(render(realisticMission()), "Review notes")).toBe(
+      [
+        "- **Add a habit** · Important: Empty habit names are accepted. (in `src/app/page.tsx`) " +
+          "Suggested check: Submitting an empty name shows an error.",
+        "- **Add a habit** · Small: The button label could be clearer.",
+      ].join("\n"),
+    );
+  });
+
+  it("summarizes usage per model for this mission only", () => {
+    const usage = sectionText(render(realisticMission()), "Usage");
+    expect(usage).toContain("5 agent runs, 1 run paused by a usage limit, about 32 min of agent time.");
+    expect(usage).toContain("| gpt-6.1-sol | Codex | 3 | 201,000 | 50,200 | — |");
+    expect(usage).toContain("| claude-opus-5-5 | Claude Code | 1 | 50,000 | 8,000 | $1.25 |");
+    expect(usage).toContain("| claude-haiku-5-5 | Claude Code | 1 | 4,000 | 500 | <$0.01 |");
+    expect(usage).toContain("| **Total** |  | 5 | 255,000 | 58,700 | $1.25 |");
+    expect(usage).not.toContain("claude-sonnet-5-5");
+  });
+
+  it("puts branches, commits, attempts, logs and the mission id in the technical details", () => {
+    const tech = sectionText(render(realisticMission()), "Technical details");
+    expect(tech).toContain(`Mission id: \`${MISSION_ID}\` (greenfield, profile \`mixed\`)`);
+    expect(tech).toContain("Started from: `main` at `0123456789`");
+    expect(tech).toContain(`Integration branch: \`mc/${MISSION_ID}\``);
+    expect(tech).toContain(`Integration worktree: \`/home/pwuser/.mission-control/worktrees/${MISSION_ID}/_integration\``);
+    expect(tech).toContain("Full check: `npm run verify` · test files: `node scripts/mc-test.mjs {files}`");
+    expect(tech).toContain("agent runs: 14");
+    expect(tech).toContain(`\`mc logs ${MISSION_ID}\``);
+    expect(tech).toContain(
+      `Logs: \`missions/${MISSION_ID}/logs/\` and \`missions/${MISSION_ID}/events.jsonl\` in the Mission Control home folder`,
+    );
+    expect(tech).toContain(`Report generated: ${GENERATED_AT}`);
+    expect(tech).toContain("| `add-habit` | done | `aaaaaaaaaa` |  | codex | 1 |");
+    expect(tech).toContain(`| \`streaks\` | blocked |  | \`mc/${MISSION_ID}--streaks\` |  | 3 |`);
+    expect(tech).toContain("### What was tried for `streaks`");
+    expect(tech).toContain(
+      "- 2026-10-10T01:00:00.000Z · rung 0 build · codex `gpt-6.1-sol` (medium) · fail · signature `abc123def456`: 2 tests failed",
+    );
+    expect(tech).not.toContain("What was tried for `add-habit`");
+    expect(tech).toContain("### Run notes\n\n- Restored src/app/page.tsx, which the test author changed.");
+    expect(tech).not.toContain("No login");
+  });
+
+  it("embeds screenshots with relative links", () => {
+    const report = render(realisticMission(), {
+      screenshots: [`/home/u/.mission-control/missions/${MISSION_ID}/screenshots/home_page-1.png`, "shots/add habit (1).png"],
+    });
+    expect(sectionText(report, "What it looks like")).toBe(
+      "![home page 1](screenshots/home_page-1.png)\n\n![add habit (1)](shots/add%20habit%20%281%29.png)",
+    );
+  });
+
+  it("links screenshots relative to another folder the report is saved in", () => {
+    const home = "/home/u/.mission-control";
+    const report = render(realisticMission(), {
+      screenshots: [`${home}/missions/${MISSION_ID}/screenshots/home.png`],
+      reportDir: `${home}/reports`,
+    });
+    expect(sectionText(report, "What it looks like")).toBe(`![home](../missions/${MISSION_ID}/screenshots/home.png)`);
+  });
+
+  it("leaves out the screenshots section when there are none", () => {
+    expect(render(realisticMission())).not.toContain("What it looks like");
+  });
+
+  it("reports a fully done mission", () => {
+    const m = realisticMission();
+    m.status = "done";
+    m.features = m.features.slice(0, 2).map((f) => ({ ...f, openFindings: [] }));
+    m.decisionsNeeded = [];
+    const report = render(m, { prose: null });
+    expect(report).toContain("**Done** · 2 of 2 features done");
+    expect(report).toContain("All 2 features are built and checked. Everything passed the final checks.");
+    expect(sectionText(report, "Needs your decision")).toBe("Nothing. You don't need to do anything.");
+    expect(sectionText(report, "Review notes")).toBe("No open review notes.");
+  });
+
+  it("says why a mission is only partly done when every feature is done", () => {
+    const m = realisticMission();
+    m.features = m.features.slice(0, 2);
+    m.decisionsNeeded = [];
+    m.notes.push("gate C: major: adding a habit breaks the list page");
+    const report = render(m, { prose: null });
+    expect(report).toContain("**Partly done** · 2 of 2 features done");
+    expect(report).toContain(
+      "All 2 features are built and checked. But the final check of the whole app didn't fully pass, so some parts " +
+        "may not work together yet. “Technical details” at the end says what it found.",
+    );
+    expect(sectionText(report, "Technical details")).toContain("- gate C: major: adding a habit breaks the list page");
+  });
+
+  it("doesn't offer commands when a greenfield app's scaffolding never went green", () => {
+    const m: Mission = { ...realisticMission(), status: "failed", stage: "init" };
+    m.features = m.features.map((f) => ({ ...f, status: "pending", blockedReason: undefined }));
+    const report = render(m, { prose: null, usage: [] });
+    expect(sectionText(report, "How to try it")).toBe("There's nothing to try yet: the app wasn't created.");
+    expect(sectionText(report, "What you can do now")).toBe("Nothing new to try yet: none of the features were finished.");
+    expect(report).not.toContain("npm run dev");
+  });
+
+  it("doesn't offer commands when no feature of an existing app was finished", () => {
+    const m: Mission = { ...realisticMission(), kind: "feature", status: "stopped", stage: "features" };
+    m.features = m.features.map((f) => ({ ...f, status: "pending" }));
+    expect(sectionText(render(m, { prose: null }), "How to try it")).toBe(
+      "There's nothing to try yet: none of the features were finished.",
+    );
+  });
+
+  it("still writes the report when a usage ledger line is malformed", () => {
+    const bad = { ...usageRecord({ provider: "claude", model: "x" }), model: undefined } as unknown as UsageRecord;
+    const report = render(realisticMission(), { usage: [bad, null as unknown as UsageRecord] });
+    expect(sectionText(report, "Usage")).toContain("| unknown model | Claude Code | 1 |");
+  });
+
+  it("reports a mission that failed before anything was planned", () => {
+    const m: Mission = {
+      ...realisticMission(),
+      status: "failed",
+      stage: "spec",
+      repoPath: "",
+      spec: undefined,
+      features: [],
+      notes: [],
+      decisionsNeeded: ["Log in again: run mc-docker.sh login-claude"],
+      integrationWorktree: undefined,
+      baseSha: undefined,
+      verify: undefined,
+    };
+    const report = render(m, { prose: null, usage: [] });
+    expect(report).toContain("**Stopped** · no features planned yet");
+    expect(report).toContain("I didn't get as far as planning the features. I hit a problem I couldn't get past on my own");
+    expect(sectionText(report, "How to try it")).toBe("There's nothing to try yet: the app wasn't created.");
+    expect(sectionText(report, "What you can do now")).toBe("Nothing new to try yet: none of the features were finished.");
+    expect(sectionText(report, "Features")).toBe("No features were planned yet.");
+    expect(sectionText(report, "Choices I made for you")).toBe("None. I followed your request as written.");
+    expect(sectionText(report, "Usage")).toBe("No agent runs were recorded.");
+    expect(sectionText(report, "Technical details")).toContain("Repository: not created");
+  });
+
+  it("explains a feature mission: branch checkout, existing failures, and starting the app", () => {
+    const m: Mission = {
+      ...realisticMission(),
+      kind: "feature",
+      title: "Add dark mode",
+      repoPath: "/home/pwuser/mc-apps/shop",
+      decisionsNeeded: [],
+      baselineBroken: true,
+      baselineFailures: ["FAIL tests/legacy.test.ts", "1 failed, 40 passed"],
+    };
+    const report = render(m, { prose: null });
+    expect(report).toContain("I worked on your request for shop: “Add dark mode”.");
+    const howTo = sectionText(report, "How to try it");
+    expect(howTo).toContain(`2. \`git checkout --detach mc/${MISSION_ID}\`: switch to the version with the new work`);
+    expect(howTo).toContain("3. `npm install`: download what the app needs");
+    expect(howTo).toContain("4. `npm run verify`: run the project's own checks");
+    expect(howTo.endsWith("Then start your app the way you usually do.")).toBe(true);
+    expect(sectionText(report, "Needs your decision")).toContain("already failing before I started");
+    expect(report).toContain("There is one thing I need you to decide");
+    expect(sectionText(report, "Technical details")).toContain(
+      "### Checks failing before the mission\n\n```\nFAIL tests/legacy.test.ts\n1 failed, 40 passed\n```",
+    );
+  });
+
+  it("uses singular wording for a single feature", () => {
+    const m = realisticMission();
+    m.status = "done";
+    m.features = [m.features[1]!];
+    m.decisionsNeeded = [];
+    expect(render(m, { prose: null })).toContain("The feature is built and checked.");
+  });
+});
+
+// ───────────────────────────── collectScreenshots ─────────────────────────────
+
+describe("collectScreenshots", () => {
+  let root: string;
+  let app: string;
+  let dest: string;
+  let clock: number;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "mc-report-test-"));
+    app = join(root, "app");
+    dest = join(root, "mission", "screenshots");
+    mkdirSync(app);
+    clock = Date.parse("2026-10-10T01:00:00Z") / 1000;
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  /** Writes a file under the app dir; each call is one minute newer than the last. */
+  function png(rel: string, content = rel): string {
+    const path = join(app, rel);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content);
+    clock += 60;
+    utimesSync(path, clock, clock);
+    return path;
+  }
+
+  it("copies the PNGs under test-results and playwright-report, newest first, with flattened names", async () => {
+    png("test-results/home-renders-chromium/test-finished-1.png");
+    png("playwright-report/data/0a1b2c.png");
+    png("test-results/add-habit-chromium/test-finished-1.PNG");
+    png("test-results/notes.txt");
+    png("test-results/trace.jpg");
+    png("screenshots-elsewhere/ignored.png");
+
+    const copied = await collectScreenshots(app, dest);
+
+    expect(copied.map((p) => basename(p))).toEqual([
+      "add-habit-chromium-test-finished-1.png",
+      "data-0a1b2c.png",
+      "home-renders-chromium-test-finished-1.png",
+    ]);
+    for (const p of copied) expect(dirname(p)).toBe(dest);
+    expect(readFileSync(copied[0]!, "utf8")).toBe("test-results/add-habit-chromium/test-finished-1.PNG");
+  });
+
+  it("skips byte-identical copies, keeping the newest", async () => {
+    png("test-results/home-chromium/test-finished-1.png", "same pixels");
+    png("playwright-report/data/ffee.png", "same pixels");
+    const copied = await collectScreenshots(app, dest);
+    expect(copied.map((p) => basename(p))).toEqual(["data-ffee.png"]);
+  });
+
+  it("keeps at most 12 by default, or the given max", async () => {
+    for (let i = 0; i < 15; i++) png(`test-results/t${String(i).padStart(2, "0")}/shot.png`);
+    const all = await collectScreenshots(app, dest);
+    expect(all).toHaveLength(12);
+    expect(basename(all[0]!)).toBe("t14-shot.png");
+    expect(basename(all[11]!)).toBe("t03-shot.png");
+
+    const two = await collectScreenshots(app, join(root, "two"), 2);
+    expect(two.map((p) => basename(p))).toEqual(["t14-shot.png", "t13-shot.png"]);
+  });
+
+  it("gives clashing flattened names unique suffixes", async () => {
+    png("test-results/a-b.png");
+    png("test-results/a/b.png");
+    png("playwright-report/a/b.png");
+    const names = (await collectScreenshots(app, dest)).map((p) => basename(p));
+    expect(names).toEqual(["a-b.png", "a-b-2.png", "a-b-3.png"]);
+  });
+
+  it("makes odd file names safe", async () => {
+    png("test-results/Home page — “dark” (1)/shot #1.png");
+    const [copied] = await collectScreenshots(app, dest);
+    expect(basename(copied!)).toBe("Home-page-dark-1-shot-1.png");
+  });
+
+  it("returns nothing, and creates no folder, when there are no screenshots", async () => {
+    expect(await collectScreenshots(app, dest)).toEqual([]);
+    expect(await collectScreenshots(join(root, "missing"), dest)).toEqual([]);
+    png("test-results/x.png");
+    expect(await collectScreenshots(app, dest, 0)).toEqual([]);
+    expect(existsSync(dest)).toBe(false);
+  });
+
+  it("does not follow symlinked folders", async () => {
+    png("test-results/real/shot.png");
+    symlinkSync(join(app, "test-results"), join(app, "test-results", "loop"));
+    const copied = await collectScreenshots(app, dest);
+    expect(copied.map((p) => basename(p))).toEqual(["real-shot.png"]);
+  });
+});

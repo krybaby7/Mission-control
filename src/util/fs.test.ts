@@ -1,6 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   appendJsonl,
@@ -52,6 +54,25 @@ describe("writeJsonAtomic / readJson", () => {
     ensureDir(join(target, "child"));
     expect(() => writeJsonAtomic(target, { v: 1 })).toThrow();
     expect(readdirSync(dir)).toEqual(["is-a-dir"]);
+  });
+
+  // A real short write: the kernel stops the first write at the file-size limit and fails the next with EFBIG.
+  it.skipIf(process.platform === "win32")("keeps the old file when the disk refuses part of the write", () => {
+    const file = join(dir, "state.json");
+    writeJsonAtomic(file, { good: "previous state" });
+    const script = `
+      const { writeJsonAtomic } = await import(process.argv[1]);
+      try { writeJsonAtomic(process.argv[2], { big: "x".repeat(200_000) }); console.log("written"); }
+      catch (err) { console.log("threw " + err.code); }`;
+    const fsModule = fileURLToPath(new URL("./fs.ts", import.meta.url));
+    const child = spawnSync(
+      "sh",
+      ["-c", 'ulimit -f 64 && exec "$0" "$@"', process.execPath, "--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", script, fsModule, file],
+      { encoding: "utf8" },
+    );
+    expect(child.stdout.trim()).toBe("threw EFBIG");
+    expect(readJson(file)).toEqual({ good: "previous state" });
+    expect(readdirSync(dir)).toEqual(["state.json"]);
   });
 
   it("refuses values that are not JSON-serializable", () => {

@@ -1,6 +1,9 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLogger, nullLogger } from "./logger.js";
 
@@ -115,6 +118,38 @@ describe("createLogger: console", () => {
     createLogger({ file }).info("quiet");
     expect(written).toEqual([]);
     expect(existsSync(file)).toBe(true);
+  });
+
+  it("keeps running and logging to the file after the console reader goes away (EPIPE)", async () => {
+    const file = join(dir, "epipe.log");
+    const script = `
+      const { createLogger } = await import(process.argv[1]);
+      const log = createLogger({ console: true, file: process.argv[2] });
+      for (let i = 0; i < 3; i++) { log.info("tick " + i); await new Promise((r) => setTimeout(r, 50)); }`;
+    const loggerModule = fileURLToPath(new URL("./logger.ts", import.meta.url));
+    const child = spawn(
+      process.execPath,
+      ["--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", script, loggerModule, file],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    child.stderr.destroy(); // the reader vanishes, as when `| head` exits
+    const [code] = await once(child, "exit");
+    expect(code).toBe(0);
+    expect(readLines(file).map((line) => line.msg)).toEqual(["tick 0", "tick 1", "tick 2"]);
+  });
+
+  it("skips the console once stderr is no longer writable", () => {
+    const written = captureStderr();
+    // restoreAllMocks does not undo getter spies, so restore this one by hand.
+    const writable = vi.spyOn(process.stderr, "writable", "get").mockReturnValue(false);
+    try {
+      const file = join(dir, "still-file.log");
+      createLogger({ console: true, file }).info("after console died");
+      expect(written).toEqual([]);
+      expect(readLines(file).map((line) => line.msg)).toEqual(["after console died"]);
+    } finally {
+      writable.mockRestore();
+    }
   });
 
   it("applies the level to the console too", () => {

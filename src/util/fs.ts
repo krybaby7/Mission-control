@@ -11,7 +11,7 @@ import {
   readSync,
   renameSync,
   rmSync,
-  writeSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -25,7 +25,9 @@ export function writeJsonAtomic(path: string, data: unknown): void {
   try {
     const fd = openSync(tmp, "w");
     try {
-      writeSync(fd, json + "\n");
+      // Unlike a single writeSync, this retries short writes and throws (e.g. ENOSPC, EFBIG) instead of
+      // leaving a truncated temp file that would then be renamed over the good one.
+      writeFileSync(fd, json + "\n");
       fsyncSync(fd);
     } finally {
       closeSync(fd);

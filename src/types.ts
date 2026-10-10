@@ -442,15 +442,24 @@ export interface GateOutput {
   issues: string[];
 }
 
+/** A verify config as agents return it: strict schemas express optional commands as null.
+ *  Convert with normalizeVerifyConfig (src/schemas.ts) before storing it as Mission.verify. */
+export interface VerifyConfigOutput {
+  install: string | null;
+  full: string;
+  tests: string | null;
+  testGlobs: string[];
+}
+
 export interface OnboardOutput {
   stackSummary: string;
-  verify: VerifyConfig;
+  verify: VerifyConfigOutput;
   notes: string[];
 }
 
 export interface InitOutput {
   summary: string;
-  verify: VerifyConfig;
+  verify: VerifyConfigOutput;
   notes: string[];
 }
 
