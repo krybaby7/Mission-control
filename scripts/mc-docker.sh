@@ -52,7 +52,7 @@ Usage: mc-docker.sh <command> [arguments...]
 Setup and maintenance:
   build [docker build flags]   Build the Mission Control image (again after every update)
   login-claude                 Log in to Claude once (type /login if it doesn't ask, /exit when done)
-  login-codex                  Log in to Codex once (device code; enable it in ChatGPT security settings)
+  login-codex                  Log in to Codex once (shows a link and a one-time code to approve)
   shell                        Open a terminal inside the container; port 3000 reaches your browser
   copy-reports                 Copy reports and screenshots to ~/mc-reports, readable from Windows
   fix-permissions              Repair ownership of the login and data volumes

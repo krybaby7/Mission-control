@@ -138,17 +138,18 @@ If Claude goes straight to its prompt without asking you to log in, type `/login
 
 ### 4b. Codex
 
-1. First, allow sign-in with a code. On <https://chatgpt.com>, click your picture > **Settings** > **Security**, and turn on the option for **device code** sign-in for Codex.
-2. In the Ubuntu window, paste:
+1. In the Ubuntu window, paste:
 
    ```
    mc login-codex
    ```
 
-   **You should see** a web address and a one-time code (like `ABCD-1234`).
-3. Open the address on your PC or iPad, sign in to ChatGPT, and enter the code.
+   **You should see** a web address (`https://auth.openai.com/codex/device`) and a one-time code (like `ABCD-1234`). The code expires after 15 minutes.
+2. Open the address on your PC or iPad, sign in to ChatGPT, and enter the code. Approve when it asks: the warning about codes from other people is a general precaution, and here the code came from your own Ubuntu window.
 
-   **You should see** a success message in the Ubuntu window, and then the prompt again.
+   **You should see** `Successfully logged in` in the Ubuntu window, and then the prompt again.
+
+   Most accounts allow this sign-in already; there is nothing to switch on first. If the code is refused, look in ChatGPT > **Settings** > **Security** for a device code option and turn it on.
 
 ## Step 5: Check the setup
 
@@ -358,7 +359,7 @@ Your logins, missions and apps are kept. If the project is private, `git pull` a
 | A mission is "Stopped, needs your help", or `mc status` shows it `failed` | Read what it needs: `mc report <mission>`, under **Needs your decision**. Do that, then continue it: `mc run --mission <mission>`. `mc status` shows the mission names. |
 | "paused, the disk is almost full" | Free some space: delete apps you no longer need from `~/mc-apps`, or run `docker system prune` to clear old Docker data. Then run `mc run` again; it continues where it paused. |
 | "Mission Control stopped unexpectedly" | The last run ended without finishing (the PC restarted, Docker Desktop stopped, or the power went out). Nothing is lost: the work so far is kept and continues. If it keeps happening, check Step 7 and that Docker Desktop stays running. |
-| The Codex code is refused | Turn on device code sign-in in ChatGPT's security settings (Step 4b), then run `mc login-codex` again. |
+| The Codex code is refused | Codes expire after 15 minutes: run `mc login-codex` again for a fresh one. If it's still refused, look for a device code option in ChatGPT > Settings > Security and turn it on. |
 | "You've hit your limit", or `mc status` shows a mission waiting | Nothing to do. Mission Control notices limits, switches to the other AI when allowed, or waits until the limit resets and carries on. If it happens every night, queue less work. |
 | "Waiting for the AIs to respond", or "paused, the AI isn't working" | The internet connection or an AI service had a problem, or an AI command line keeps failing. Nothing was lost and nothing counted against the work. Check that the PC is online, then run `mc doctor --live`. The next `mc run` carries on where it paused. |
 | You want to stop a run | In another Ubuntu window: `mc stop`. It stops after the current step and keeps its progress; the next `mc run` continues. If it hasn't stopped after a few minutes: `docker stop mission-control-run`. |
