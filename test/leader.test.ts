@@ -302,6 +302,8 @@ describe("leader/CLAUDE.md: reports, logs and what can be done", () => {
       expect(text, name).not.toMatch(/Every run gets a stop time/);
       expect(text, name).not.toMatch(/Always give `--until`|always gives `--until`/i);
       expect(text, name).not.toMatch(/If the CEO gave none, ask for one|ask for the time first|If no stop time was given, ask for one/);
+      // Nor in any other words: nothing may tell the leader to ask for a stop time, except the sentence that forbids it.
+      expect(text.replace(/Do not ask for a stop time/g, ""), name).not.toMatch(/\bask(?:s)? (?:the CEO )?for (?:a|the) (?:stop )?time|\bAlways (?:give|ask for)\b/i);
     }
     expect(CLAUDE_MD).toMatch(/The stop time is optional\. Add `--until HH:MM`[^\n]*only when the CEO gives one/);
     expect(CLAUDE_MD).toMatch(/Do not ask for a stop time, and do not make one up/);
@@ -325,6 +327,20 @@ describe("leader/CLAUDE.md: reports, logs and what can be done", () => {
     // The one limit that does exist: a stop time more than 18 hours ahead is refused by the engine.
     expect(engine).toMatch(/MAX_\w+_MS = 18 \* 60 \* 60_000/);
     expect(CLAUDE_MD).toMatch(/more than 18 hours away, Mission Control refuses it and starts nothing/);
+  });
+
+  it("says, wherever it says how a run ends, that it also ends early when no work can go on (src/run.ts, src/dispatcher.ts)", () => {
+    // The engine's own reasons (Dispatcher.noWorkPossible); the docs give plain-word versions of them.
+    const dispatcher = read("src", "dispatcher.ts");
+    expect(dispatcher).toContain("every AI needs a new login");
+    expect(dispatcher).toContain("the AI command lines keep failing");
+    expect(read("src", "run.ts")).toContain("The remaining missions wait for the next run.");
+    expect(CLAUDE_MD).toMatch(/It also ends early, before the queued work is done, when no work can go on: a full disk, every AI login expired, or the AI command lines keep failing\. The remaining work then waits for the next run/);
+    expect(CLAUDE_MD.match(/no work can go on/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(LEADER_README).toMatch(/ends early if no work can go on/);
+    const setupDoc = read("docs", "setup-windows.md");
+    expect(setupDoc).toMatch(/until no work can go on/);
+    expect(setupDoc).toMatch(/also ends early if no work can go on/);
   });
 
   it("explains the engine's own old wording in plain words", () => {
@@ -502,6 +518,7 @@ describe("no text of ours is framed by a time of day (round decision R1)", () =>
   const setup = read("docs", "setup-windows.md");
   const readme = read("README.md");
   const decisions = read("docs", "mvp-spec.md");
+  const script = read("scripts", "mc-docker.sh");
 
   // The leader's folder and its page are all ours. The other files are older text about the engine, so only the parts
   // we wrote are scanned: the dashboard and leader sections, and the table rows about the dashboard.
@@ -515,6 +532,10 @@ describe("no text of ours is framed by a time of day (round decision R1)", () =>
     ["docs/setup-windows.md, the dashboard and leader sections", section(setup, "## Optional: watch the team on a web page (the dashboard)", "## Optional: upload finished work to GitHub")],
     ["docs/setup-windows.md, the dashboard rows of the problem table", setup.split("\n").filter((l) => l.startsWith("|") && /dashboard|localhost:8787/i.test(l)).join("\n")],
     ["docs/mvp-spec.md, the dashboard decisions", section(decisions, "### CEO dashboard and the leader", "\n### ")],
+    // The rest of the script is older text about the engine, so only the dashboard parts are scanned.
+    ["scripts/mc-docker.sh, the dashboard constants and their comments", section(script, "readonly DASHBOARD_CONTAINER", "readonly DASHBOARD_MEMORY")],
+    ["scripts/mc-docker.sh, the dashboard usage text", section(script, "  dashboard [--port N]", "  fix-permissions")],
+    ["scripts/mc-docker.sh, the dashboard function", section(script, "# `dashboard [--port N]", "# `mc feature <app-folder>")],
     ["test/leader.test.ts", read("test", "leader.test.ts")],
   ];
 

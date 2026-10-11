@@ -317,7 +317,7 @@ The dashboard is a web page that shows, in plain words, whether the team is work
    mc dashboard --until 07:00
    ```
 
-   `--until` is only a stop time to show. Mission Control doesn't save the run's stop time, so without `--until` the page shows no stop time and no countdown. A run started without a stop time simply keeps going until the queued work is done.
+   `--until` is only a stop time to show. Mission Control doesn't save the run's stop time, so without `--until` the page shows no stop time and no countdown. A run started without a stop time keeps going until the queued work is done, or until no work can go on.
 
 4. To stop the dashboard, press **Ctrl+C** in its window. If the window is gone and it is still running, `docker stop mission-control-dashboard` stops it.
 
@@ -364,7 +364,7 @@ The leader is a Claude Code session that you talk to in plain words: "How is it 
 
    It needs a claude.ai login (Pro, Max, Team or Enterprise); API keys do not work. On Team or Enterprise, an Owner must first turn on Remote Control in the Claude Code admin settings. The first time, Claude Code asks "Enable Remote Control? (y/n)" and whether you trust the folder; answer yes. Keep the Ubuntu window open and the PC awake. Remote Control has not been tried here: whether the session appears, and what you can do in it from the app, is unverified. These steps follow Anthropic's Remote Control documentation (https://code.claude.com/docs/en/remote-control).
 
-If you ask the leader to start the team working, it runs `mc run` as a background task of the chat. It adds a stop time (`--until`) only if you give one; without one, the run keeps going until the queued work is done or you ask it to stop. If the chat session ends, the run may stop too; its progress is kept and the next run continues (not tried). For a run that must not depend on a chat, use Step 9 or the scheduled run.
+If you ask the leader to start the team working, it runs `mc run` as a background task of the chat. It adds a stop time (`--until`) only if you give one; without one, the run keeps going until the queued work is done or you ask it to stop (it also ends early if no work can go on, for example a full disk or every AI login expired). If the chat session ends, the run may stop too; its progress is kept and the next run continues (not tried). For a run that must not depend on a chat, use Step 9 or the scheduled run.
 
 ## Optional: upload finished work to GitHub
 

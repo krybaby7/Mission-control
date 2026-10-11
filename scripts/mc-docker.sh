@@ -7,7 +7,7 @@ readonly IMAGE="mission-control:local"
 readonly RUN_CONTAINER="mission-control-run"
 readonly DASHBOARD_CONTAINER="mission-control-dashboard"
 readonly DASHBOARD_PORT=8787
-# The dashboard only serves two small documents, so its box is much smaller than a night run's.
+# The dashboard only serves two small documents, so its box is much smaller than a run's.
 readonly DASHBOARD_PIDS_LIMIT=256
 readonly DASHBOARD_MEMORY="256m"
 readonly CONTAINER_HOME="/home/pwuser"

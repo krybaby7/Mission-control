@@ -40,7 +40,7 @@ What `mc run` does without `--until`, from `src/run.ts`, `src/cli.ts` and `scrip
 - When every AI is at its usage limit, the run waits for the limit to end and carries on. With a stop time, it ends the run instead of waiting past that time. Without one it can wait a long time.
 - With a stop time, the engine refuses one that is more than 18 hours ahead (`--until` always means the next time the clock shows it) and starts nothing.
 
-`leader/CLAUDE.md` tells the leader to say this in plain words before it starts a run without a stop time. An older rule, "ask for a stop time on every run", was removed: the CEO decides whether there is a stop time. The dashboard's `--until` is only "a stop time to show": the engine does not save the stop time, so `mc dashboard --until HH:MM` takes the time the CEO gave and shows it with a countdown.
+`leader/CLAUDE.md` tells the leader to say this in plain words before it starts a run without a stop time. The CEO decides whether there is a stop time; the leader does not ask for one. The dashboard's `--until` is only "a stop time to show": the engine does not save the stop time, so `mc dashboard --until HH:MM` takes the time the CEO gave and shows it with a countdown.
 
 Some of Mission Control's own messages still use an older word for the run: the phone notification "Night finished", the log line "Ending the night early", and the README's tagline "Your overnight software team". The engine was not changed. In the leader's words, and in everything the dashboard shows, each of them means that the team finished or ended its run.
 
