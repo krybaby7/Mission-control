@@ -1,0 +1,60 @@
+{
+  "id": "2026-10-11-add-dark-mode",
+  "kind": "feature",
+  "title": "Add dark mode",
+  "request": "Build me Add dark mode",
+  "repoPath": "/fixture/mc-apps/add-dark-mode",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-add-dark-mode",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "running",
+  "stage": "features",
+  "createdAt": "2026-10-11T09:58:00.000Z",
+  "updatedAt": "2026-10-11T09:58:20.000Z",
+  "features": [
+    {
+      "id": "toggle",
+      "title": "Dark mode switch",
+      "story": "As a user I can use dark mode switch.",
+      "acceptance": [
+        "run() in src/toggle.mjs returns \"toggle works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "building",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "fail",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        },
+        {
+          "rung": 0,
+          "action": "fix",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "fail",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:12.000Z"
+        }
+      ],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

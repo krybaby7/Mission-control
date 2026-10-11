@@ -1,0 +1,24 @@
+{"at":"2026-10-11T09:58:10.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"mission.start","data":{"stage":"spec"}}
+{"at":"2026-10-11T09:58:11.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"spec","data":{"appName":"Shopping list","features":["one","two"]}}
+{"at":"2026-10-11T09:58:12.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"stage","data":{"from":"spec","to":"gate_a"}}
+{"at":"2026-10-11T09:58:13.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"stage","data":{"from":"gate_a","to":"init"}}
+{"at":"2026-10-11T09:58:14.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"attempt","data":{"feature":"_init","rung":0,"provider":"codex","model":"gpt-6.1-sol","effort":"medium","outcome":"pass"}}
+{"at":"2026-10-11T09:58:15.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"stage","data":{"from":"init","to":"features"}}
+{"at":"2026-10-11T09:58:19.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"feature.status","data":{"feature":"one","from":"pending","to":"testing"}}
+{"at":"2026-10-11T09:58:20.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"tests.frozen","data":{"feature":"one","files":["tests/one.test.mjs"],"commit":"0000000000000000000000000000000000000000"}}
+{"at":"2026-10-11T09:58:21.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"attempt","data":{"feature":"one","rung":0,"action":"build","provider":"codex","model":"gpt-6.1-sol","effort":"medium","outcome":"pass"}}
+{"at":"2026-10-11T09:58:22.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"feature.status","data":{"feature":"one","from":"building","to":"reviewing"}}
+{"at":"2026-10-11T09:58:23.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"merge","data":{"feature":"one","commit":"0000000000000000000000000000000000000000"}}
+{"at":"2026-10-11T09:58:24.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"feature.status","data":{"feature":"one","from":"reviewing","to":"done"}}
+{"at":"2026-10-11T09:58:25.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"feature.status","data":{"feature":"two","from":"pending","to":"testing"}}
+{"at":"2026-10-11T09:58:26.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"tests.frozen","data":{"feature":"two","files":["tests/two.test.mjs"],"commit":"0000000000000000000000000000000000000000"}}
+{"at":"2026-10-11T09:58:27.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"attempt","data":{"feature":"two","rung":0,"action":"build","provider":"codex","model":"gpt-6.1-sol","effort":"medium","outcome":"pass"}}
+{"at":"2026-10-11T09:58:28.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"feature.status","data":{"feature":"two","from":"building","to":"reviewing"}}
+{"at":"2026-10-11T09:58:29.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"merge","data":{"feature":"two","commit":"0000000000000000000000000000000000000000"}}
+{"at":"2026-10-11T09:58:30.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"feature.status","data":{"feature":"two","from":"reviewing","to":"done"}}
+{"at":"2026-10-11T09:58:49.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"stage","data":{"from":"features","to":"gate_c"}}
+{"at":"2026-10-11T09:58:50.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"verify","data":{"label":"gate-c","ok":true,"exitCode":0,"timedOut":false,"durationMs":100,"signature":"","logFile":""}}
+{"at":"2026-10-11T09:58:51.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"stage","data":{"from":"gate_c","to":"finalize"}}
+{"at":"2026-10-11T09:58:52.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"report","data":{"path":"/fixture/.mission-control/missions/x/report.md"}}
+{"at":"2026-10-11T09:58:53.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"mission.end","data":{"status":"done"}}
+{"at":"2026-10-11T09:58:54.000Z","missionId":"2026-10-11-feature-review-unfinished-note","type":"stage","data":{"from":"finalize","to":"complete"}}

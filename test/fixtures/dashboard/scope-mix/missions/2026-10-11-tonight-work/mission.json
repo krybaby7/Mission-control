@@ -1,0 +1,55 @@
+{
+  "id": "2026-10-11-tonight-work",
+  "kind": "greenfield",
+  "title": "Tonight work",
+  "request": "Build me Tonight work",
+  "repoPath": "/fixture/mc-apps/tonight-work",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-tonight-work",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "done",
+  "stage": "complete",
+  "createdAt": "2026-10-11T08:57:00.000Z",
+  "updatedAt": "2026-10-11T09:57:00.000Z",
+  "features": [
+    {
+      "id": "main",
+      "title": "The main thing",
+      "story": "As a user I can use the main thing.",
+      "acceptance": [
+        "run() in src/main.mjs returns \"main works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/main.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

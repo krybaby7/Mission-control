@@ -1,0 +1,39 @@
+{
+  "id": "2026-10-11-mystery-status",
+  "kind": "greenfield",
+  "title": "Mystery status",
+  "request": "Build me Mystery status",
+  "repoPath": "/fixture/mc-apps/mystery-status",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-mystery-status",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "hibernating",
+  "stage": "features",
+  "createdAt": "2026-10-11T09:58:00.000Z",
+  "updatedAt": "2026-10-11T09:58:10.000Z",
+  "features": [
+    {
+      "id": "one",
+      "title": "Feature one",
+      "story": "As a user I can use feature one.",
+      "acceptance": [
+        "run() in src/one.mjs returns \"one works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "pending",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

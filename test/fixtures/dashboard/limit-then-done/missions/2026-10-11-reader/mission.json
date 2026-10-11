@@ -1,0 +1,155 @@
+{
+  "id": "2026-10-11-reader",
+  "kind": "greenfield",
+  "title": "Reader",
+  "request": "A reader app",
+  "repoPath": "/fixture/mc-apps/reader",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-reader",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "done",
+  "stage": "complete",
+  "createdAt": "2026-10-11T09:58:25.597Z",
+  "updatedAt": "2026-10-11T12:59:25.596Z",
+  "features": [
+    {
+      "id": "feed",
+      "title": "News feed",
+      "story": "As a reader I see articles.",
+      "acceptance": [
+        "run() in src/feed.mjs returns \"feed works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "implemented feed",
+          "at": "2026-10-11T12:59:25.596Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/feed.test.mjs",
+          "sha256": "4aeab62bb1535aa83132e3cb915f6ca7b36ba4911e8c8fe7b8ecb93e1b03b768"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "testsCommit": "365f6f25f93d9e373380f2b1b070b29d553c4acb",
+      "passingCommit": "602689efff79704695691f3535552e2a173c70ca",
+      "builtBy": "codex",
+      "commit": "1fd4467d990cb7168fb124918daf3a051a127848"
+    },
+    {
+      "id": "bookmark",
+      "title": "Bookmarks",
+      "story": "As a reader I can save an article.",
+      "acceptance": [
+        "run() in src/bookmark.mjs returns \"bookmark works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "feed"
+      ],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "implemented bookmark",
+          "at": "2026-10-11T12:59:25.596Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/bookmark.test.mjs",
+          "sha256": "28b2853c9d6e2bf48480ad53e5ab808af26d8c18aa6bdf6604ffaa8dbe503018"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "testsCommit": "91ab48645d05f622faaeca3e73962ab1111c67ff",
+      "passingCommit": "cdfb77c8e373eba94289218c9e6a5cf35289e438",
+      "builtBy": "codex",
+      "commit": "3122a9419f9a6330c3a9094a7243cd3dac29d98b"
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 13,
+  "notes": [
+    "Everything is stored locally; no sign-in."
+  ],
+  "spec": {
+    "appName": "Reader",
+    "summary": "A small reader app.",
+    "features": [
+      {
+        "id": "feed",
+        "title": "News feed",
+        "story": "As a reader I see articles.",
+        "acceptance": [
+          "run() in src/feed.mjs returns \"feed works\""
+        ],
+        "kind": "standard",
+        "deps": []
+      },
+      {
+        "id": "bookmark",
+        "title": "Bookmarks",
+        "story": "As a reader I can save an article.",
+        "acceptance": [
+          "run() in src/bookmark.mjs returns \"bookmark works\""
+        ],
+        "kind": "standard",
+        "deps": [
+          "feed"
+        ]
+      }
+    ],
+    "assumptions": [
+      "Everything is stored locally; no sign-in."
+    ],
+    "uiContract": "Feature <id> lives in src/<id>.mjs and exports run()."
+  },
+  "baseSha": "fb727564ddb8acc012181fb23c925c54bdfb6556",
+  "verify": {
+    "full": "node --test \"tests/**/*.test.mjs\"",
+    "testGlobs": [
+      "tests/**"
+    ],
+    "tests": "node --test {files}"
+  }
+}

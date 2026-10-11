@@ -1,0 +1,57 @@
+{
+  "id": "2026-10-11-reader",
+  "kind": "greenfield",
+  "title": "Reader",
+  "request": "Build me Reader",
+  "repoPath": "/fixture/mc-apps/reader",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-reader",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "waiting",
+  "stage": "gate_a",
+  "createdAt": "2026-10-11T09:58:25.597Z",
+  "updatedAt": "2026-10-11T09:58:25.596Z",
+  "features": [
+    {
+      "id": "feed",
+      "title": "News feed",
+      "story": "As a user I can use news feed.",
+      "acceptance": [
+        "run() in src/feed.mjs returns \"feed works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "pending",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "bookmark",
+      "title": "Bookmarks",
+      "story": "As a user I can use bookmarks.",
+      "acceptance": [
+        "run() in src/bookmark.mjs returns \"bookmark works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "feed"
+      ],
+      "status": "pending",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

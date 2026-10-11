@@ -1,0 +1,24 @@
+{"at":"2026-10-11T09:58:00.000Z","missionId":"2026-10-11-garden-planner","type":"mission.start","data":{"stage":"spec"}}
+{"at":"2026-10-11T09:58:01.000Z","missionId":"2026-10-11-garden-planner","type":"run.start","data":{"label":"spec","jobId":"spec-1","role":"architect","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}
+{"at":"2026-10-11T09:58:02.000Z","missionId":"2026-10-11-garden-planner","type":"run.end","data":{"label":"spec","jobId":"spec-1","provider":"codex","model":"gpt-6.1-sol","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:03.000Z","missionId":"2026-10-11-garden-planner","type":"spec","data":{"appName":"Garden planner","features":["beds","watering","harvest"]}}
+{"at":"2026-10-11T09:58:03.100Z","missionId":"2026-10-11-garden-planner","type":"stage","data":{"from":"spec","to":"gate_a"}}
+{"at":"2026-10-11T09:58:04.000Z","missionId":"2026-10-11-garden-planner","type":"run.start","data":{"label":"gate-a","jobId":"gate-a-1","role":"reviewer","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}
+{"at":"2026-10-11T09:58:05.000Z","missionId":"2026-10-11-garden-planner","type":"run.end","data":{"label":"gate-a","jobId":"gate-a-1","provider":"codex","model":"gpt-6.1-sol","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:05.100Z","missionId":"2026-10-11-garden-planner","type":"stage","data":{"from":"gate_a","to":"init"}}
+{"at":"2026-10-11T09:58:06.000Z","missionId":"2026-10-11-garden-planner","type":"run.start","data":{"label":"init","jobId":"init-1","role":"engineer","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}
+{"at":"2026-10-11T09:58:07.000Z","missionId":"2026-10-11-garden-planner","type":"run.end","data":{"label":"init","jobId":"init-1","provider":"codex","model":"gpt-6.1-sol","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:07.500Z","missionId":"2026-10-11-garden-planner","type":"attempt","data":{"feature":"_init","rung":0,"provider":"codex","model":"gpt-6.1-sol","effort":"medium","outcome":"pass"}}
+{"at":"2026-10-11T09:58:07.600Z","missionId":"2026-10-11-garden-planner","type":"stage","data":{"from":"init","to":"features"}}
+{"at":"2026-10-11T09:58:08.000Z","missionId":"2026-10-11-garden-planner","type":"feature.status","data":{"feature":"beds","from":"pending","to":"testing"}}
+{"at":"2026-10-11T09:58:08.100Z","missionId":"2026-10-11-garden-planner","type":"run.start","data":{"label":"test-beds","jobId":"test-beds-1","role":"test_author","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}
+{"at":"2026-10-11T09:58:08.200Z","missionId":"2026-10-11-garden-planner","type":"run.end","data":{"label":"test-beds","jobId":"test-beds-1","provider":"codex","model":"gpt-6.1-sol","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:08.300Z","missionId":"2026-10-11-garden-planner","type":"tests.frozen","data":{"feature":"beds","files":["tests/beds.test.mjs"],"commit":"1111111111111111111111111111111111111111"}}
+{"at":"2026-10-11T09:58:08.400Z","missionId":"2026-10-11-garden-planner","type":"run.start","data":{"label":"build-beds","jobId":"build-beds-1","role":"engineer","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}
+{"at":"2026-10-11T09:58:08.500Z","missionId":"2026-10-11-garden-planner","type":"run.end","data":{"label":"build-beds","jobId":"build-beds-1","provider":"codex","model":"gpt-6.1-sol","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:08.600Z","missionId":"2026-10-11-garden-planner","type":"attempt","data":{"feature":"beds","rung":0,"provider":"codex","model":"gpt-6.1-sol","effort":"medium","outcome":"pass"}}
+{"at":"2026-10-11T09:58:08.700Z","missionId":"2026-10-11-garden-planner","type":"feature.status","data":{"feature":"beds","from":"testing","to":"reviewing"}}
+{"at":"2026-10-11T09:58:08.800Z","missionId":"2026-10-11-garden-planner","type":"run.start","data":{"label":"review-beds","jobId":"review-beds-1","role":"reviewer","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}
+{"at":"2026-10-11T09:58:08.900Z","missionId":"2026-10-11-garden-planner","type":"run.end","data":{"label":"review-beds","jobId":"review-beds-1","provider":"codex","model":"gpt-6.1-sol","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:09.000Z","missionId":"2026-10-11-garden-planner","type":"merge","data":{"feature":"beds","commit":"2222222222222222222222222222222222222222"}}
+{"at":"2026-10-11T09:58:20.000Z","missionId":"2026-10-11-garden-planner","type":"mission.stopped","data":{"stage":"features","reason":"no provider is free before the deadline (next chance 2026-10-11T12:59:10.000Z)"}}

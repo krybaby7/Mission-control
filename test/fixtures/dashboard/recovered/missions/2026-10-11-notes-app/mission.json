@@ -1,0 +1,121 @@
+{
+  "id": "2026-10-11-notes-app",
+  "kind": "greenfield",
+  "title": "Notes app",
+  "request": "Build Notes app",
+  "repoPath": "/fixture/mc-apps/notes-app",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-notes-app",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "done",
+  "stage": "complete",
+  "createdAt": "2026-10-11T09:58:09.000Z",
+  "updatedAt": "2026-10-11T09:59:09.000Z",
+  "features": [
+    {
+      "id": "capture",
+      "title": "Capture a note",
+      "story": "As a user I can use capture a note.",
+      "acceptance": [
+        "run() in src/capture.mjs returns \"capture works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "fail",
+          "summary": "verification failed",
+          "at": "2026-10-11T09:58:29.000Z"
+        },
+        {
+          "rung": 1,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "ok",
+          "at": "2026-10-11T09:58:39.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/capture.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "search",
+      "title": "Search notes",
+      "story": "As a user I can use search notes.",
+      "acceptance": [
+        "run() in src/search.mjs returns \"search works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "ok",
+          "at": "2026-10-11T09:58:39.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/search.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 12,
+  "notes": []
+}

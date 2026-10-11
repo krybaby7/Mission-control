@@ -1,0 +1,1629 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": 1791713010000,
+  "generatedAtText": "10:03:30",
+  "freshness": {
+    "pollEveryMs": 4000,
+    "staleAfterMs": 30000,
+    "notRespondingAfterMs": 300000,
+    "notUpdatingText": "Not updating",
+    "notUpdating": {
+      "state": "needs_look",
+      "word": "Needs a look",
+      "sentence": "Not updating. The page has had no news for a while.",
+      "reasons": [
+        {
+          "code": "page_stale",
+          "severity": "look",
+          "text": "the page has had no news for a while",
+          "missionId": null,
+          "featureId": null
+        }
+      ]
+    },
+    "notResponding": {
+      "state": "not_responding",
+      "word": "Not responding",
+      "sentence": "No news for 5 minutes. The last known state is shown greyed out.",
+      "reasons": [
+        {
+          "code": "no_news",
+          "severity": "look",
+          "text": "no news for 5 minutes",
+          "missionId": null,
+          "featureId": null
+        }
+      ]
+    }
+  },
+  "lamp": {
+    "state": "needs_you_now",
+    "word": "Needs you now",
+    "sentence": "“Recipe box” needs your help and 1 feature is stuck.",
+    "reasons": [
+      {
+        "code": "mission_failed",
+        "severity": "now",
+        "text": "“Recipe box” needs your help",
+        "missionId": "2026-10-11-recipe-box",
+        "featureId": null
+      },
+      {
+        "code": "feature_stuck",
+        "severity": "look",
+        "text": "1 feature is stuck",
+        "missionId": null,
+        "featureId": null
+      }
+    ]
+  },
+  "run": {
+    "active": false,
+    "heartbeat": "none",
+    "startedAt": null,
+    "startedAtText": null,
+    "runningMs": null,
+    "runningText": null,
+    "heartbeatAgeMs": null,
+    "heartbeatText": null,
+    "stopRequested": false,
+    "lastActivityAt": null,
+    "lastActivityText": null,
+    "deadline": null,
+    "line": "No run is working right now.",
+    "activityLine": null
+  },
+  "now": null,
+  "missions": [
+    {
+      "id": "2026-10-11-habit-tracker",
+      "title": "Habit tracker",
+      "readable": true,
+      "kind": "new_app",
+      "kindWord": "new app",
+      "scope": "tonight",
+      "openFromBefore": false,
+      "state": "done",
+      "word": "Done",
+      "sentence": "All 4 features are built and checked.",
+      "pausedWhy": null,
+      "progress": [
+        {
+          "id": "plan",
+          "word": "Plan",
+          "state": "done"
+        },
+        {
+          "id": "plan_check",
+          "word": "Plan check",
+          "state": "done"
+        },
+        {
+          "id": "build",
+          "word": "Build",
+          "state": "done"
+        },
+        {
+          "id": "final_check",
+          "word": "Final check",
+          "state": "done"
+        },
+        {
+          "id": "landed",
+          "word": "Landed",
+          "state": "done"
+        }
+      ],
+      "progressWord": "Landed",
+      "repairLap": false,
+      "featuresDone": 4,
+      "featuresTotal": 4,
+      "featuresLine": "4 of 4 features done",
+      "waiting": null,
+      "features": [
+        {
+          "id": "add-habit",
+          "title": "Add and name a habit",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Add and name a habit\" in Habit tracker: <your answer here>"
+        },
+        {
+          "id": "daily-checkin",
+          "title": "Daily check-in",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Daily check-in\" in Habit tracker: <your answer here>"
+        },
+        {
+          "id": "streak-count",
+          "title": "Streak counter",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Streak counter\" in Habit tracker: <your answer here>"
+        },
+        {
+          "id": "weekly-chart",
+          "title": "Weekly streak chart",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Weekly streak chart\" in Habit tracker: <your answer here>"
+        }
+      ],
+      "updatedAt": 1791712693376,
+      "tellLeader": "About \"Habit tracker\": <your answer here>"
+    },
+    {
+      "id": "2026-10-11-members-site",
+      "title": "Members site",
+      "readable": true,
+      "kind": "new_app",
+      "kindWord": "new app",
+      "scope": "tonight",
+      "openFromBefore": false,
+      "state": "partly_done",
+      "word": "Partly done",
+      "sentence": "2 of 4 features are built and checked. 1 feature is stuck. 1 feature was left out.",
+      "pausedWhy": null,
+      "progress": [
+        {
+          "id": "plan",
+          "word": "Plan",
+          "state": "done"
+        },
+        {
+          "id": "plan_check",
+          "word": "Plan check",
+          "state": "done"
+        },
+        {
+          "id": "build",
+          "word": "Build",
+          "state": "done"
+        },
+        {
+          "id": "final_check",
+          "word": "Final check",
+          "state": "done"
+        },
+        {
+          "id": "landed",
+          "word": "Landed",
+          "state": "done"
+        }
+      ],
+      "progressWord": "Landed",
+      "repairLap": false,
+      "featuresDone": 2,
+      "featuresTotal": 4,
+      "featuresLine": "2 of 4 features done",
+      "waiting": null,
+      "features": [
+        {
+          "id": "signup",
+          "title": "Sign-up page",
+          "state": "stuck",
+          "word": "Stuck",
+          "reason": {
+            "text": "I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.",
+            "author": "ai"
+          },
+          "steps": {
+            "used": 3,
+            "total": 5,
+            "caption": "Tried 3 times (2 build tries and 1 expert diagnosis)"
+          },
+          "reinforcements": 2,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": "feature_stuck:2026-10-11-members-site:signup",
+          "tellLeader": "About \"Sign-up page\" in Members site: <your answer here>"
+        },
+        {
+          "id": "pay-subscription",
+          "title": "Paid subscription",
+          "state": "left_out",
+          "word": "Left out",
+          "reason": {
+            "text": "It needed “Sign-up page”, which is stuck.",
+            "author": "engine"
+          },
+          "steps": {
+            "used": 0,
+            "total": 5,
+            "caption": "No tries yet"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 0,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Paid subscription\" in Members site: <your answer here>"
+        },
+        {
+          "id": "welcome-email",
+          "title": "Welcome email",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Welcome email\" in Members site: <your answer here>"
+        },
+        {
+          "id": "settings",
+          "title": "Settings page",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Settings page\" in Members site: <your answer here>"
+        }
+      ],
+      "updatedAt": 1791712697573,
+      "tellLeader": "About \"Members site\": <your answer here>"
+    },
+    {
+      "id": "2026-10-11-recipe-box",
+      "title": "Recipe box",
+      "readable": true,
+      "kind": "new_app",
+      "kindWord": "new app",
+      "scope": "tonight",
+      "openFromBefore": false,
+      "state": "needs_you",
+      "word": "Needs you",
+      "sentence": "It needs your help.",
+      "pausedWhy": null,
+      "progress": [
+        {
+          "id": "plan",
+          "word": "Plan",
+          "state": "done"
+        },
+        {
+          "id": "plan_check",
+          "word": "Plan check",
+          "state": "done"
+        },
+        {
+          "id": "build",
+          "word": "Build",
+          "state": "current"
+        },
+        {
+          "id": "final_check",
+          "word": "Final check",
+          "state": "todo"
+        },
+        {
+          "id": "landed",
+          "word": "Landed",
+          "state": "todo"
+        }
+      ],
+      "progressWord": "Build",
+      "repairLap": false,
+      "featuresDone": 0,
+      "featuresTotal": 2,
+      "featuresLine": "0 of 2 features done",
+      "waiting": null,
+      "features": [
+        {
+          "id": "recipes-list",
+          "title": "Recipe list",
+          "state": "paused",
+          "word": "Paused",
+          "reason": {
+            "text": "Paused. It continues on the next run.",
+            "author": "engine"
+          },
+          "steps": {
+            "used": 0,
+            "total": 5,
+            "caption": "No tries yet"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Recipe list\" in Recipe box: <your answer here>"
+        },
+        {
+          "id": "recipe-search",
+          "title": "Recipe search",
+          "state": "waiting_turn",
+          "word": "Waiting its turn",
+          "reason": null,
+          "steps": {
+            "used": 0,
+            "total": 5,
+            "caption": "No tries yet"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 0,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Recipe search\" in Recipe box: <your answer here>"
+        }
+      ],
+      "updatedAt": 1791712699069,
+      "tellLeader": "About \"Recipe box\": <your answer here>"
+    },
+    {
+      "id": "2026-10-11-task-board",
+      "title": "Task board",
+      "readable": true,
+      "kind": "new_app",
+      "kindWord": "new app",
+      "scope": "tonight",
+      "openFromBefore": false,
+      "state": "done",
+      "word": "Done",
+      "sentence": "All 3 features are built and checked.",
+      "pausedWhy": null,
+      "progress": [
+        {
+          "id": "plan",
+          "word": "Plan",
+          "state": "done"
+        },
+        {
+          "id": "plan_check",
+          "word": "Plan check",
+          "state": "done"
+        },
+        {
+          "id": "build",
+          "word": "Build",
+          "state": "done"
+        },
+        {
+          "id": "final_check",
+          "word": "Final check",
+          "state": "done"
+        },
+        {
+          "id": "landed",
+          "word": "Landed",
+          "state": "done"
+        }
+      ],
+      "progressWord": "Landed",
+      "repairLap": false,
+      "featuresDone": 3,
+      "featuresTotal": 3,
+      "featuresLine": "3 of 3 features done",
+      "waiting": null,
+      "features": [
+        {
+          "id": "list-tasks",
+          "title": "Task list",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Task list\" in Task board: <your answer here>"
+        },
+        {
+          "id": "add-task",
+          "title": "Add a task",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Add a task\" in Task board: <your answer here>"
+        },
+        {
+          "id": "done-task",
+          "title": "Mark a task done",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Mark a task done\" in Task board: <your answer here>"
+        }
+      ],
+      "updatedAt": 1791712704802,
+      "tellLeader": "About \"Task board\": <your answer here>"
+    },
+    {
+      "id": "2026-10-11-reader",
+      "title": "Reader",
+      "readable": true,
+      "kind": "new_app",
+      "kindWord": "new app",
+      "scope": "tonight",
+      "openFromBefore": false,
+      "state": "done",
+      "word": "Done",
+      "sentence": "All 2 features are built and checked.",
+      "pausedWhy": null,
+      "progress": [
+        {
+          "id": "plan",
+          "word": "Plan",
+          "state": "done"
+        },
+        {
+          "id": "plan_check",
+          "word": "Plan check",
+          "state": "done"
+        },
+        {
+          "id": "build",
+          "word": "Build",
+          "state": "done"
+        },
+        {
+          "id": "final_check",
+          "word": "Final check",
+          "state": "done"
+        },
+        {
+          "id": "landed",
+          "word": "Landed",
+          "state": "done"
+        }
+      ],
+      "progressWord": "Landed",
+      "repairLap": false,
+      "featuresDone": 2,
+      "featuresTotal": 2,
+      "featuresLine": "2 of 2 features done",
+      "waiting": null,
+      "features": [
+        {
+          "id": "feed",
+          "title": "News feed",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"News feed\" in Reader: <your answer here>"
+        },
+        {
+          "id": "bookmark",
+          "title": "Bookmarks",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Bookmarks\" in Reader: <your answer here>"
+        }
+      ],
+      "updatedAt": 1791723565596,
+      "tellLeader": "About \"Reader\": <your answer here>"
+    }
+  ],
+  "needsYou": [
+    {
+      "id": "mission_failed:2026-10-11-recipe-box:0",
+      "kind": "mission_failed",
+      "severity": "now",
+      "missionId": "2026-10-11-recipe-box",
+      "missionTitle": "Recipe box",
+      "fromBefore": false,
+      "featureId": null,
+      "title": "“Recipe box” needs your help",
+      "happened": {
+        "text": "A login has expired. Claude or Codex has to be logged in again on the PC.",
+        "author": "engine"
+      },
+      "summary": null,
+      "ifNothing": "Once the login works, the next run carries on by itself.",
+      "tellLeader": "About \"Recipe box\", which stopped: <your answer here>"
+    },
+    {
+      "id": "feature_stuck:2026-10-11-members-site:signup",
+      "kind": "feature_stuck",
+      "severity": "look",
+      "missionId": "2026-10-11-members-site",
+      "missionTitle": "Members site",
+      "fromBefore": false,
+      "featureId": "signup",
+      "title": "“Sign-up page” is stuck",
+      "happened": {
+        "text": "I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.",
+        "author": "ai"
+      },
+      "summary": "Tried 3 times (2 build tries and 1 expert diagnosis).",
+      "ifNothing": "It stays out. Nothing tries it again unless you ask. “Paid subscription” needed it, so that stays out too.",
+      "tellLeader": "About \"Sign-up page\" in Members site, which is stuck: <your answer here>"
+    }
+  ],
+  "allowance": {
+    "providers": [
+      {
+        "id": "claude",
+        "label": "Claude",
+        "pill": {
+          "state": "no_reading",
+          "word": "No reading yet"
+        },
+        "windows": [],
+        "note": "No usage reading yet.",
+        "limitedUntil": null,
+        "limitedText": null
+      },
+      {
+        "id": "codex",
+        "label": "Codex",
+        "pill": {
+          "state": "waiting_reset",
+          "word": "Waiting for reset"
+        },
+        "windows": [],
+        "note": "No usage reading yet.",
+        "limitedUntil": 1791723505596,
+        "limitedText": "Waiting for the 5-hour limit to reset. Work resumes at 12:59."
+      }
+    ],
+    "waiting": null,
+    "fileChangedAt": 1791712680000,
+    "fileChangedText": "Usage figures last changed at 09:58"
+  },
+  "timeline": {
+    "items": [
+      {
+        "at": 1791712689053,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-habit-tracker",
+        "featureId": null,
+        "tone": "info",
+        "text": "Started working on “Habit tracker”.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712689101,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-habit-tracker",
+        "featureId": null,
+        "tone": "info",
+        "text": "The plan is ready: 4 features.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712689392,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-habit-tracker",
+        "featureId": null,
+        "tone": "good",
+        "text": "The app's foundation is ready.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712690212,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-habit-tracker",
+        "featureId": "add-habit",
+        "tone": "good",
+        "text": "“Add and name a habit” is built and checked.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712691051,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-habit-tracker",
+        "featureId": "daily-checkin",
+        "tone": "good",
+        "text": "“Daily check-in” is built and checked.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712691992,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-habit-tracker",
+        "featureId": "streak-count",
+        "tone": "good",
+        "text": "“Streak counter” is built and checked.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712692918,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-habit-tracker",
+        "featureId": "weekly-chart",
+        "tone": "good",
+        "text": "“Weekly streak chart” is built and checked.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712692939,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-habit-tracker",
+        "featureId": null,
+        "tone": "info",
+        "text": "The building is finished. Starting the final check.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712693207,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-habit-tracker",
+        "featureId": null,
+        "tone": "good",
+        "text": "The final tests of the whole app passed.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712693376,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-habit-tracker",
+        "featureId": null,
+        "tone": "good",
+        "text": "Finished “Habit tracker”: done.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712694163,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": null,
+        "tone": "info",
+        "text": "Started working on “Members site”.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712694172,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": null,
+        "tone": "info",
+        "text": "The plan is ready: 4 features.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712694423,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": null,
+        "tone": "good",
+        "text": "The app's foundation is ready.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712694973,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": "signup",
+        "tone": "warn",
+        "text": "“Sign-up page” did not pass its checks. Calling in reinforcements (step 2 of 5).",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712695214,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": "signup",
+        "tone": "warn",
+        "text": "“Sign-up page” did not pass its checks. Calling in reinforcements (step 3 of 5).",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712695275,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": "signup",
+        "tone": "bad",
+        "text": "“Sign-up page” is stuck.",
+        "note": {
+          "text": "I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.",
+          "author": "ai"
+        },
+        "author": "ai",
+        "count": 1
+      },
+      {
+        "at": 1791712695278,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": "pay-subscription",
+        "tone": "warn",
+        "text": "“Paid subscription” was left out because it needed a stuck feature.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712696223,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": "welcome-email",
+        "tone": "good",
+        "text": "“Welcome email” is built and checked.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712697188,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": "settings",
+        "tone": "good",
+        "text": "“Settings page” is built and checked.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712697212,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": null,
+        "tone": "info",
+        "text": "The building is finished. Starting the final check.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712697449,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": null,
+        "tone": "good",
+        "text": "The final tests of the whole app passed.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712697573,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": null,
+        "tone": "warn",
+        "text": "Finished “Members site”: partly done.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712698384,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-recipe-box",
+        "featureId": null,
+        "tone": "info",
+        "text": "Started working on “Recipe box”.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712698389,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-recipe-box",
+        "featureId": null,
+        "tone": "info",
+        "text": "The plan is ready: 2 features.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712698677,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-recipe-box",
+        "featureId": null,
+        "tone": "good",
+        "text": "The app's foundation is ready.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712699041,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-recipe-box",
+        "featureId": "recipes-list",
+        "tone": "info",
+        "text": "Wrote 1 check that “Recipe list” must pass. The AI that builds it cannot change it.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712699064,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-recipe-box",
+        "featureId": null,
+        "tone": "bad",
+        "text": "A login has expired.",
+        "note": null,
+        "author": "engine",
+        "count": 2
+      },
+      {
+        "at": 1791712699069,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-recipe-box",
+        "featureId": null,
+        "tone": "bad",
+        "text": "“Recipe box” needs your help.",
+        "note": {
+          "text": "A login has expired. Claude or Codex has to be logged in again on the PC.",
+          "author": "engine"
+        },
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712699847,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-task-board",
+        "featureId": null,
+        "tone": "info",
+        "text": "Started working on “Task board”.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712699853,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-task-board",
+        "featureId": null,
+        "tone": "info",
+        "text": "The plan is ready: 3 features.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712700124,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-task-board",
+        "featureId": null,
+        "tone": "good",
+        "text": "The app's foundation is ready.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712700991,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-task-board",
+        "featureId": "list-tasks",
+        "tone": "good",
+        "text": "“Task list” is built and checked.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712703517,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-task-board",
+        "featureId": "add-task",
+        "tone": "good",
+        "text": "“Add a task” is built and checked.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712704402,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-task-board",
+        "featureId": "done-task",
+        "tone": "good",
+        "text": "“Mark a task done” is built and checked.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712704422,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-task-board",
+        "featureId": null,
+        "tone": "info",
+        "text": "The building is finished. Starting the final check.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712704677,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-task-board",
+        "featureId": null,
+        "tone": "good",
+        "text": "The final tests of the whole app passed.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712704802,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-task-board",
+        "featureId": null,
+        "tone": "good",
+        "text": "Finished “Task board”: done.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712705596,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-reader",
+        "featureId": null,
+        "tone": "info",
+        "text": "Started working on “Reader”.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712705596,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-reader",
+        "featureId": null,
+        "tone": "info",
+        "text": "The plan is ready: 2 features.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712705596,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-reader",
+        "featureId": null,
+        "tone": "warn",
+        "text": "Waiting for allowance until 12:59. It resumes by itself.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791723565596,
+        "time": "12:59",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-reader",
+        "featureId": null,
+        "tone": "good",
+        "text": "The app's foundation is ready.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791723565596,
+        "time": "12:59",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-reader",
+        "featureId": "feed",
+        "tone": "good",
+        "text": "“News feed” is built and checked.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791723565596,
+        "time": "12:59",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-reader",
+        "featureId": "bookmark",
+        "tone": "good",
+        "text": "“Bookmarks” is built and checked.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791723565596,
+        "time": "12:59",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-reader",
+        "featureId": null,
+        "tone": "info",
+        "text": "The building is finished. Starting the final check.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791723565596,
+        "time": "12:59",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-reader",
+        "featureId": null,
+        "tone": "good",
+        "text": "The final tests of the whole app passed.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791723565596,
+        "time": "12:59",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-reader",
+        "featureId": null,
+        "tone": "good",
+        "text": "Finished “Reader”: done.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      }
+    ],
+    "earlierNotShown": 0
+  },
+  "debrief": {
+    "verdict": {
+      "id": "needs_you",
+      "word": "Needs you",
+      "sentence": "5 missions: 3 done, 1 partly done, 1 needs your help."
+    },
+    "missions": [
+      {
+        "missionId": "2026-10-11-habit-tracker",
+        "title": "Habit tracker",
+        "verdict": {
+          "id": "done",
+          "word": "Done",
+          "sentence": "All 4 features are built and checked."
+        },
+        "plannedLine": "4 features planned",
+        "got": [
+          {
+            "featureId": "add-habit",
+            "title": "Add and name a habit",
+            "note": {
+              "text": "As a user I can add a habit with a name.",
+              "author": "ai"
+            },
+            "attempts": 1
+          },
+          {
+            "featureId": "daily-checkin",
+            "title": "Daily check-in",
+            "note": {
+              "text": "As a user I can tick a habit off for today.",
+              "author": "ai"
+            },
+            "attempts": 1
+          },
+          {
+            "featureId": "streak-count",
+            "title": "Streak counter",
+            "note": {
+              "text": "As a user I see my current streak.",
+              "author": "ai"
+            },
+            "attempts": 1
+          },
+          {
+            "featureId": "weekly-chart",
+            "title": "Weekly streak chart",
+            "note": {
+              "text": "As a user I see a chart of my week.",
+              "author": "ai"
+            },
+            "attempts": 1
+          }
+        ],
+        "leftOut": [],
+        "recovered": [],
+        "ticks": [
+          {
+            "id": "delivered",
+            "label": "Delivered",
+            "state": "yes",
+            "why": "All 4 features were built and checked.",
+            "caveat": null
+          },
+          {
+            "id": "final_review",
+            "label": "Final review passed",
+            "state": "yes",
+            "why": "The final review ran and found no serious problem.",
+            "caveat": null
+          },
+          {
+            "id": "nothing_open",
+            "label": "Nothing open",
+            "state": "yes",
+            "why": "Nothing is waiting for you.",
+            "caveat": null
+          },
+          {
+            "id": "no_rework",
+            "label": "No rework",
+            "state": "yes",
+            "why": "The final check did not send the team back for a repair round.",
+            "caveat": null
+          }
+        ],
+        "agentTimeText": "less than a minute of AI work",
+        "agentRuns": 21,
+        "tellLeader": "About \"Habit tracker\": <your answer here>"
+      },
+      {
+        "missionId": "2026-10-11-members-site",
+        "title": "Members site",
+        "verdict": {
+          "id": "partly_done",
+          "word": "Partly done",
+          "sentence": "2 of 4 features are built and checked. 1 feature is stuck."
+        },
+        "plannedLine": "4 features planned",
+        "got": [
+          {
+            "featureId": "welcome-email",
+            "title": "Welcome email",
+            "note": {
+              "text": "As a new user I get a welcome email.",
+              "author": "ai"
+            },
+            "attempts": 1
+          },
+          {
+            "featureId": "settings",
+            "title": "Settings page",
+            "note": {
+              "text": "As a user I can change my name.",
+              "author": "ai"
+            },
+            "attempts": 1
+          }
+        ],
+        "leftOut": [
+          {
+            "featureId": "signup",
+            "title": "Sign-up page",
+            "note": {
+              "text": "I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.",
+              "author": "ai"
+            },
+            "attempts": 3
+          },
+          {
+            "featureId": "pay-subscription",
+            "title": "Paid subscription",
+            "note": {
+              "text": "It needed “Sign-up page”, which is stuck.",
+              "author": "engine"
+            },
+            "attempts": 0
+          }
+        ],
+        "recovered": [],
+        "ticks": [
+          {
+            "id": "delivered",
+            "label": "Delivered",
+            "state": "no",
+            "why": "2 of 4 features were built and checked. 1 is stuck. 1 was left out.",
+            "caveat": null
+          },
+          {
+            "id": "final_review",
+            "label": "Final review passed",
+            "state": "yes",
+            "why": "The final review ran and found no serious problem.",
+            "caveat": "It covered only the 2 features that were built."
+          },
+          {
+            "id": "nothing_open",
+            "label": "Nothing open",
+            "state": "no",
+            "why": "1 item is waiting for you.",
+            "caveat": null
+          },
+          {
+            "id": "no_rework",
+            "label": "No rework",
+            "state": "yes",
+            "why": "The final check did not send the team back for a repair round.",
+            "caveat": null
+          }
+        ],
+        "agentTimeText": "less than a minute of AI work",
+        "agentRuns": 20,
+        "tellLeader": "About \"Members site\": <your answer here>"
+      },
+      {
+        "missionId": "2026-10-11-recipe-box",
+        "title": "Recipe box",
+        "verdict": {
+          "id": "needs_you",
+          "word": "Needs you",
+          "sentence": "It needs your help."
+        },
+        "plannedLine": "2 features planned",
+        "got": [],
+        "leftOut": [],
+        "recovered": [],
+        "ticks": [
+          {
+            "id": "delivered",
+            "label": "Delivered",
+            "state": "no",
+            "why": "0 of 2 features were built and checked.",
+            "caveat": null
+          },
+          {
+            "id": "final_review",
+            "label": "Final review passed",
+            "state": "no",
+            "why": "The final check did not run.",
+            "caveat": null
+          },
+          {
+            "id": "nothing_open",
+            "label": "Nothing open",
+            "state": "no",
+            "why": "1 item is waiting for you.",
+            "caveat": null
+          },
+          {
+            "id": "no_rework",
+            "label": "No rework",
+            "state": "yes",
+            "why": "The final check did not send the team back for a repair round.",
+            "caveat": null
+          }
+        ],
+        "agentTimeText": "less than a minute of AI work",
+        "agentRuns": 7,
+        "tellLeader": "About \"Recipe box\": <your answer here>"
+      },
+      {
+        "missionId": "2026-10-11-task-board",
+        "title": "Task board",
+        "verdict": {
+          "id": "done",
+          "word": "Done",
+          "sentence": "All 3 features are built and checked."
+        },
+        "plannedLine": "3 features planned",
+        "got": [
+          {
+            "featureId": "list-tasks",
+            "title": "Task list",
+            "note": {
+              "text": "As a user I see my tasks.",
+              "author": "ai"
+            },
+            "attempts": 1
+          },
+          {
+            "featureId": "add-task",
+            "title": "Add a task",
+            "note": {
+              "text": "As a user I can add a task.",
+              "author": "ai"
+            },
+            "attempts": 1
+          },
+          {
+            "featureId": "done-task",
+            "title": "Mark a task done",
+            "note": {
+              "text": "As a user I can complete a task.",
+              "author": "ai"
+            },
+            "attempts": 1
+          }
+        ],
+        "leftOut": [],
+        "recovered": [],
+        "ticks": [
+          {
+            "id": "delivered",
+            "label": "Delivered",
+            "state": "yes",
+            "why": "All 3 features were built and checked.",
+            "caveat": null
+          },
+          {
+            "id": "final_review",
+            "label": "Final review passed",
+            "state": "yes",
+            "why": "The final review ran and found no serious problem.",
+            "caveat": null
+          },
+          {
+            "id": "nothing_open",
+            "label": "Nothing open",
+            "state": "yes",
+            "why": "Nothing is waiting for you.",
+            "caveat": null
+          },
+          {
+            "id": "no_rework",
+            "label": "No rework",
+            "state": "yes",
+            "why": "The final check did not send the team back for a repair round.",
+            "caveat": null
+          }
+        ],
+        "agentTimeText": "less than a minute of AI work",
+        "agentRuns": 17,
+        "tellLeader": "About \"Task board\": <your answer here>"
+      },
+      {
+        "missionId": "2026-10-11-reader",
+        "title": "Reader",
+        "verdict": {
+          "id": "done",
+          "word": "Done",
+          "sentence": "All 2 features are built and checked."
+        },
+        "plannedLine": "2 features planned",
+        "got": [
+          {
+            "featureId": "feed",
+            "title": "News feed",
+            "note": {
+              "text": "As a reader I see articles.",
+              "author": "ai"
+            },
+            "attempts": 1
+          },
+          {
+            "featureId": "bookmark",
+            "title": "Bookmarks",
+            "note": {
+              "text": "As a reader I can save an article.",
+              "author": "ai"
+            },
+            "attempts": 1
+          }
+        ],
+        "leftOut": [],
+        "recovered": [],
+        "ticks": [
+          {
+            "id": "delivered",
+            "label": "Delivered",
+            "state": "yes",
+            "why": "All 2 features were built and checked.",
+            "caveat": null
+          },
+          {
+            "id": "final_review",
+            "label": "Final review passed",
+            "state": "yes",
+            "why": "The final review ran and found no serious problem.",
+            "caveat": null
+          },
+          {
+            "id": "nothing_open",
+            "label": "Nothing open",
+            "state": "yes",
+            "why": "Nothing is waiting for you.",
+            "caveat": null
+          },
+          {
+            "id": "no_rework",
+            "label": "No rework",
+            "state": "yes",
+            "why": "The final check did not send the team back for a repair round.",
+            "caveat": null
+          }
+        ],
+        "agentTimeText": "less than a minute of AI work",
+        "agentRuns": 14,
+        "tellLeader": "About \"Reader\": <your answer here>"
+      }
+    ],
+    "allowanceNote": "The AI work runs on your existing Claude and Codex plans, so there is no separate bill. This page cannot show your share of the week yet.",
+    "honestyNote": "These are the AI team's own checks, not a human review."
+  },
+  "counts": {
+    "unreadableMissions": 0,
+    "openFromBefore": 0,
+    "olderNeedYou": 0,
+    "olderWaitingForYou": 0,
+    "tonightMissions": 5,
+    "featuresDone": 11,
+    "featuresTotal": 15,
+    "featuresLine": "11 of 15 features done",
+    "questions": 0,
+    "stuckFeatures": 1,
+    "olderMissionsHidden": 0
+  },
+  "leader": {
+    "quickPhrases": [
+      "Your call",
+      "Leave it out",
+      "Try again",
+      "What is going on?"
+    ],
+    "globalSentence": "About tonight's run: <your answer here>",
+    "stopSentence": "Please stop tonight's run.",
+    "pasteHint": "Paste this into your chat with the leader.",
+    "copyFailHint": "Select the text and copy it",
+    "aiNotice": "The AI wrote this. Do not run commands from it.",
+    "canDo": "The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.",
+    "stopNote": "Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "limits": {},
+  "modelBlocks": [],
+  "utilization": [
+    {
+      "provider": "claude",
+      "window": "five_hour",
+      "utilization": 1.04,
+      "resetsAt": 1791721200000
+    },
+    {
+      "provider": "codex",
+      "window": "180_minutes",
+      "utilization": 1.2,
+      "resetsAt": 1791716400000
+    }
+  ]
+}

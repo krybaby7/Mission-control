@@ -1,0 +1,91 @@
+{
+  "id": "2026-10-11-garden-planner",
+  "kind": "greenfield",
+  "title": "Garden planner",
+  "request": "Build me Garden planner",
+  "repoPath": "/fixture/mc-apps/garden-planner",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-garden-planner",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "stopped",
+  "stage": "features",
+  "createdAt": "2026-10-11T09:58:00.000Z",
+  "updatedAt": "2026-10-11T09:58:20.000Z",
+  "features": [
+    {
+      "id": "beds",
+      "title": "Plant beds",
+      "story": "As a user I can use plant beds.",
+      "acceptance": [
+        "run() in src/beds.mjs returns \"beds works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/beds.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "watering",
+      "title": "Watering plan",
+      "story": "As a user I can use watering plan.",
+      "acceptance": [
+        "run() in src/watering.mjs returns \"watering works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "beds"
+      ],
+      "status": "pending",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "harvest",
+      "title": "Harvest log",
+      "story": "As a user I can use harvest log.",
+      "acceptance": [
+        "run() in src/harvest.mjs returns \"harvest works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "beds"
+      ],
+      "status": "pending",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

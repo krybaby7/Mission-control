@@ -1,0 +1,89 @@
+{
+  "id": "2026-10-11-old-shop",
+  "kind": "feature",
+  "title": "Old shop",
+  "request": "Build me Old shop",
+  "repoPath": "/fixture/mc-apps/old-shop",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-old-shop",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "done",
+  "stage": "complete",
+  "createdAt": "2026-10-11T09:58:00.000Z",
+  "updatedAt": "2026-10-11T09:58:30.000Z",
+  "features": [
+    {
+      "id": "gift-wrap",
+      "title": "Gift wrap option",
+      "story": "As a user I can use gift wrap option.",
+      "acceptance": [
+        "run() in src/gift-wrap.mjs returns \"gift-wrap works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/gift-wrap.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "wish-list",
+      "title": "Wish list",
+      "story": "As a user I can use wish list.",
+      "acceptance": [
+        "run() in src/wish-list.mjs returns \"wish-list works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/wish-list.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": true,
+  "baselineFailures": [
+    "3 of the project's tests were already failing"
+  ],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

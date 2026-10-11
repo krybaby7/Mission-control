@@ -1,0 +1,25 @@
+{"at":"2026-10-11T09:58:10.000Z","missionId":"2026-10-11-expense-log","type":"mission.start","data":{"stage":"spec"}}
+{"at":"2026-10-11T09:58:11.000Z","missionId":"2026-10-11-expense-log","type":"spec","data":{"appName":"Expense log","features":["add-expense"]}}
+{"at":"2026-10-11T09:58:12.000Z","missionId":"2026-10-11-expense-log","type":"stage","data":{"from":"spec","to":"gate_a"}}
+{"at":"2026-10-11T09:58:13.000Z","missionId":"2026-10-11-expense-log","type":"stage","data":{"from":"gate_a","to":"init"}}
+{"at":"2026-10-11T09:58:14.000Z","missionId":"2026-10-11-expense-log","type":"attempt","data":{"feature":"_init","rung":0,"provider":"codex","model":"gpt-6.1-sol","effort":"medium","outcome":"pass"}}
+{"at":"2026-10-11T09:58:15.000Z","missionId":"2026-10-11-expense-log","type":"stage","data":{"from":"init","to":"features"}}
+{"at":"2026-10-11T09:58:19.000Z","missionId":"2026-10-11-expense-log","type":"feature.status","data":{"feature":"add-expense","from":"pending","to":"testing"}}
+{"at":"2026-10-11T09:58:20.000Z","missionId":"2026-10-11-expense-log","type":"tests.frozen","data":{"feature":"add-expense","files":["tests/add-expense.test.mjs"],"commit":"0000000000000000000000000000000000000000"}}
+{"at":"2026-10-11T09:58:21.000Z","missionId":"2026-10-11-expense-log","type":"attempt","data":{"feature":"add-expense","rung":0,"action":"build","provider":"codex","model":"gpt-6.1-sol","effort":"medium","outcome":"pass"}}
+{"at":"2026-10-11T09:58:22.000Z","missionId":"2026-10-11-expense-log","type":"feature.status","data":{"feature":"add-expense","from":"building","to":"reviewing"}}
+{"at":"2026-10-11T09:58:23.000Z","missionId":"2026-10-11-expense-log","type":"merge","data":{"feature":"add-expense","commit":"0000000000000000000000000000000000000000"}}
+{"at":"2026-10-11T09:58:24.000Z","missionId":"2026-10-11-expense-log","type":"feature.status","data":{"feature":"add-expense","from":"reviewing","to":"done"}}
+{"at":"2026-10-11T09:58:39.000Z","missionId":"2026-10-11-expense-log","type":"stage","data":{"from":"features","to":"gate_c"}}
+{"at":"2026-10-11T09:58:40.000Z","missionId":"2026-10-11-expense-log","type":"verify","data":{"label":"gate-c","ok":false,"exitCode":1,"timedOut":false,"durationMs":100,"signature":"abc","logFile":""}}
+{"at":"2026-10-11T09:58:41.000Z","missionId":"2026-10-11-expense-log","type":"stage","data":{"from":"gate_c","to":"features"}}
+{"at":"2026-10-11T09:58:42.000Z","missionId":"2026-10-11-expense-log","type":"feature.added","data":{"feature":"gate-c-fix-1","round":1}}
+{"at":"2026-10-11T09:58:43.000Z","missionId":"2026-10-11-expense-log","type":"feature.status","data":{"feature":"gate-c-fix-1","from":"pending","to":"testing"}}
+{"at":"2026-10-11T09:58:44.000Z","missionId":"2026-10-11-expense-log","type":"attempt","data":{"feature":"gate-c-fix-1","rung":0,"action":"build","provider":"codex","model":"gpt-6.1-sol","effort":"medium","outcome":"pass"}}
+{"at":"2026-10-11T09:58:45.000Z","missionId":"2026-10-11-expense-log","type":"merge","data":{"feature":"gate-c-fix-1","commit":"0000000000000000000000000000000000000000"}}
+{"at":"2026-10-11T09:58:49.000Z","missionId":"2026-10-11-expense-log","type":"stage","data":{"from":"features","to":"gate_c"}}
+{"at":"2026-10-11T09:58:50.000Z","missionId":"2026-10-11-expense-log","type":"verify","data":{"label":"gate-c","ok":true,"exitCode":0,"timedOut":false,"durationMs":100,"signature":"","logFile":""}}
+{"at":"2026-10-11T09:58:51.000Z","missionId":"2026-10-11-expense-log","type":"stage","data":{"from":"gate_c","to":"finalize"}}
+{"at":"2026-10-11T09:58:52.000Z","missionId":"2026-10-11-expense-log","type":"report","data":{"path":"/fixture/.mission-control/missions/x/report.md"}}
+{"at":"2026-10-11T09:58:53.000Z","missionId":"2026-10-11-expense-log","type":"mission.end","data":{"status":"done"}}
+{"at":"2026-10-11T09:58:54.000Z","missionId":"2026-10-11-expense-log","type":"stage","data":{"from":"finalize","to":"complete"}}

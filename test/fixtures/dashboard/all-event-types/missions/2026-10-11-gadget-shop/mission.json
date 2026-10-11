@@ -1,0 +1,242 @@
+{
+  "id": "2026-10-11-gadget-shop",
+  "kind": "greenfield",
+  "title": "Gadget shop",
+  "request": "Build Gadget shop",
+  "repoPath": "/fixture/mc-apps/gadget-shop",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-gadget-shop",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "partial",
+  "stage": "complete",
+  "createdAt": "2026-10-11T09:58:09.000Z",
+  "updatedAt": "2026-10-11T09:59:09.000Z",
+  "features": [
+    {
+      "id": "alpha",
+      "title": "Alpha page",
+      "story": "As a user I can use alpha page.",
+      "acceptance": [
+        "run() in src/alpha.mjs returns \"alpha works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "ok",
+          "at": "2026-10-11T09:58:39.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/alpha.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "beta",
+      "title": "Beta page",
+      "story": "As a user I can use beta page.",
+      "acceptance": [
+        "run() in src/beta.mjs returns \"beta works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "blocked",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "fail",
+          "summary": "verification failed",
+          "at": "2026-10-11T09:58:29.000Z"
+        },
+        {
+          "rung": 1,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "fail",
+          "summary": "verification failed",
+          "at": "2026-10-11T09:58:34.000Z"
+        },
+        {
+          "rung": 2,
+          "action": "diagnose",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "ok",
+          "at": "2026-10-11T09:58:37.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/beta.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "blockedReason": "I need to know which payment provider you want (Stripe or PayPal) before this can be finished."
+    },
+    {
+      "id": "gamma",
+      "title": "Gamma page",
+      "story": "As a user I can use gamma page.",
+      "acceptance": [
+        "run() in src/gamma.mjs returns \"gamma works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "skipped",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [
+        {
+          "path": "tests/gamma.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "blockedReason": "waiting on \"Beta page\", which was blocked"
+    },
+    {
+      "id": "delta",
+      "title": "Delta page",
+      "story": "As a user I can use delta page.",
+      "acceptance": [
+        "run() in src/delta.mjs returns \"delta works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "ok",
+          "at": "2026-10-11T09:58:39.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/delta.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "gate-c-fix-1",
+      "title": "Fix found by the final check",
+      "story": "As a user I can use fix found by the final check.",
+      "acceptance": [
+        "run() in src/gate-c-fix-1.mjs returns \"gate-c-fix-1 works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "ok",
+          "at": "2026-10-11T09:58:39.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/gate-c-fix-1.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 1,
+  "agentRuns": 12,
+  "notes": []
+}

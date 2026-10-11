@@ -1,0 +1,87 @@
+{
+  "id": "2026-10-11-seed-shop",
+  "kind": "greenfield",
+  "title": "Seed shop",
+  "request": "Build me Seed shop",
+  "repoPath": "/fixture/mc-apps/seed-shop",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-seed-shop",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "done",
+  "stage": "finalize",
+  "createdAt": "2026-10-11T09:58:00.000Z",
+  "updatedAt": "2026-10-11T09:58:20.000Z",
+  "features": [
+    {
+      "id": "catalog",
+      "title": "Seed catalog",
+      "story": "As a user I can use seed catalog.",
+      "acceptance": [
+        "run() in src/catalog.mjs returns \"catalog works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/catalog.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "basket",
+      "title": "Basket",
+      "story": "As a user I can use basket.",
+      "acceptance": [
+        "run() in src/basket.mjs returns \"basket works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/basket.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

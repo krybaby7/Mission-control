@@ -1,0 +1,213 @@
+{
+  "id": "2026-10-11-task-board",
+  "kind": "greenfield",
+  "title": "Task board",
+  "request": "A simple task board",
+  "repoPath": "/fixture/mc-apps/task-board",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-task-board",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "done",
+  "stage": "complete",
+  "createdAt": "2026-10-11T09:58:19.844Z",
+  "updatedAt": "2026-10-11T09:58:24.802Z",
+  "features": [
+    {
+      "id": "list-tasks",
+      "title": "Task list",
+      "story": "As a user I see my tasks.",
+      "acceptance": [
+        "run() in src/list-tasks.mjs returns \"list-tasks works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "implemented list-tasks",
+          "at": "2026-10-11T09:58:20.902Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/list-tasks.test.mjs",
+          "sha256": "79ad2a7f86ce4710c9848308ffaf6cc6dcf21f852e0e1335978a3dd17f73701c"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "testsCommit": "4fc053d29f012086cbff5dea8fc1c63de89acca4",
+      "passingCommit": "b3cbd70fe913745cf1d7818475c4fa3bc2711987",
+      "builtBy": "codex",
+      "commit": "91aa6c88ee40b8993ff7124278408d8f800f5107"
+    },
+    {
+      "id": "add-task",
+      "title": "Add a task",
+      "story": "As a user I can add a task.",
+      "acceptance": [
+        "run() in src/add-task.mjs returns \"add-task works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "list-tasks"
+      ],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "implemented add-task",
+          "at": "2026-10-11T09:58:22.860Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/add-task.test.mjs",
+          "sha256": "c4aee110abcd3f98f1e00f320fe5805fb98c8d473fb224f511226d3f4f78e35b"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "testsCommit": "35e31a7f2bf5abd1286ce90850c21bec0dc07622",
+      "passingCommit": "8eb5e5733850cb28e77ec8f3b39dae5bae54f10a",
+      "builtBy": "codex",
+      "commit": "eb39431416f8958ce4ab7f09bba5737ce48bf631"
+    },
+    {
+      "id": "done-task",
+      "title": "Mark a task done",
+      "story": "As a user I can complete a task.",
+      "acceptance": [
+        "run() in src/done-task.mjs returns \"done-task works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "add-task"
+      ],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "implemented done-task",
+          "at": "2026-10-11T09:58:24.315Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/done-task.test.mjs",
+          "sha256": "97c0dc260e6b832fcaaed1733abf6c75f986ba102be2e04cdc4e8e7ef4e3aefe"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "testsCommit": "98b9f51521ba6aaa43ba5c144b8dbea0813b1536",
+      "passingCommit": "764521f0b201c84b9d013f72c97202857797227f",
+      "builtBy": "codex",
+      "commit": "490b6e8a74e5fa438fd1ec978f522a19e0162f70"
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 17,
+  "notes": [
+    "Everything is stored locally; no sign-in."
+  ],
+  "spec": {
+    "appName": "Task board",
+    "summary": "A small task board.",
+    "features": [
+      {
+        "id": "list-tasks",
+        "title": "Task list",
+        "story": "As a user I see my tasks.",
+        "acceptance": [
+          "run() in src/list-tasks.mjs returns \"list-tasks works\""
+        ],
+        "kind": "standard",
+        "deps": []
+      },
+      {
+        "id": "add-task",
+        "title": "Add a task",
+        "story": "As a user I can add a task.",
+        "acceptance": [
+          "run() in src/add-task.mjs returns \"add-task works\""
+        ],
+        "kind": "standard",
+        "deps": [
+          "list-tasks"
+        ]
+      },
+      {
+        "id": "done-task",
+        "title": "Mark a task done",
+        "story": "As a user I can complete a task.",
+        "acceptance": [
+          "run() in src/done-task.mjs returns \"done-task works\""
+        ],
+        "kind": "standard",
+        "deps": [
+          "add-task"
+        ]
+      }
+    ],
+    "assumptions": [
+      "Everything is stored locally; no sign-in."
+    ],
+    "uiContract": "Feature <id> lives in src/<id>.mjs and exports run()."
+  },
+  "baseSha": "b7a29768dadd4c7b29fda06268e55dabe0b2f1cb",
+  "verify": {
+    "full": "node --test \"tests/**/*.test.mjs\"",
+    "testGlobs": [
+      "tests/**"
+    ],
+    "tests": "node --test {files}"
+  }
+}

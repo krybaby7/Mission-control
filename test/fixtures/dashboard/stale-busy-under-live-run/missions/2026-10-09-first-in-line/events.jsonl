@@ -1,0 +1,2 @@
+{"at":"2026-10-11T09:50:05.000Z","missionId":"2026-10-09-first-in-line","type":"mission.start","data":{"stage":"spec"}}
+{"at":"2026-10-11T09:58:10.000Z","missionId":"2026-10-09-first-in-line","type":"run.start","data":{"label":"spec","jobId":"spec-1","role":"architect","provider":"claude","model":"claude-opus-5-5","effort":"high"}}

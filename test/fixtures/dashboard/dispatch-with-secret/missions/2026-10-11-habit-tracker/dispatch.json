@@ -1,0 +1,26 @@
+{
+  "units": {
+    "add-habit": {
+      "lastFailure": {
+        "outputTail": "FAIL tests/add-habit.test.mjs\n  at /fixture/mc-apps/habit-tracker/src/add-habit.mjs:3:9",
+        "signature": "def"
+      },
+      "passTail": "ok 1 - add-habit works (in /fixture/mc-apps/habit-tracker)",
+      "installed": true
+    }
+  },
+  "gitSettings": {
+    "config": "[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = https://x-access-token:ghp_FAKE0123456789SENTINEL@github.com/fixture/habit-tracker.git\n",
+    "entries": [
+      "core.repositoryformatversion\n0",
+      "remote.origin.url\nhttps://x-access-token:ghp_FAKE0123456789SENTINEL@github.com/fixture/habit-tracker.git"
+    ],
+    "hooks": {}
+  },
+  "finalVerify": {
+    "ok": true,
+    "head": "3333333333333333333333333333333333333333",
+    "reviewed": true,
+    "blocking": 0
+  }
+}

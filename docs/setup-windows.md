@@ -297,6 +297,71 @@ Only one run can happen at a time. If you start one by hand while the scheduled 
 
 Your apps' files are in File Explorer at `\\wsl.localhost\Ubuntu\home\<your-ubuntu-name>\mc-apps`.
 
+## Optional: watch the night on a web page (the dashboard)
+
+The dashboard is a web page that shows, in plain words, whether the night is working, how far along it is, whether anything needs you, and what you got in the morning. It only reads Mission Control's files: it can't change, stop or start anything. This part has not been tried on a real PC yet.
+
+1. Open a second Ubuntu window (leave the one with the night run alone) and run:
+
+   ```
+   mc dashboard
+   ```
+
+   **You should see** a line like `mc-docker: the dashboard is at http://localhost:8787 (Ctrl+C to stop)`. Leave the window open. The dashboard runs in a container of its own, which can only read Mission Control's folder.
+
+2. Open <http://localhost:8787> in your Windows browser. The page has four tabs: **Tonight**, **Needs you**, **Timeline** and **Morning debrief**. It asks for news every few seconds. If it can't, it says **Not updating**, and after a few minutes **Not responding**.
+
+3. To see a countdown to the stop time, start it with the same time you gave the night run:
+
+   ```
+   mc dashboard --until 07:00
+   ```
+
+   Mission Control doesn't save the stop time, so without `--until` the page shows no countdown.
+
+4. To stop the dashboard, press **Ctrl+C** in its window. If the window is gone and it is still running, `docker stop mission-control-dashboard` stops it.
+
+After you update Mission Control (see [Updating Mission Control](#updating-mission-control)), run `mc build` before starting the dashboard: the page is part of the image.
+
+There is no password, by design. Anyone who can open the page can see your missions' names and progress.
+
+### From the iPad
+
+**Whether the iPad can open the dashboard through WSL2 and the Windows firewall has not been tried, so this guide doesn't say how to do it.** These are the facts that are known:
+
+- `mc dashboard` makes the page available on the PC itself only.
+- `mc dashboard --lan` makes it available on every network interface of the PC, so any device on the same network that has the PC's address and port 8787 can open it. The address would be the PC's own address on your network (Windows shows it with the `ipconfig` command).
+- The page is plain `http`, with no password.
+- Windows, Docker Desktop and WSL2 each sit between the iPad and the page. Nobody has checked what they let through.
+
+If the page doesn't open on the iPad, the leader (next section) can tell you how the night is going in words, and the ntfy notifications from Step 6 don't depend on the dashboard.
+
+## Optional: start the leader
+
+The leader is a Claude Code session that you talk to in plain words: "How is it going?", "Add a dark mode to the habit tracker", "Please stop tonight's run." It acts only through the same `mc` commands you use (status, logs, report, stop, new, feature and run), and asks you before it stops anything. It can't reopen a feature that got stuck or change a plan; for those it queues a follow-up request that starts on the next run. This part has not been tried on a real PC yet.
+
+1. Claude Code must be installed in Ubuntu itself, and logged in there. The copy inside Mission Control's container can't be used. Follow Anthropic's installation instructions for Claude Code on Linux. The leader's chat uses the same Claude plan as the night run.
+
+2. In the Ubuntu window:
+
+   ```
+   cd ~/Mission-control/leader && claude
+   ```
+
+   Log in when it asks. Then type `How is it going?`. The folder's `CLAUDE.md` and `.claude/settings.json` give the leader its instructions and limits; [leader/README.md](../leader/README.md) explains them.
+
+3. On the dashboard, the **Tell the leader** buttons give you a ready sentence. Copy it and paste it into the chat with the leader.
+
+4. Optional: to talk to the same leader from the Claude app on your iPad or phone, start it this way instead of step 2:
+
+   ```
+   cd ~/Mission-control/leader && claude remote-control
+   ```
+
+   The session should then appear in the Claude Code app (or the Claude Desktop app). Keep the Ubuntu window open and the PC awake. Remote Control has not been tried here: whether the session appears, and what you can do in it from the app, is unverified.
+
+If you ask the leader to start the night, it runs `mc run` as a background task of the chat. If the chat session ends, the run may stop too; its progress is kept and the next run continues (not tried). For a night that must not depend on a chat, use Step 9 or the scheduled run.
+
 ## Optional: upload finished work to GitHub
 
 Out of the box, Mission Control keeps everything on your PC. If you turn uploading on, each finished mission's branch (`mc/<mission>`) goes to the app's repository on GitHub. Mission Control never uploads `main` and never overwrites what is already there, and it doesn't run the app's git hooks while uploading.
@@ -373,6 +438,10 @@ Your logins, missions and apps are kept. If the project is private, `git pull` a
 | `cannot write to /home/pwuser/mc-apps` | Run the command it prints: `sudo chown -R "$USER": ~/mc-apps && mc build`. |
 | `port is already allocated` when running `mc shell` | Another `mc shell` window is open. Close it first. |
 | http://localhost:3000 doesn't open | Check that the app is still running in the `mc shell` window. If it is, stop it with **Ctrl+C** and start it again with `npm run dev -- --hostname 0.0.0.0`. |
+| `the dashboard is already running` | One dashboard is open already. Use the address it printed when it started, or stop it with `docker stop mission-control-dashboard`. |
+| `port is already allocated` when running `mc dashboard` | Port 8787 is in use, maybe by a dashboard in another window. Close that one, or choose another port: `mc dashboard --port 8788`, and open <http://localhost:8788>. |
+| http://localhost:8787 doesn't open | Check that the dashboard window is still open and shows the address. If you updated Mission Control, run `mc build` and start the dashboard again. From the iPad, see [From the iPad](#from-the-ipad): it has not been tried. |
+| The dashboard says **Not updating** or **Not responding** | The page has lost touch with the dashboard window. Check that the window is open and the PC is awake, then reload the page. |
 | Nothing happened overnight, or "Mission Control: the night run didn't start" | The notification and the end of `~/mc-night.log` (`tail -n 50 ~/mc-night.log`) say why; look that message up in this table. Without either, the scheduled run didn't run at all: was the PC asleep, restarted, or signed out (Step 7)? Also make sure Docker Desktop starts when you sign in (Step 2). |
 | The report says `Could not push mc/...` | Uploading is on (see [Optional: upload finished work to GitHub](#optional-upload-finished-work-to-github)). With `no remote`: the app has no GitHub address yet; follow instructions 1 to 3 there, or ignore it. With `Authentication failed`, `could not read Username`, `403` or `denied`: the token expired or can't write to that repository; make a new one (instruction 2) and save it with `set-url` (instruction 3). With `pre-push hook`: the app has its own git hook that runs before uploads (some projects use one for big files, called Git LFS, or for checks), and Mission Control never runs an app's hooks, so it didn't upload. Upload it yourself in the Ubuntu window when no night run is working: `git -C ~/mc-apps/<app-folder> push origin mc/<mission>`. |
 | No notification on the iPad | Repeat the test in Step 6, instruction 5. Check that notifications are allowed for ntfy in the iPad's Settings. Check the address with `mc config get notify.ntfyUrl`. |

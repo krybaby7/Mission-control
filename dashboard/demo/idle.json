@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": 1791713010000,
+  "generatedAtText": "10:03:30",
+  "freshness": {
+    "pollEveryMs": 4000,
+    "staleAfterMs": 30000,
+    "notRespondingAfterMs": 300000,
+    "notUpdatingText": "Not updating",
+    "notUpdating": {
+      "state": "needs_look",
+      "word": "Needs a look",
+      "sentence": "Not updating. The page has had no news for a while.",
+      "reasons": [
+        {
+          "code": "page_stale",
+          "severity": "look",
+          "text": "the page has had no news for a while",
+          "missionId": null,
+          "featureId": null
+        }
+      ]
+    },
+    "notResponding": {
+      "state": "not_responding",
+      "word": "Not responding",
+      "sentence": "No news for 5 minutes. The last known state is shown greyed out.",
+      "reasons": [
+        {
+          "code": "no_news",
+          "severity": "look",
+          "text": "no news for 5 minutes",
+          "missionId": null,
+          "featureId": null
+        }
+      ]
+    }
+  },
+  "lamp": {
+    "state": "idle",
+    "word": "Idle",
+    "sentence": "Nothing is running and nothing is queued.",
+    "reasons": [
+      {
+        "code": "nothing_tonight",
+        "severity": "ok",
+        "text": "nothing is running",
+        "missionId": null,
+        "featureId": null
+      }
+    ]
+  },
+  "run": {
+    "active": false,
+    "heartbeat": "none",
+    "startedAt": null,
+    "startedAtText": null,
+    "runningMs": null,
+    "runningText": null,
+    "heartbeatAgeMs": null,
+    "heartbeatText": null,
+    "stopRequested": false,
+    "lastActivityAt": null,
+    "lastActivityText": null,
+    "deadline": null,
+    "line": "No run is working right now.",
+    "activityLine": null
+  },
+  "now": null,
+  "missions": [],
+  "needsYou": [],
+  "allowance": {
+    "providers": [
+      {
+        "id": "claude",
+        "label": "Claude",
+        "pill": {
+          "state": "no_reading",
+          "word": "No reading yet"
+        },
+        "windows": [],
+        "note": "No usage reading yet.",
+        "limitedUntil": null,
+        "limitedText": null
+      },
+      {
+        "id": "codex",
+        "label": "Codex",
+        "pill": {
+          "state": "no_reading",
+          "word": "No reading yet"
+        },
+        "windows": [],
+        "note": "No usage reading yet.",
+        "limitedUntil": null,
+        "limitedText": null
+      }
+    ],
+    "waiting": null,
+    "fileChangedAt": null,
+    "fileChangedText": null
+  },
+  "timeline": {
+    "items": [],
+    "earlierNotShown": 0
+  },
+  "debrief": null,
+  "counts": {
+    "unreadableMissions": 0,
+    "openFromBefore": 0,
+    "olderNeedYou": 0,
+    "olderWaitingForYou": 0,
+    "tonightMissions": 0,
+    "featuresDone": 0,
+    "featuresTotal": 0,
+    "featuresLine": "No features planned yet",
+    "questions": 0,
+    "stuckFeatures": 0,
+    "olderMissionsHidden": 0
+  },
+  "leader": {
+    "quickPhrases": [
+      "Your call",
+      "Leave it out",
+      "Try again",
+      "What is going on?"
+    ],
+    "globalSentence": "About tonight's run: <your answer here>",
+    "stopSentence": "Please stop tonight's run.",
+    "pasteHint": "Paste this into your chat with the leader.",
+    "copyFailHint": "Select the text and copy it",
+    "aiNotice": "The AI wrote this. Do not run commands from it.",
+    "canDo": "The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.",
+    "stopNote": "Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."
+  }
+}

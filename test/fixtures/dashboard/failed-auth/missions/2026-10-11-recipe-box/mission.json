@@ -1,0 +1,116 @@
+{
+  "id": "2026-10-11-recipe-box",
+  "kind": "greenfield",
+  "title": "Recipe box",
+  "request": "A recipe box app",
+  "repoPath": "/fixture/mc-apps/recipe-box",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-recipe-box",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "failed",
+  "stage": "features",
+  "createdAt": "2026-10-11T09:58:18.381Z",
+  "updatedAt": "2026-10-11T09:58:19.069Z",
+  "features": [
+    {
+      "id": "recipes-list",
+      "title": "Recipe list",
+      "story": "As a cook I can see my recipes.",
+      "acceptance": [
+        "run() in src/recipes-list.mjs returns \"recipes-list works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "building",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [
+        {
+          "path": "tests/recipes-list.test.mjs",
+          "sha256": "3499da4b2ae1ed6bde7ab4025838a474ce78c2ee0e5058d09314b6fcb924f5b3"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "branch": "mc/2026-10-11-recipe-box--recipes-list",
+      "worktree": "/fixture/.mission-control/worktrees/2026-10-11-recipe-box/recipes-list",
+      "testsCommit": "6af1f57cb55d1849c6db6918d6e27baffb301de3"
+    },
+    {
+      "id": "recipe-search",
+      "title": "Recipe search",
+      "story": "As a cook I can search recipes.",
+      "acceptance": [
+        "run() in src/recipe-search.mjs returns \"recipe-search works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "recipes-list"
+      ],
+      "status": "pending",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [
+    "Log in again: codex and claude need a new login. In the Ubuntu window run `mc login-codex` and `mc login-claude`. The next `mc run` then carries on with this mission by itself; to carry on right away, run `mc run --mission 2026-10-11-recipe-box`."
+  ],
+  "gateCRounds": 0,
+  "agentRuns": 5,
+  "notes": [
+    "Everything is stored locally; no sign-in.",
+    "No model could run: codex and claude need a new login."
+  ],
+  "spec": {
+    "appName": "Recipe box",
+    "summary": "A recipe box.",
+    "features": [
+      {
+        "id": "recipes-list",
+        "title": "Recipe list",
+        "story": "As a cook I can see my recipes.",
+        "acceptance": [
+          "run() in src/recipes-list.mjs returns \"recipes-list works\""
+        ],
+        "kind": "standard",
+        "deps": []
+      },
+      {
+        "id": "recipe-search",
+        "title": "Recipe search",
+        "story": "As a cook I can search recipes.",
+        "acceptance": [
+          "run() in src/recipe-search.mjs returns \"recipe-search works\""
+        ],
+        "kind": "standard",
+        "deps": [
+          "recipes-list"
+        ]
+      }
+    ],
+    "assumptions": [
+      "Everything is stored locally; no sign-in."
+    ],
+    "uiContract": "Feature <id> lives in src/<id>.mjs and exports run()."
+  },
+  "baseSha": "f8ed9ce0a25bf8e60771783fa9c69fec5c46c812",
+  "integrationWorktree": "/fixture/.mission-control/worktrees/2026-10-11-recipe-box/_integration",
+  "verify": {
+    "full": "node --test \"tests/**/*.test.mjs\"",
+    "testGlobs": [
+      "tests/**"
+    ],
+    "tests": "node --test {files}"
+  },
+  "failure": {
+    "reason": "No model could run: codex and claude need a new login.",
+    "decision": "Log in again: codex and claude need a new login. In the Ubuntu window run `mc login-codex` and `mc login-claude`. The next `mc run` then carries on with this mission by itself; to carry on right away, run `mc run --mission 2026-10-11-recipe-box`.",
+    "retryable": true
+  }
+}

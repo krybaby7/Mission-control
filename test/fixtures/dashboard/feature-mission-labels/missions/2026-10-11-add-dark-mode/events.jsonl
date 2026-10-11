@@ -1,0 +1,10 @@
+{"at":"2026-10-11T09:58:00.000Z","missionId":"2026-10-11-add-dark-mode","type":"mission.start","data":{"stage":"onboard"}}
+{"at":"2026-10-11T09:58:01.000Z","missionId":"2026-10-11-add-dark-mode","type":"run.start","data":{"label":"onboard","jobId":"onboard-1","role":"architect","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}
+{"at":"2026-10-11T09:58:02.000Z","missionId":"2026-10-11-add-dark-mode","type":"run.end","data":{"label":"onboard","jobId":"onboard-1","provider":"codex","model":"gpt-6.1-sol","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:03.000Z","missionId":"2026-10-11-add-dark-mode","type":"stage","data":{"from":"onboard","to":"spec"}}
+{"at":"2026-10-11T09:58:04.000Z","missionId":"2026-10-11-add-dark-mode","type":"run.start","data":{"label":"spec","jobId":"spec-1","role":"architect","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}
+{"at":"2026-10-11T09:58:05.000Z","missionId":"2026-10-11-add-dark-mode","type":"run.end","data":{"label":"spec","jobId":"spec-1","provider":"codex","model":"gpt-6.1-sol","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:06.000Z","missionId":"2026-10-11-add-dark-mode","type":"feature.status","data":{"feature":"toggle","from":"pending","to":"building"}}
+{"at":"2026-10-11T09:58:08.000Z","missionId":"2026-10-11-add-dark-mode","type":"run.start","data":{"label":"fix-toggle","jobId":"fix-toggle-1","role":"engineer","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}
+{"at":"2026-10-11T09:58:10.000Z","missionId":"2026-10-11-add-dark-mode","type":"run.end","data":{"label":"fix-toggle","jobId":"fix-toggle-1","provider":"codex","model":"gpt-6.1-sol","outcome":"failed","durationMs":40}}
+{"at":"2026-10-11T09:58:12.000Z","missionId":"2026-10-11-add-dark-mode","type":"run.start","data":{"label":"diagnose-toggle","jobId":"diagnose-toggle-1","role":"architect","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}

@@ -1,0 +1,71 @@
+{
+  "id": "2026-10-10-killed-night",
+  "kind": "greenfield",
+  "title": "Killed night",
+  "request": "Build me Killed night",
+  "repoPath": "/fixture/mc-apps/killed-night",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-10-killed-night",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "running",
+  "stage": "features",
+  "createdAt": "2026-10-10T21:00:00.000Z",
+  "updatedAt": "2026-10-11T01:00:00.000Z",
+  "features": [
+    {
+      "id": "one",
+      "title": "First piece",
+      "story": "As a user I can use first piece.",
+      "acceptance": [
+        "run() in src/one.mjs returns \"one works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/one.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "two",
+      "title": "Second piece",
+      "story": "As a user I can use second piece.",
+      "acceptance": [
+        "run() in src/two.mjs returns \"two works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "building",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

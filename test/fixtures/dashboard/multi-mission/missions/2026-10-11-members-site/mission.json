@@ -1,0 +1,275 @@
+{
+  "id": "2026-10-11-members-site",
+  "kind": "greenfield",
+  "title": "Members site",
+  "request": "A members site where people sign up, pay and get a welcome email",
+  "repoPath": "/fixture/mc-apps/members-site",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-members-site",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "partial",
+  "stage": "complete",
+  "createdAt": "2026-10-11T09:58:14.157Z",
+  "updatedAt": "2026-10-11T09:58:17.573Z",
+  "features": [
+    {
+      "id": "signup",
+      "title": "Sign-up page",
+      "story": "As a visitor I can create an account.",
+      "acceptance": [
+        "run() in src/signup.mjs returns \"signup works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "blocked",
+      "rung": 3,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "fail",
+          "signature": "75f1f0969526",
+          "summary": "verification failed",
+          "at": "2026-10-11T09:58:14.973Z"
+        },
+        {
+          "rung": 1,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "high",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "fail",
+          "signature": "75f1f0969526",
+          "summary": "verification failed",
+          "at": "2026-10-11T09:58:15.214Z"
+        },
+        {
+          "rung": 2,
+          "action": "diagnose",
+          "provider": "claude",
+          "model": "claude-opus-5-5",
+          "effort": "high",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "block: I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.",
+          "at": "2026-10-11T09:58:15.251Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/signup.test.mjs",
+          "sha256": "6bf4010571e41b29ceb8e6859632c858e349985b9c9d2daa73829efb090c2028"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "branch": "mc/2026-10-11-members-site--signup",
+      "testsCommit": "6138f29d8901c6adf0d8e01f03e9151a2078055b",
+      "blockedReason": "I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you."
+    },
+    {
+      "id": "pay-subscription",
+      "title": "Paid subscription",
+      "story": "As a user I can pay for a plan.",
+      "acceptance": [
+        "run() in src/pay-subscription.mjs returns \"pay-subscription works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "signup"
+      ],
+      "status": "skipped",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "blockedReason": "waiting on \"Sign-up page\", which was blocked"
+    },
+    {
+      "id": "welcome-email",
+      "title": "Welcome email",
+      "story": "As a new user I get a welcome email.",
+      "acceptance": [
+        "run() in src/welcome-email.mjs returns \"welcome-email works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "implemented welcome-email",
+          "at": "2026-10-11T09:58:16.130Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/welcome-email.test.mjs",
+          "sha256": "b1ceb592d1ea71e33cb07f39e39439a0c7d2acd1bb01c0662b824467bb06d28c"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "testsCommit": "4f1124dd015c6ac6f7d203a4f63bd2d79133feb8",
+      "passingCommit": "84f1a9d719c734a8e4c977967c8dc3bca3750b02",
+      "builtBy": "codex",
+      "commit": "e3b619f3c86a3d239670e204b7155d317de740c6"
+    },
+    {
+      "id": "settings",
+      "title": "Settings page",
+      "story": "As a user I can change my name.",
+      "acceptance": [
+        "run() in src/settings.mjs returns \"settings works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "implemented settings",
+          "at": "2026-10-11T09:58:17.093Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/settings.test.mjs",
+          "sha256": "1471533693389195535b7cb2d385fddc81a4f0c47827a61e901253f33440b438"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "testsCommit": "e9f9ab5885d305d3106e08512ebcc26684574992",
+      "passingCommit": "60ae01b75a3340e0eb69bd7a2565223baaece24f",
+      "builtBy": "codex",
+      "commit": "cb68eb1278468de3b3866633e8fbd97dd9b88920"
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [
+    "\"Sign-up page\": I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you."
+  ],
+  "gateCRounds": 0,
+  "agentRuns": 20,
+  "notes": [
+    "Everything is stored locally; no sign-in."
+  ],
+  "spec": {
+    "appName": "Members site",
+    "summary": "A small members site.",
+    "features": [
+      {
+        "id": "signup",
+        "title": "Sign-up page",
+        "story": "As a visitor I can create an account.",
+        "acceptance": [
+          "run() in src/signup.mjs returns \"signup works\""
+        ],
+        "kind": "standard",
+        "deps": []
+      },
+      {
+        "id": "pay-subscription",
+        "title": "Paid subscription",
+        "story": "As a user I can pay for a plan.",
+        "acceptance": [
+          "run() in src/pay-subscription.mjs returns \"pay-subscription works\""
+        ],
+        "kind": "standard",
+        "deps": [
+          "signup"
+        ]
+      },
+      {
+        "id": "welcome-email",
+        "title": "Welcome email",
+        "story": "As a new user I get a welcome email.",
+        "acceptance": [
+          "run() in src/welcome-email.mjs returns \"welcome-email works\""
+        ],
+        "kind": "standard",
+        "deps": []
+      },
+      {
+        "id": "settings",
+        "title": "Settings page",
+        "story": "As a user I can change my name.",
+        "acceptance": [
+          "run() in src/settings.mjs returns \"settings works\""
+        ],
+        "kind": "standard",
+        "deps": []
+      }
+    ],
+    "assumptions": [
+      "Everything is stored locally; no sign-in."
+    ],
+    "uiContract": "Feature <id> lives in src/<id>.mjs and exports run()."
+  },
+  "baseSha": "e54491a36d1e6d86de0173f154b56f2d8e352fa0",
+  "verify": {
+    "full": "node --test \"tests/**/*.test.mjs\"",
+    "testGlobs": [
+      "tests/**"
+    ],
+    "tests": "node --test {files}"
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "id": "2026-10-11-mystery-feature",
+  "kind": "greenfield",
+  "title": "Mystery feature",
+  "request": "Build me Mystery feature",
+  "repoPath": "/fixture/mc-apps/mystery-feature",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-mystery-feature",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "done",
+  "stage": "complete",
+  "createdAt": "2026-10-11T09:58:00.000Z",
+  "updatedAt": "2026-10-11T09:58:12.000Z",
+  "features": [
+    {
+      "id": "calm",
+      "title": "Calm feature",
+      "story": "As a user I can use calm feature.",
+      "acceptance": [
+        "run() in src/calm.mjs returns \"calm works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/calm.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "odd",
+      "title": "Odd feature",
+      "story": "As a user I can use odd feature.",
+      "acceptance": [
+        "run() in src/odd.mjs returns \"odd works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "daydreaming",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

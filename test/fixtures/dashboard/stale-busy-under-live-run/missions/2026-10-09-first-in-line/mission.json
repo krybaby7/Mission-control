@@ -1,0 +1,22 @@
+{
+  "id": "2026-10-09-first-in-line",
+  "kind": "greenfield",
+  "title": "First in line",
+  "request": "Build me First in line",
+  "repoPath": "/fixture/mc-apps/first-in-line",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-09-first-in-line",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "running",
+  "stage": "spec",
+  "createdAt": "2026-10-09T20:00:00.000Z",
+  "updatedAt": "2026-10-11T09:50:10.000Z",
+  "features": [],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

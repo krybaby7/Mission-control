@@ -1,0 +1,8 @@
+{"at":"2026-10-11T09:58:25.596Z","missionId":"2026-10-11-reader","type":"mission.start","data":{"stage":"spec"}}
+{"at":"2026-10-11T09:58:25.596Z","missionId":"2026-10-11-reader","type":"run.start","data":{"label":"spec","jobId":"spec-1","role":"architect","provider":"claude","model":"claude-opus-5-5","effort":"high"}}
+{"at":"2026-10-11T09:58:25.596Z","missionId":"2026-10-11-reader","type":"run.end","data":{"label":"spec","jobId":"spec-1","provider":"claude","model":"claude-opus-5-5","outcome":"ok","durationMs":0}}
+{"at":"2026-10-11T09:58:25.596Z","missionId":"2026-10-11-reader","type":"stage","data":{"from":"spec","to":"gate_a"}}
+{"at":"2026-10-11T09:58:25.596Z","missionId":"2026-10-11-reader","type":"run.start","data":{"label":"gate-a","jobId":"gate-a-1","role":"reviewer","provider":"codex","model":"gpt-6-astra","effort":"high"}}
+{"at":"2026-10-11T09:58:25.596Z","missionId":"2026-10-11-reader","type":"run.end","data":{"label":"gate-a","jobId":"gate-a-1","provider":"codex","model":"gpt-6-astra","outcome":"limited","durationMs":2}}
+{"at":"2026-10-11T09:58:25.596Z","missionId":"2026-10-11-reader","type":"limit.wait","data":{"until":"2026-10-11T12:59:10.596Z","reason":"gpt-6-astra: session limit until 2026-10-11T12:58:25.596Z"}}
+{"at":"2026-10-11T12:59:10.800Z","missionId":"2026-10-11-reader","type":"run.start","data":{"label":"gate-a","jobId":"gate-a-2","role":"reviewer","provider":"codex","model":"gpt-6-astra","effort":"high"}}

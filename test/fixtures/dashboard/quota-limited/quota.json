@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "limits": {
+    "claude": {
+      "kind": "weekly",
+      "until": 1792002600000,
+      "raw": "weekly limit reached"
+    }
+  },
+  "modelBlocks": [
+    {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "until": 1791717300000,
+      "raw": "model limit"
+    }
+  ],
+  "utilization": [
+    {
+      "provider": "codex",
+      "window": "five_hour",
+      "utilization": 0.3,
+      "resetsAt": 1791721200000
+    }
+  ]
+}

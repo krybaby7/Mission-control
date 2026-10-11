@@ -1,0 +1,525 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": 1791713010000,
+  "generatedAtText": "10:03:30",
+  "freshness": {
+    "pollEveryMs": 4000,
+    "staleAfterMs": 30000,
+    "notRespondingAfterMs": 300000,
+    "notUpdatingText": "Not updating",
+    "notUpdating": {
+      "state": "needs_look",
+      "word": "Needs a look",
+      "sentence": "Not updating. The page has had no news for a while.",
+      "reasons": [
+        {
+          "code": "page_stale",
+          "severity": "look",
+          "text": "the page has had no news for a while",
+          "missionId": null,
+          "featureId": null
+        }
+      ]
+    },
+    "notResponding": {
+      "state": "not_responding",
+      "word": "Not responding",
+      "sentence": "No news for 5 minutes. The last known state is shown greyed out.",
+      "reasons": [
+        {
+          "code": "no_news",
+          "severity": "look",
+          "text": "no news for 5 minutes",
+          "missionId": null,
+          "featureId": null
+        }
+      ]
+    }
+  },
+  "lamp": {
+    "state": "needs_look",
+    "word": "Needs a look",
+    "sentence": "1 feature is stuck.",
+    "reasons": [
+      {
+        "code": "feature_stuck",
+        "severity": "look",
+        "text": "1 feature is stuck",
+        "missionId": null,
+        "featureId": null
+      }
+    ]
+  },
+  "run": {
+    "active": false,
+    "heartbeat": "none",
+    "startedAt": null,
+    "startedAtText": null,
+    "runningMs": null,
+    "runningText": null,
+    "heartbeatAgeMs": null,
+    "heartbeatText": null,
+    "stopRequested": false,
+    "lastActivityAt": null,
+    "lastActivityText": null,
+    "deadline": null,
+    "line": "No run is working right now.",
+    "activityLine": null
+  },
+  "now": null,
+  "missions": [
+    {
+      "id": "2026-10-11-members-site",
+      "title": "Members site",
+      "readable": true,
+      "kind": "new_app",
+      "kindWord": "new app",
+      "scope": "tonight",
+      "openFromBefore": false,
+      "state": "partly_done",
+      "word": "Partly done",
+      "sentence": "2 of 4 features are built and checked. 1 feature is stuck. 1 feature was left out.",
+      "pausedWhy": null,
+      "progress": [
+        {
+          "id": "plan",
+          "word": "Plan",
+          "state": "done"
+        },
+        {
+          "id": "plan_check",
+          "word": "Plan check",
+          "state": "done"
+        },
+        {
+          "id": "build",
+          "word": "Build",
+          "state": "done"
+        },
+        {
+          "id": "final_check",
+          "word": "Final check",
+          "state": "done"
+        },
+        {
+          "id": "landed",
+          "word": "Landed",
+          "state": "done"
+        }
+      ],
+      "progressWord": "Landed",
+      "repairLap": false,
+      "featuresDone": 2,
+      "featuresTotal": 4,
+      "featuresLine": "2 of 4 features done",
+      "waiting": null,
+      "features": [
+        {
+          "id": "signup",
+          "title": "Sign-up page",
+          "state": "stuck",
+          "word": "Stuck",
+          "reason": {
+            "text": "I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.",
+            "author": "ai"
+          },
+          "steps": {
+            "used": 3,
+            "total": 5,
+            "caption": "Tried 3 times (2 build tries and 1 expert diagnosis)"
+          },
+          "reinforcements": 2,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": "feature_stuck:2026-10-11-members-site:signup",
+          "tellLeader": "About \"Sign-up page\" in Members site: <your answer here>"
+        },
+        {
+          "id": "pay-subscription",
+          "title": "Paid subscription",
+          "state": "left_out",
+          "word": "Left out",
+          "reason": {
+            "text": "It needed “Sign-up page”, which is stuck.",
+            "author": "engine"
+          },
+          "steps": {
+            "used": 0,
+            "total": 5,
+            "caption": "No tries yet"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 0,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Paid subscription\" in Members site: <your answer here>"
+        },
+        {
+          "id": "welcome-email",
+          "title": "Welcome email",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Welcome email\" in Members site: <your answer here>"
+        },
+        {
+          "id": "settings",
+          "title": "Settings page",
+          "state": "done",
+          "word": "Done",
+          "reason": null,
+          "steps": {
+            "used": 1,
+            "total": 5,
+            "caption": "Tried 1 time (1 build try)"
+          },
+          "reinforcements": 0,
+          "recovered": false,
+          "acceptanceTests": 1,
+          "isRepair": false,
+          "cardId": null,
+          "tellLeader": "About \"Settings page\" in Members site: <your answer here>"
+        }
+      ],
+      "updatedAt": 1791712697573,
+      "tellLeader": "About \"Members site\": <your answer here>"
+    }
+  ],
+  "needsYou": [
+    {
+      "id": "feature_stuck:2026-10-11-members-site:signup",
+      "kind": "feature_stuck",
+      "severity": "look",
+      "missionId": "2026-10-11-members-site",
+      "missionTitle": "Members site",
+      "fromBefore": false,
+      "featureId": "signup",
+      "title": "“Sign-up page” is stuck",
+      "happened": {
+        "text": "I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.",
+        "author": "ai"
+      },
+      "summary": "Tried 3 times (2 build tries and 1 expert diagnosis).",
+      "ifNothing": "It stays out. Nothing tries it again unless you ask. “Paid subscription” needed it, so that stays out too.",
+      "tellLeader": "About \"Sign-up page\" in Members site, which is stuck: <your answer here>"
+    }
+  ],
+  "allowance": {
+    "providers": [
+      {
+        "id": "claude",
+        "label": "Claude",
+        "pill": {
+          "state": "no_reading",
+          "word": "No reading yet"
+        },
+        "windows": [],
+        "note": "No usage reading yet.",
+        "limitedUntil": null,
+        "limitedText": null
+      },
+      {
+        "id": "codex",
+        "label": "Codex",
+        "pill": {
+          "state": "no_reading",
+          "word": "No reading yet"
+        },
+        "windows": [],
+        "note": "No usage reading yet.",
+        "limitedUntil": null,
+        "limitedText": null
+      }
+    ],
+    "waiting": null,
+    "fileChangedAt": null,
+    "fileChangedText": null
+  },
+  "timeline": {
+    "items": [
+      {
+        "at": 1791712694163,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": null,
+        "tone": "info",
+        "text": "Started working on “Members site”.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712694172,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": null,
+        "tone": "info",
+        "text": "The plan is ready: 4 features.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712694423,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": null,
+        "tone": "good",
+        "text": "The app's foundation is ready.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712694973,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": "signup",
+        "tone": "warn",
+        "text": "“Sign-up page” did not pass its checks. Calling in reinforcements (step 2 of 5).",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712695214,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": "signup",
+        "tone": "warn",
+        "text": "“Sign-up page” did not pass its checks. Calling in reinforcements (step 3 of 5).",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712695275,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": "signup",
+        "tone": "bad",
+        "text": "“Sign-up page” is stuck.",
+        "note": {
+          "text": "I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.",
+          "author": "ai"
+        },
+        "author": "ai",
+        "count": 1
+      },
+      {
+        "at": 1791712695278,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": "pay-subscription",
+        "tone": "warn",
+        "text": "“Paid subscription” was left out because it needed a stuck feature.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712696223,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": "welcome-email",
+        "tone": "good",
+        "text": "“Welcome email” is built and checked.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712697188,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": "settings",
+        "tone": "good",
+        "text": "“Settings page” is built and checked.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712697212,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": null,
+        "tone": "info",
+        "text": "The building is finished. Starting the final check.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712697449,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": null,
+        "tone": "good",
+        "text": "The final tests of the whole app passed.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      },
+      {
+        "at": 1791712697573,
+        "time": "09:58",
+        "day": "Sun 11 Oct",
+        "missionId": "2026-10-11-members-site",
+        "featureId": null,
+        "tone": "warn",
+        "text": "Finished “Members site”: partly done.",
+        "note": null,
+        "author": "engine",
+        "count": 1
+      }
+    ],
+    "earlierNotShown": 0
+  },
+  "debrief": {
+    "verdict": {
+      "id": "partly_done",
+      "word": "Partly done",
+      "sentence": "2 of 4 features are built and checked. 1 feature is stuck."
+    },
+    "missions": [
+      {
+        "missionId": "2026-10-11-members-site",
+        "title": "Members site",
+        "verdict": {
+          "id": "partly_done",
+          "word": "Partly done",
+          "sentence": "2 of 4 features are built and checked. 1 feature is stuck."
+        },
+        "plannedLine": "4 features planned",
+        "got": [
+          {
+            "featureId": "welcome-email",
+            "title": "Welcome email",
+            "note": {
+              "text": "As a new user I get a welcome email.",
+              "author": "ai"
+            },
+            "attempts": 1
+          },
+          {
+            "featureId": "settings",
+            "title": "Settings page",
+            "note": {
+              "text": "As a user I can change my name.",
+              "author": "ai"
+            },
+            "attempts": 1
+          }
+        ],
+        "leftOut": [
+          {
+            "featureId": "signup",
+            "title": "Sign-up page",
+            "note": {
+              "text": "I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.",
+              "author": "ai"
+            },
+            "attempts": 3
+          },
+          {
+            "featureId": "pay-subscription",
+            "title": "Paid subscription",
+            "note": {
+              "text": "It needed “Sign-up page”, which is stuck.",
+              "author": "engine"
+            },
+            "attempts": 0
+          }
+        ],
+        "recovered": [],
+        "ticks": [
+          {
+            "id": "delivered",
+            "label": "Delivered",
+            "state": "no",
+            "why": "2 of 4 features were built and checked. 1 is stuck. 1 was left out.",
+            "caveat": null
+          },
+          {
+            "id": "final_review",
+            "label": "Final review passed",
+            "state": "yes",
+            "why": "The final review ran and found no serious problem.",
+            "caveat": "It covered only the 2 features that were built."
+          },
+          {
+            "id": "nothing_open",
+            "label": "Nothing open",
+            "state": "no",
+            "why": "1 item is waiting for you.",
+            "caveat": null
+          },
+          {
+            "id": "no_rework",
+            "label": "No rework",
+            "state": "yes",
+            "why": "The final check did not send the team back for a repair round.",
+            "caveat": null
+          }
+        ],
+        "agentTimeText": "less than a minute of AI work",
+        "agentRuns": 20,
+        "tellLeader": "About \"Members site\": <your answer here>"
+      }
+    ],
+    "allowanceNote": "The AI work runs on your existing Claude and Codex plans, so there is no separate bill. This page cannot show your share of the week yet.",
+    "honestyNote": "These are the AI team's own checks, not a human review."
+  },
+  "counts": {
+    "unreadableMissions": 0,
+    "openFromBefore": 0,
+    "olderNeedYou": 0,
+    "olderWaitingForYou": 0,
+    "tonightMissions": 1,
+    "featuresDone": 2,
+    "featuresTotal": 4,
+    "featuresLine": "2 of 4 features done",
+    "questions": 0,
+    "stuckFeatures": 1,
+    "olderMissionsHidden": 0
+  },
+  "leader": {
+    "quickPhrases": [
+      "Your call",
+      "Leave it out",
+      "Try again",
+      "What is going on?"
+    ],
+    "globalSentence": "About tonight's run: <your answer here>",
+    "stopSentence": "Please stop tonight's run.",
+    "pasteHint": "Paste this into your chat with the leader.",
+    "copyFailHint": "Select the text and copy it",
+    "aiNotice": "The AI wrote this. Do not run commands from it.",
+    "canDo": "The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.",
+    "stopNote": "Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."
+  }
+}

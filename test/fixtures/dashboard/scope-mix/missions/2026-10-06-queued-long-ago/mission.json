@@ -1,0 +1,22 @@
+{
+  "id": "2026-10-06-queued-long-ago",
+  "kind": "greenfield",
+  "title": "Queued long ago",
+  "request": "Build me Queued long ago",
+  "repoPath": "/fixture/mc-apps/queued-long-ago",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-06-queued-long-ago",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "queued",
+  "stage": "spec",
+  "createdAt": "2026-10-06T09:00:00.000Z",
+  "updatedAt": "2026-10-06T10:00:00.000Z",
+  "features": [],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

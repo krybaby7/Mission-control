@@ -65,6 +65,7 @@ your idea ─► Architect (frontier) writes a spec: small, testable features
 | `mc run [--until HH:MM] [--profile mixed\|claude\|codex] [--role engineer=claude:frontier]` | Work through the queue |
 | `mc status` / `mc report [id]` / `mc logs <id>` | Progress, the report, a step-by-step log |
 | `mc stop` | Stop after the current step; nothing is lost |
+| `mc dashboard [--port N] [--until HH:MM]` | Show tonight's progress on a web page. It only reads. Through the Docker script it runs in a container of its own (see below) |
 
 **Profiles:**
 
@@ -74,6 +75,30 @@ your idea ─► Architect (frontier) writes a spec: small, testable features
 | `claude` | Claude only |
 | `codex` | Codex for every role. Cheap helper tasks (planning context, failure summaries, report writing) still use Haiku 5.5 |
 
+## Watching the night and talking to the leader
+
+Two parts, for someone who is not technical (a CEO, say) and looks at an iPad or a phone for five seconds:
+
+- **The dashboard is the eyes.** A web page that shows whether the night is working, how far along it is, whether anything needs a person, and what you got. It only reads the files Mission Control already writes, and it can change nothing. Start it in its own Ubuntu window and leave it running:
+
+  ```bash
+  scripts/mc-docker.sh dashboard              # then open http://localhost:8787 in the Windows browser
+  scripts/mc-docker.sh dashboard --until 07:00   # adds a countdown; give the same time you gave `run`
+  ```
+
+  It runs in a container of its own that sees the Mission Control folder read-only. There is no password, by design: anyone who can open the page can see it. By default only the PC itself can; `--lan` publishes it on every network interface (see [docs/setup-windows.md](docs/setup-windows.md)). Press Ctrl+C to stop it.
+
+- **The leader is the hands.** A Claude Code session started in the [`leader/`](leader/) folder. The CEO talks to it in plain words ("How is it going?", "Add a dark mode to the habit tracker", "Please stop tonight's run."). It acts only through `mc`: status, logs, report, stop, new, feature and run. On the dashboard, every card and feature has a **Tell the leader** button that gives a ready sentence to paste into the chat. The page itself sends nothing.
+
+  ```bash
+  cd leader && claude                    # in the Ubuntu window
+  cd leader && claude remote-control     # the same session, reachable from the Claude app
+  ```
+
+  The leader cannot reopen a feature or change a plan in place. A stuck feature or a question is answered with a follow-up request, which starts on the next run.
+
+**Not tried on a real PC yet:** Docker Desktop and WSL2 networking to a browser or an iPad, iPad Safari, `claude remote-control`, and any real AI output. The dashboard and the leader's instructions are tested against recordings of the real engine run with stand-in AIs. Details: [docs/leader.md](docs/leader.md), [docs/dashboard-spec.md](docs/dashboard-spec.md) (section 20 lists what is unverified).
+
 ## Documents
 
 | File | What's in it |
@@ -82,6 +107,8 @@ your idea ─► Architect (frontier) writes a spec: small, testable features
 | [docs/design-v1.md](docs/design-v1.md) | The architecture and the decisions behind it |
 | [docs/mvp-spec.md](docs/mvp-spec.md) | The exact build contract, including verified CLI facts and the decision log |
 | [docs/setup-windows.md](docs/setup-windows.md) | Step-by-step setup for Windows 11 + iPad |
+| [docs/leader.md](docs/leader.md) | The leader: what it may do, how it is limited, what is not tried |
+| [docs/dashboard-spec.md](docs/dashboard-spec.md) | The dashboard's build contract: lamp rules, wording, data sources, tests |
 
 ## For developers
 

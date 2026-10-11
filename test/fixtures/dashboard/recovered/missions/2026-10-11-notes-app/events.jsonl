@@ -1,0 +1,25 @@
+{"at":"2026-10-11T09:58:10.000Z","missionId":"2026-10-11-notes-app","type":"mission.start","data":{"stage":"spec"}}
+{"at":"2026-10-11T09:58:11.000Z","missionId":"2026-10-11-notes-app","type":"spec","data":{"appName":"Notes app","features":["capture","search"]}}
+{"at":"2026-10-11T09:58:12.000Z","missionId":"2026-10-11-notes-app","type":"stage","data":{"from":"spec","to":"gate_a"}}
+{"at":"2026-10-11T09:58:13.000Z","missionId":"2026-10-11-notes-app","type":"stage","data":{"from":"gate_a","to":"init"}}
+{"at":"2026-10-11T09:58:14.000Z","missionId":"2026-10-11-notes-app","type":"attempt","data":{"feature":"_init","rung":0,"provider":"codex","model":"gpt-6.1-sol","effort":"medium","outcome":"pass"}}
+{"at":"2026-10-11T09:58:15.000Z","missionId":"2026-10-11-notes-app","type":"stage","data":{"from":"init","to":"features"}}
+{"at":"2026-10-11T09:58:19.000Z","missionId":"2026-10-11-notes-app","type":"feature.status","data":{"feature":"capture","from":"pending","to":"testing"}}
+{"at":"2026-10-11T09:58:20.000Z","missionId":"2026-10-11-notes-app","type":"tests.frozen","data":{"feature":"capture","files":["tests/capture.test.mjs"],"commit":"0000000000000000000000000000000000000000"}}
+{"at":"2026-10-11T09:58:21.000Z","missionId":"2026-10-11-notes-app","type":"attempt","data":{"feature":"capture","rung":0,"action":"build","provider":"codex","model":"gpt-6.1-sol","effort":"medium","outcome":"fail"}}
+{"at":"2026-10-11T09:58:21.500Z","missionId":"2026-10-11-notes-app","type":"attempt","data":{"feature":"capture","rung":1,"action":"build","provider":"codex","model":"gpt-6.1-sol","effort":"high","outcome":"pass"}}
+{"at":"2026-10-11T09:58:22.000Z","missionId":"2026-10-11-notes-app","type":"feature.status","data":{"feature":"capture","from":"building","to":"reviewing"}}
+{"at":"2026-10-11T09:58:23.000Z","missionId":"2026-10-11-notes-app","type":"merge","data":{"feature":"capture","commit":"0000000000000000000000000000000000000000"}}
+{"at":"2026-10-11T09:58:24.000Z","missionId":"2026-10-11-notes-app","type":"feature.status","data":{"feature":"capture","from":"reviewing","to":"done"}}
+{"at":"2026-10-11T09:58:25.000Z","missionId":"2026-10-11-notes-app","type":"feature.status","data":{"feature":"search","from":"pending","to":"testing"}}
+{"at":"2026-10-11T09:58:26.000Z","missionId":"2026-10-11-notes-app","type":"tests.frozen","data":{"feature":"search","files":["tests/search.test.mjs"],"commit":"0000000000000000000000000000000000000000"}}
+{"at":"2026-10-11T09:58:27.000Z","missionId":"2026-10-11-notes-app","type":"attempt","data":{"feature":"search","rung":0,"action":"build","provider":"codex","model":"gpt-6.1-sol","effort":"medium","outcome":"pass"}}
+{"at":"2026-10-11T09:58:28.000Z","missionId":"2026-10-11-notes-app","type":"feature.status","data":{"feature":"search","from":"building","to":"reviewing"}}
+{"at":"2026-10-11T09:58:29.000Z","missionId":"2026-10-11-notes-app","type":"merge","data":{"feature":"search","commit":"0000000000000000000000000000000000000000"}}
+{"at":"2026-10-11T09:58:30.000Z","missionId":"2026-10-11-notes-app","type":"feature.status","data":{"feature":"search","from":"reviewing","to":"done"}}
+{"at":"2026-10-11T09:58:49.000Z","missionId":"2026-10-11-notes-app","type":"stage","data":{"from":"features","to":"gate_c"}}
+{"at":"2026-10-11T09:58:50.000Z","missionId":"2026-10-11-notes-app","type":"verify","data":{"label":"gate-c","ok":true,"exitCode":0,"timedOut":false,"durationMs":100,"signature":"","logFile":""}}
+{"at":"2026-10-11T09:58:51.000Z","missionId":"2026-10-11-notes-app","type":"stage","data":{"from":"gate_c","to":"finalize"}}
+{"at":"2026-10-11T09:58:52.000Z","missionId":"2026-10-11-notes-app","type":"report","data":{"path":"/fixture/.mission-control/missions/x/report.md"}}
+{"at":"2026-10-11T09:58:53.000Z","missionId":"2026-10-11-notes-app","type":"mission.end","data":{"status":"done"}}
+{"at":"2026-10-11T09:58:54.000Z","missionId":"2026-10-11-notes-app","type":"stage","data":{"from":"finalize","to":"complete"}}

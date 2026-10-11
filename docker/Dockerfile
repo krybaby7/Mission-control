@@ -39,6 +39,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
+COPY dashboard ./dashboard
 COPY prompts ./prompts
 COPY stacks ./stacks
 RUN npm run build \

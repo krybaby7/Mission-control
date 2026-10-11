@@ -130,6 +130,16 @@ describe("Dockerfile", () => {
     expect(DOCKERFILE).toMatch(/RUN npm run build \\\n && npm link \\\n[\s\S]*&& mc --help >\/dev\/null\n/);
   });
 
+  it("copies the dashboard page into the image, and the package lists it", () => {
+    expect(DOCKERFILE).toContain("COPY dashboard ./dashboard");
+    const { files } = JSON.parse(fs.readFileSync(path.join(REPO_DIR, "package.json"), "utf8")) as { files: string[] };
+    expect(files).toContain("dashboard");
+  });
+
+  it("has the page the image copies: without it `mc dashboard` has nothing to serve", () => {
+    expect(fs.existsSync(path.join(REPO_DIR, "dashboard", "index.html"))).toBe(true);
+  });
+
   it("keeps Playwright from deleting browsers other apps still use", () => {
     expect(DOCKERFILE).toMatch(/^\s+PLAYWRIGHT_SKIP_BROWSER_GC=1$/m);
   });

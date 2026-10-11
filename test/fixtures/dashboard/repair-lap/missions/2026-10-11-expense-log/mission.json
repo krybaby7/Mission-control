@@ -1,0 +1,103 @@
+{
+  "id": "2026-10-11-expense-log",
+  "kind": "greenfield",
+  "title": "Expense log",
+  "request": "Build Expense log",
+  "repoPath": "/fixture/mc-apps/expense-log",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-expense-log",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "done",
+  "stage": "complete",
+  "createdAt": "2026-10-11T09:58:09.000Z",
+  "updatedAt": "2026-10-11T09:59:09.000Z",
+  "features": [
+    {
+      "id": "add-expense",
+      "title": "Add an expense",
+      "story": "As a user I can use add an expense.",
+      "acceptance": [
+        "run() in src/add-expense.mjs returns \"add-expense works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "ok",
+          "at": "2026-10-11T09:58:39.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/add-expense.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "gate-c-fix-1",
+      "title": "Fix found by the final check",
+      "story": "Repair: the totals were wrong.",
+      "acceptance": [
+        "run() in src/gate-c-fix-1.mjs returns \"gate-c-fix-1 works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "ok",
+          "at": "2026-10-11T09:58:39.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/gate-c-fix-1.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 1,
+  "agentRuns": 12,
+  "notes": []
+}

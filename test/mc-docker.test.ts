@@ -503,6 +503,123 @@ describe("mc-docker.sh: telling the iPad when a night run can't start", () => {
   });
 });
 
+describe("mc-docker.sh: dashboard", () => {
+  // Its own `docker run`, not the one every other container gets: no logins, no apps folder, a read-only home.
+  const DASHBOARD = [
+    "run", "--rm", "--init", "--name", "mission-control-dashboard",
+    "--read-only", "--tmpfs", "/tmp:rw,size=16m",
+    "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "256", "--memory", "256m", "--memory-swap", "-1",
+    "--volume", "mc-home:/home/pwuser/.mission-control:ro",
+  ];
+  const expectedDashboard = (publish: string, port: string, extra: string[] = []): string[] => [
+    ...DASHBOARD,
+    "--publish", publish,
+    "--env", "TZ=America/New_York",
+    "--entrypoint", "mc", IMAGE,
+    "dashboard", "--host", "0.0.0.0", "--port", port, ...extra,
+  ];
+
+  it("serves on this computer only, with the Mission Control folder mounted read-only and nothing else", () => {
+    const r = wrapper(["dashboard"]);
+    expect(r.status).toBe(0);
+    expect(r.run).toEqual(expectedDashboard("127.0.0.1:8787:8787", "8787"));
+    expect(r.stdout).toContain("mc-docker: the dashboard is at http://localhost:8787 (Ctrl+C to stop)");
+    expect(r.stdout).not.toContain("other devices");
+  });
+
+  it("mounts only mc-home, and that volume ends with :ro (no logins, no browsers, no apps folder)", () => {
+    const run = wrapper(["dashboard"]).run!;
+    const volumes = run.flatMap((arg, i) => (run[i - 1] === "--volume" ? [arg] : []));
+    expect(volumes).toEqual(["mc-home:/home/pwuser/.mission-control:ro"]);
+    expect(run.join(" ")).not.toMatch(/mc-claude|mc-codex|mc-browsers|mc-apps/);
+    expect(run).not.toContain("--hostname");
+    expect(run).not.toContain("--interactive");
+    expect(run).not.toContain("--tty");
+  });
+
+  it("skips the container's entrypoint script, which would complain about the read-only folder", () => {
+    const run = wrapper(["dashboard"]).run!;
+    expect(valueAfter(run, "--entrypoint")).toBe("mc");
+    expect(run.indexOf("--entrypoint")).toBeLessThan(run.indexOf(IMAGE));
+    expect(run.slice(run.indexOf(IMAGE))).toEqual([IMAGE, "dashboard", "--host", "0.0.0.0", "--port", "8787"]);
+  });
+
+  it("takes another port, and passes a stop time on so the page can count down", () => {
+    const r = wrapper(["dashboard", "--port", "9000", "--until", "07:00"]);
+    expect(r.status).toBe(0);
+    expect(r.run).toEqual(expectedDashboard("127.0.0.1:9000:9000", "9000", ["--until", "07:00"]));
+    expect(r.stdout).toContain("http://localhost:9000");
+  });
+
+  it("--lan publishes on every network interface, and says so", () => {
+    const r = wrapper(["dashboard", "--lan"]);
+    expect(r.status).toBe(0);
+    expect(r.run).toEqual(expectedDashboard("8787:8787", "8787"));
+    expect(r.stdout).toContain("other devices on your network can open it too");
+  });
+
+  it("takes its options in any order", () => {
+    const r = wrapper(["dashboard", "--until", "06:30", "--lan", "--port", "8800"]);
+    expect(r.run).toEqual(expectedDashboard("8800:8800", "8800", ["--until", "06:30"]));
+  });
+
+  it("leaves out the timezone when it is unknown, and does not create the apps folder", () => {
+    const r = wrapper(["dashboard"], { env: { TZ: undefined, FAKE_LOCALTIME: "/etc/not-a-zone-file" } });
+    expect(r.status).toBe(0);
+    const etcTimezone = fs.existsSync("/etc/timezone") ? fs.readFileSync("/etc/timezone", "utf8").trim() : "";
+    expect(valueAfter(r.run, "--env")).toBe(etcTimezone ? `TZ=${etcTimezone}` : undefined);
+    expect(fs.existsSync(path.join(home, "mc-apps"))).toBe(false);
+  });
+
+  it("refuses a second dashboard and says how to stop the first", () => {
+    const r = wrapper(["dashboard"], { env: { FAKE_RUN_STATE: "true" } });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("the dashboard is already running");
+    expect(r.stderr).toContain("docker stop mission-control-dashboard");
+    expect(r.run).toBeUndefined();
+  });
+
+  it("removes a dashboard container left behind by a crash before starting", () => {
+    const r = wrapper(["dashboard"], { env: { FAKE_RUN_STATE: "false" } });
+    expect(r.status).toBe(0);
+    const rm = r.calls.findIndex((call) => call.join(" ") === "container rm mission-control-dashboard");
+    expect(rm).toBeGreaterThan(-1);
+    expect(r.calls.indexOf(r.run!)).toBeGreaterThan(rm);
+  });
+
+  it.each([
+    [["--port", "abc"], "is not a port number"],
+    [["--port", "0"], "is not a port number"],
+    [["--port", "65536"], "is not a port number"],
+    [["--port", "080"], "is not a port number"],
+    [["--port"], "--port needs a number"],
+    [["--until", "7pm"], "is not a time of day"],
+    [["--until"], "--until needs a time"],
+    [["--token", "x"], "I don't know"],
+  ])("explains a bad option %j and starts nothing", (args, message) => {
+    const r = wrapper(["dashboard", ...args]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+    expect(r.run).toBeUndefined();
+  });
+
+  it("needs Docker, the image, and a normal user like every other command", () => {
+    expect(wrapper(["dashboard"], { env: { FAKE_INFO_FAILURES: "1000" } }).stderr).toContain("Docker isn't running");
+    expect(wrapper(["dashboard"], { env: { FAKE_IMAGE_MISSING: "1" } }).stderr).toContain("image isn't built yet. Run: mc build");
+    const root = wrapper(["dashboard"], { env: { FAKE_UID: "0" } });
+    expect(root.status).toBe(1);
+    expect(root.stderr).toContain("without sudo");
+    expect(root.run).toBeUndefined();
+  });
+
+  it("is listed in the help, with what --lan does", () => {
+    const r = wrapper(["help"]);
+    expect(r.stdout).toContain("dashboard [--port N] [--lan] [--until HH:MM]");
+    expect(r.stdout).toContain("--lan lets other devices on your network open it");
+    expect(r.calls).toEqual([]);
+  });
+});
+
 describe("mc-docker.sh: timezone", () => {
   const tzFlag = (r: WrapperResult) => valueAfter(r.run, "--env");
 

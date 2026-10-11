@@ -1,0 +1,271 @@
+{
+  "id": "2026-10-11-habit-tracker",
+  "kind": "greenfield",
+  "title": "Habit tracker",
+  "request": "A habit tracker with a weekly streak chart",
+  "repoPath": "/fixture/mc-apps/habit-tracker",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-habit-tracker",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "done",
+  "stage": "complete",
+  "createdAt": "2026-10-11T09:58:09.047Z",
+  "updatedAt": "2026-10-11T09:58:13.376Z",
+  "features": [
+    {
+      "id": "add-habit",
+      "title": "Add and name a habit",
+      "story": "As a user I can add a habit with a name.",
+      "acceptance": [
+        "run() in src/add-habit.mjs returns \"add-habit works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "implemented add-habit",
+          "at": "2026-10-11T09:58:10.129Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/add-habit.test.mjs",
+          "sha256": "e1a2edf6e1fe4fa58115c3bea895d03f6a6c4724d77f54b97e7317625fc71a62"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "testsCommit": "49cbfb4eb9be9426de4bb61c62c4e40486c6e086",
+      "passingCommit": "1d3522a3e394eb204e114a0afe455fb46dcc514c",
+      "builtBy": "codex",
+      "commit": "a9d9180f5f8f2eb31a1621d24d179923d2b1399d"
+    },
+    {
+      "id": "daily-checkin",
+      "title": "Daily check-in",
+      "story": "As a user I can tick a habit off for today.",
+      "acceptance": [
+        "run() in src/daily-checkin.mjs returns \"daily-checkin works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "add-habit"
+      ],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "implemented daily-checkin",
+          "at": "2026-10-11T09:58:10.962Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/daily-checkin.test.mjs",
+          "sha256": "ce520cc6c55f3b0cee9fb6ae4b833757853fb6b4db4f34ae0636b77f4ccea847"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "testsCommit": "acd5115eef325f121d051ac8931432817f12d616",
+      "passingCommit": "00bcb26d7ca100307909672e9d5a232ae67357ec",
+      "builtBy": "codex",
+      "commit": "88bf96b0dc4514c0daf70cb607f7e79592d9834e"
+    },
+    {
+      "id": "streak-count",
+      "title": "Streak counter",
+      "story": "As a user I see my current streak.",
+      "acceptance": [
+        "run() in src/streak-count.mjs returns \"streak-count works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "daily-checkin"
+      ],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "implemented streak-count",
+          "at": "2026-10-11T09:58:11.887Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/streak-count.test.mjs",
+          "sha256": "44dfa5552276b17cf2be98d58979e673387ddac33301fe582bba78b5b06d0386"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "testsCommit": "8e417d25ecee8f925d6be2d6e6155731468e010f",
+      "passingCommit": "0d9633a2ebd7224ac32420b35f3c64530e439c0a",
+      "builtBy": "codex",
+      "commit": "322f0b04a1b9c724f4e1bb6a6f1997813d1f252e"
+    },
+    {
+      "id": "weekly-chart",
+      "title": "Weekly streak chart",
+      "story": "As a user I see a chart of my week.",
+      "acceptance": [
+        "run() in src/weekly-chart.mjs returns \"weekly-chart works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "daily-checkin"
+      ],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 12000,
+            "outputTokens": 3500,
+            "cacheReadTokens": 40000,
+            "cacheWriteTokens": 2000,
+            "estCostUsd": 0.21,
+            "turns": 6
+          },
+          "outcome": "pass",
+          "summary": "implemented weekly-chart",
+          "at": "2026-10-11T09:58:12.827Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/weekly-chart.test.mjs",
+          "sha256": "3057ff7192879733a06188e0f570089ef3889cb8e75e325a0b3dba6739e64cf6"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "testsCommit": "6edc6d74391bf0b31c1c6f4e0f7adde0bb5e9c23",
+      "passingCommit": "1530f6c25309f8827796676491047465c3634a55",
+      "builtBy": "codex",
+      "commit": "e8d83211190582d50d7796c2d6545f717f916236"
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 21,
+  "notes": [
+    "Everything is stored locally; no sign-in."
+  ],
+  "spec": {
+    "appName": "Habit tracker",
+    "summary": "A small habit tracker with a weekly streak chart.",
+    "features": [
+      {
+        "id": "add-habit",
+        "title": "Add and name a habit",
+        "story": "As a user I can add a habit with a name.",
+        "acceptance": [
+          "run() in src/add-habit.mjs returns \"add-habit works\""
+        ],
+        "kind": "standard",
+        "deps": []
+      },
+      {
+        "id": "daily-checkin",
+        "title": "Daily check-in",
+        "story": "As a user I can tick a habit off for today.",
+        "acceptance": [
+          "run() in src/daily-checkin.mjs returns \"daily-checkin works\""
+        ],
+        "kind": "standard",
+        "deps": [
+          "add-habit"
+        ]
+      },
+      {
+        "id": "streak-count",
+        "title": "Streak counter",
+        "story": "As a user I see my current streak.",
+        "acceptance": [
+          "run() in src/streak-count.mjs returns \"streak-count works\""
+        ],
+        "kind": "standard",
+        "deps": [
+          "daily-checkin"
+        ]
+      },
+      {
+        "id": "weekly-chart",
+        "title": "Weekly streak chart",
+        "story": "As a user I see a chart of my week.",
+        "acceptance": [
+          "run() in src/weekly-chart.mjs returns \"weekly-chart works\""
+        ],
+        "kind": "standard",
+        "deps": [
+          "daily-checkin"
+        ]
+      }
+    ],
+    "assumptions": [
+      "Everything is stored locally; no sign-in."
+    ],
+    "uiContract": "Feature <id> lives in src/<id>.mjs and exports run()."
+  },
+  "baseSha": "a36a524783140818a930d7e1826c20bd1a3629f4",
+  "verify": {
+    "full": "node --test \"tests/**/*.test.mjs\"",
+    "testGlobs": [
+      "tests/**"
+    ],
+    "tests": "node --test {files}"
+  }
+}

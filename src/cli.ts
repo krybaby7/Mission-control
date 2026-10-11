@@ -8,6 +8,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError } from "commander";
 import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
+import { parsePort, runDashboard } from "./dashboard/command.js";
+import { DEFAULT_PORT } from "./dashboard/constants.js";
+import { builtInSettings, settingsFromConfig } from "./dashboard/snapshot.js";
 import { ConfigProblemsError, configPath, configTemplateYaml, defaultConfig, inContainer, loadConfig, parseRoleOverride } from "./config.js";
 import { type DoctorCheck, runDoctor, unkeptFolderProblems } from "./doctor.js";
 import { Git } from "./git.js";
@@ -145,6 +148,14 @@ function buildProgram(io: CliIO, setExit: (code: number) => void): Command {
     .option("--follow", "keep showing new steps as they happen (Ctrl+C to stop)")
     .action((id: string, opts: { follow?: boolean }) => logsCommand(io, id, opts.follow === true));
 
+  program
+    .command("dashboard")
+    .description("show tonight's progress on a web page (read-only)")
+    .option("--host <address>", "the address to listen on (default: this computer only; inside the container, every address)")
+    .option("--port <number>", `the port to listen on (default: ${DEFAULT_PORT})`)
+    .option("--until <HH:MM>", "show how long is left until this time; give the same time you gave mc run")
+    .action((opts: DashboardOptions) => dashboardCommand(io, opts));
+
   return program;
 }
 
@@ -163,6 +174,12 @@ interface RunOptions {
   mission?: string;
   profile?: string;
   role: string[];
+}
+
+interface DashboardOptions {
+  host?: string;
+  port?: string;
+  until?: string;
 }
 
 function collect(value: string, previous: string[]): string[] {
@@ -869,6 +886,38 @@ function text(value: unknown): string {
 function seconds(ms: unknown): string {
   if (typeof ms !== "number" || !Number.isFinite(ms)) return "?";
   return ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`;
+}
+
+// ───────────────────────────── dashboard ─────────────────────────────
+
+/** Serves the read-only dashboard until Ctrl+C (or a stop signal from Docker). It never writes into the home. */
+async function dashboardCommand(io: CliIO, opts: DashboardOptions): Promise<void> {
+  const port = opts.port === undefined ? DEFAULT_PORT : parsePort(opts.port);
+  const store = lenientStore(io);
+  let settings = builtInSettings();
+  try {
+    settings = settingsFromConfig(loadConfig());
+  } catch {
+    // lenientStore has already said what is wrong with the settings; the page uses the built-in ones
+  }
+  const stop = new AbortController();
+  const onSignal = () => stop.abort();
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+  try {
+    await runDashboard({
+      home: store.home,
+      settings,
+      host: opts.host ?? (inContainer() ? "0.0.0.0" : "127.0.0.1"),
+      port,
+      ...(opts.until !== undefined && { until: opts.until }),
+      say: (line) => say(io.stdout, line),
+      signal: stop.signal,
+    });
+  } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+  }
 }
 
 // ───────────────────────────── Helpers ─────────────────────────────

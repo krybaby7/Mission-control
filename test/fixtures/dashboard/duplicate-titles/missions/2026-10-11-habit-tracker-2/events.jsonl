@@ -1,0 +1,14 @@
+{"at":"2026-10-11T09:58:30.000Z","missionId":"2026-10-11-habit-tracker-2","type":"mission.start","data":{"stage":"spec"}}
+{"at":"2026-10-11T09:58:31.000Z","missionId":"2026-10-11-habit-tracker-2","type":"run.start","data":{"label":"spec","jobId":"spec-1","role":"architect","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}
+{"at":"2026-10-11T09:58:32.000Z","missionId":"2026-10-11-habit-tracker-2","type":"run.end","data":{"label":"spec","jobId":"spec-1","provider":"codex","model":"gpt-6.1-sol","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:33.000Z","missionId":"2026-10-11-habit-tracker-2","type":"spec","data":{"appName":"Habit tracker","features":["add-habit","reminders"]}}
+{"at":"2026-10-11T09:58:33.100Z","missionId":"2026-10-11-habit-tracker-2","type":"stage","data":{"from":"spec","to":"gate_a"}}
+{"at":"2026-10-11T09:58:34.000Z","missionId":"2026-10-11-habit-tracker-2","type":"run.start","data":{"label":"gate-a","jobId":"gate-a-1","role":"reviewer","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}
+{"at":"2026-10-11T09:58:35.000Z","missionId":"2026-10-11-habit-tracker-2","type":"run.end","data":{"label":"gate-a","jobId":"gate-a-1","provider":"codex","model":"gpt-6.1-sol","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:35.100Z","missionId":"2026-10-11-habit-tracker-2","type":"stage","data":{"from":"gate_a","to":"init"}}
+{"at":"2026-10-11T09:58:36.000Z","missionId":"2026-10-11-habit-tracker-2","type":"run.start","data":{"label":"init","jobId":"init-1","role":"engineer","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}
+{"at":"2026-10-11T09:58:37.000Z","missionId":"2026-10-11-habit-tracker-2","type":"run.end","data":{"label":"init","jobId":"init-1","provider":"codex","model":"gpt-6.1-sol","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:37.500Z","missionId":"2026-10-11-habit-tracker-2","type":"attempt","data":{"feature":"_init","rung":0,"provider":"codex","model":"gpt-6.1-sol","effort":"medium","outcome":"pass"}}
+{"at":"2026-10-11T09:58:37.600Z","missionId":"2026-10-11-habit-tracker-2","type":"stage","data":{"from":"init","to":"features"}}
+{"at":"2026-10-11T09:58:48.000Z","missionId":"2026-10-11-habit-tracker-2","type":"mission.end","data":{"status":"partial"}}
+{"at":"2026-10-11T09:58:48.500Z","missionId":"2026-10-11-habit-tracker-2","type":"stage","data":{"from":"finalize","to":"complete"}}

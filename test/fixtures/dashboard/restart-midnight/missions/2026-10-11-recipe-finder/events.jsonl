@@ -1,0 +1,4 @@
+{"at":"2026-10-12T01:40:00.000Z","missionId":"2026-10-11-recipe-finder","type":"mission.start","data":{"stage":"spec"}}
+{"at":"2026-10-12T02:00:00.000Z","missionId":"2026-10-11-recipe-finder","type":"run.start","data":{"label":"build-filters","jobId":"build-filters-1","role":"engineer","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}
+{"at":"2026-10-12T03:10:30.000Z","missionId":"2026-10-11-recipe-finder","type":"mission.resume","data":{"stage":"features"}}
+{"at":"2026-10-12T03:19:00.000Z","missionId":"2026-10-11-recipe-finder","type":"run.start","data":{"label":"build-filters","jobId":"build-filters-2","role":"engineer","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}

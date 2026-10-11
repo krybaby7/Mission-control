@@ -5,6 +5,11 @@ set -euo pipefail
 
 readonly IMAGE="mission-control:local"
 readonly RUN_CONTAINER="mission-control-run"
+readonly DASHBOARD_CONTAINER="mission-control-dashboard"
+readonly DASHBOARD_PORT=8787
+# The dashboard only serves two small documents, so its box is much smaller than a night run's.
+readonly DASHBOARD_PIDS_LIMIT=256
+readonly DASHBOARD_MEMORY="256m"
 readonly CONTAINER_HOME="/home/pwuser"
 readonly APPS_DIR="$HOME/mc-apps"
 readonly REPORTS_DIR="$HOME/mc-reports"
@@ -55,6 +60,9 @@ Setup and maintenance:
   login-codex                  Log in to Codex once (shows a link and a one-time code to approve)
   shell                        Open a terminal inside the container; port 3000 reaches your browser
   copy-reports                 Copy reports and screenshots to ~/mc-reports, readable from Windows
+  dashboard [--port N] [--lan] [--until HH:MM]
+                               Show tonight's progress on a web page at http://localhost:8787 (it only reads).
+                               --lan lets other devices on your network open it too. Ctrl+C stops it.
   fix-permissions              Repair ownership of the login and data volumes
   help                         Show this help
 
@@ -314,6 +322,69 @@ run_night() {
   run_container --name "$RUN_CONTAINER" --hostname "$RUN_CONTAINER" -- mc run "$@"
 }
 
+# `dashboard [--port N] [--lan] [--until HH:MM]`: a read-only web page about tonight's run, in a container of its own.
+# It gets none of what the other containers get (no logins, no apps folder) and sees the Mission Control folder through
+# a read-only mount, so the operating system enforces that it never writes. `--entrypoint mc` skips docker/entrypoint.sh,
+# which would complain about the read-only folder and the missing logins. No --hostname: a lock held by the night run
+# (hostname mission-control-run) must look like another host's, so it is judged by its heartbeat and not by a pid.
+run_dashboard() {
+  local port="$DASHBOARD_PORT" stop_time="" publish_host="127.0.0.1:"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --port)
+        [ "$#" -ge 2 ] || die "dashboard: --port needs a number, for example: mc dashboard --port 8787"
+        port="$2"
+        shift 2
+        ;;
+      --until)
+        [ "$#" -ge 2 ] || die "dashboard: --until needs a time, for example: mc dashboard --until 07:00"
+        stop_time="$2"
+        shift 2
+        ;;
+      --lan)
+        publish_host=""
+        shift
+        ;;
+      *) die "dashboard: I don't know \"$1\". Usage: mc dashboard [--port N] [--lan] [--until HH:MM]" ;;
+    esac
+  done
+  case "$port" in
+    '' | *[!0-9]* | 0?*) die "dashboard: \"$port\" is not a port number. Use a whole number from 1 to 65535." ;;
+  esac
+  if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+    die "dashboard: \"$port\" is not a port number. Use a whole number from 1 to 65535."
+  fi
+  if [ -n "$stop_time" ] && ! [[ "$stop_time" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then
+    die "dashboard: \"$stop_time\" is not a time of day. Write it as HH:MM in 24-hour time, for example 07:00."
+  fi
+  local running
+  running="$(docker container inspect --format '{{.State.Running}}' "$DASHBOARD_CONTAINER" 2>/dev/null || true)"
+  case "$running" in
+    true) die "the dashboard is already running. Open the address it printed when it started (http://localhost:$DASHBOARD_PORT unless you chose another port), or stop it with: docker stop $DASHBOARD_CONTAINER" ;;
+    false) docker container rm "$DASHBOARD_CONTAINER" >/dev/null ;; # left behind by a crash
+  esac
+  local -a flags=(--rm --init --name "$DASHBOARD_CONTAINER"
+    --read-only --tmpfs /tmp:rw,size=16m
+    --cap-drop ALL --security-opt no-new-privileges --pids-limit "$DASHBOARD_PIDS_LIMIT"
+    --memory "$DASHBOARD_MEMORY" --memory-swap -1
+    --volume "mc-home:$CONTAINER_HOME/.mission-control:ro"
+    --publish "$publish_host$port:$port")
+  local zone
+  zone="$(host_timezone)"
+  if [ -n "$zone" ]; then
+    flags+=(--env "TZ=$zone")
+  fi
+  local -a mc_args=(dashboard --host 0.0.0.0 --port "$port")
+  if [ -n "$stop_time" ]; then
+    mc_args+=(--until "$stop_time")
+  fi
+  say "the dashboard is at http://localhost:$port (Ctrl+C to stop)"
+  if [ -z "$publish_host" ]; then
+    say "other devices on your network can open it too, at this computer's address and port $port."
+  fi
+  exec docker run "${flags[@]}" --entrypoint mc "$IMAGE" "${mc_args[@]}"
+}
+
 # `mc feature <app-folder> ...`: the container only sees ~/mc-apps, so an app folder anywhere else would look missing
 # to Mission Control. Stops with what to do when the folder exists here but outside ~/mc-apps.
 check_feature_folder() {
@@ -392,6 +463,10 @@ main() {
       run_container --publish "127.0.0.1:$PREVIEW_PORT:$PREVIEW_PORT" -- bash
       ;;
     copy-reports) copy_reports ;;
+    dashboard)
+      shift
+      run_dashboard "$@"
+      ;;
     fix-permissions) fix_permissions ;;
     run)
       shift

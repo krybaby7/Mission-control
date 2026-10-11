@@ -1,0 +1,2 @@
+{"at":"2026-10-11T22:00:10.000Z","missionId":"2026-10-11-fitness-log","type":"mission.start","data":{"stage":"spec"}}
+{"at":"2026-10-12T01:30:00.000Z","missionId":"2026-10-11-fitness-log","type":"mission.end","data":{"status":"done"}}

@@ -1,0 +1,91 @@
+{
+  "id": "2026-10-11-reader",
+  "kind": "greenfield",
+  "title": "Reader",
+  "request": "A reader app",
+  "repoPath": "",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-reader",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "waiting",
+  "stage": "gate_a",
+  "createdAt": "2026-10-11T09:58:25.597Z",
+  "updatedAt": "2026-10-11T09:58:25.596Z",
+  "features": [
+    {
+      "id": "feed",
+      "title": "News feed",
+      "story": "As a reader I see articles.",
+      "acceptance": [
+        "run() in src/feed.mjs returns \"feed works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "pending",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "bookmark",
+      "title": "Bookmarks",
+      "story": "As a reader I can save an article.",
+      "acceptance": [
+        "run() in src/bookmark.mjs returns \"bookmark works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "feed"
+      ],
+      "status": "pending",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 1,
+  "notes": [
+    "Everything is stored locally; no sign-in."
+  ],
+  "spec": {
+    "appName": "Reader",
+    "summary": "A small reader app.",
+    "features": [
+      {
+        "id": "feed",
+        "title": "News feed",
+        "story": "As a reader I see articles.",
+        "acceptance": [
+          "run() in src/feed.mjs returns \"feed works\""
+        ],
+        "kind": "standard",
+        "deps": []
+      },
+      {
+        "id": "bookmark",
+        "title": "Bookmarks",
+        "story": "As a reader I can save an article.",
+        "acceptance": [
+          "run() in src/bookmark.mjs returns \"bookmark works\""
+        ],
+        "kind": "standard",
+        "deps": [
+          "feed"
+        ]
+      }
+    ],
+    "assumptions": [
+      "Everything is stored locally; no sign-in."
+    ],
+    "uiContract": "Feature <id> lives in src/<id>.mjs and exports run()."
+  }
+}

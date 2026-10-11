@@ -1,0 +1,87 @@
+{
+  "id": "2026-10-11-fitness-log",
+  "kind": "greenfield",
+  "title": "Fitness log",
+  "request": "Build me Fitness log",
+  "repoPath": "/fixture/mc-apps/fitness-log",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-fitness-log",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "done",
+  "stage": "complete",
+  "createdAt": "2026-10-11T22:00:10.000Z",
+  "updatedAt": "2026-10-12T01:30:00.000Z",
+  "features": [
+    {
+      "id": "workouts",
+      "title": "Log a workout",
+      "story": "As a user I can use log a workout.",
+      "acceptance": [
+        "run() in src/workouts.mjs returns \"workouts works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/workouts.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "streaks",
+      "title": "Show streaks",
+      "story": "As a user I can use show streaks.",
+      "acceptance": [
+        "run() in src/streaks.mjs returns \"streaks works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/streaks.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

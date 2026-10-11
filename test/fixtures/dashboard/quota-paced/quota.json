@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "limits": {},
+  "modelBlocks": [],
+  "utilization": [
+    {
+      "provider": "claude",
+      "window": "seven_day",
+      "utilization": 0.9,
+      "resetsAt": 1792054755000
+    },
+    {
+      "provider": "claude",
+      "window": "five_hour",
+      "utilization": 0.98,
+      "resetsAt": 1791723505000
+    },
+    {
+      "provider": "codex",
+      "window": "seven_day",
+      "utilization": 0.3,
+      "resetsAt": 1792002600000
+    }
+  ]
+}

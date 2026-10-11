@@ -1,0 +1,76 @@
+{
+  "id": "2026-10-11-habit-tracker-2",
+  "kind": "greenfield",
+  "title": "Habit tracker",
+  "request": "Build me Habit tracker",
+  "repoPath": "/fixture/mc-apps/habit-tracker-2",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-habit-tracker-2",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "partial",
+  "stage": "complete",
+  "createdAt": "2026-10-11T09:58:30.000Z",
+  "updatedAt": "2026-10-11T09:58:50.000Z",
+  "features": [
+    {
+      "id": "add-habit",
+      "title": "Add a habit",
+      "story": "As a user I can use add a habit.",
+      "acceptance": [
+        "run() in src/add-habit.mjs returns \"add-habit works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/add-habit.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "reminders",
+      "title": "Reminders",
+      "story": "As a user I can use reminders.",
+      "acceptance": [
+        "run() in src/reminders.mjs returns \"reminders works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "blocked",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "blockedReason": "the architect could not decide which time zone to use"
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [
+    "\"Reminders\": the architect could not decide which time zone to use",
+    "Should reminders also be sent by email?",
+    "Should the weekly summary be on Monday or Sunday?"
+  ],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

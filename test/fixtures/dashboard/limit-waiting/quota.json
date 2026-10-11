@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "limits": {
+    "codex": {
+      "kind": "session",
+      "raw": "mock session limit",
+      "until": 1791723505596
+    }
+  },
+  "modelBlocks": [],
+  "utilization": []
+}

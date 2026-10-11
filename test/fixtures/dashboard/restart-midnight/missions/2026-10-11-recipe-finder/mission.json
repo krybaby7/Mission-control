@@ -1,0 +1,71 @@
+{
+  "id": "2026-10-11-recipe-finder",
+  "kind": "greenfield",
+  "title": "Recipe finder",
+  "request": "Build me Recipe finder",
+  "repoPath": "/fixture/mc-apps/recipe-finder",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-recipe-finder",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "running",
+  "stage": "features",
+  "createdAt": "2026-10-11T22:00:20.000Z",
+  "updatedAt": "2026-10-12T03:10:30.000Z",
+  "features": [
+    {
+      "id": "search",
+      "title": "Search recipes",
+      "story": "As a user I can use search recipes.",
+      "acceptance": [
+        "run() in src/search.mjs returns \"search works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/search.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "filters",
+      "title": "Filters",
+      "story": "As a user I can use filters.",
+      "acceptance": [
+        "run() in src/filters.mjs returns \"filters works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "building",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

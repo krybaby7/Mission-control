@@ -1,0 +1,22 @@
+{
+  "id": "2026-10-11-last-in-line",
+  "kind": "greenfield",
+  "title": "Last in line",
+  "request": "Build me Last in line",
+  "repoPath": "/fixture/mc-apps/last-in-line",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-last-in-line",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "queued",
+  "stage": "spec",
+  "createdAt": "2026-10-11T08:00:00.000Z",
+  "updatedAt": "2026-10-11T08:00:00.000Z",
+  "features": [],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": []
+}

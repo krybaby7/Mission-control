@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "limits": {
+    "codex": {
+      "kind": "session",
+      "until": 1791702000000,
+      "raw": "old limit"
+    }
+  },
+  "modelBlocks": [],
+  "utilization": [
+    {
+      "provider": "claude",
+      "window": "five_hour",
+      "utilization": 0.95,
+      "resetsAt": 1791705600000
+    },
+    {
+      "provider": "claude",
+      "window": "seven_day",
+      "utilization": 0.3,
+      "resetsAt": 1792054800000
+    }
+  ]
+}

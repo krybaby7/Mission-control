@@ -1,0 +1,89 @@
+{
+  "id": "2026-10-11-book-club",
+  "kind": "greenfield",
+  "title": "Book club",
+  "request": "Build me Book club",
+  "repoPath": "/fixture/mc-apps/book-club",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-book-club",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "waiting",
+  "stage": "features",
+  "createdAt": "2026-10-11T09:58:00.000Z",
+  "updatedAt": "2026-10-11T09:58:18.000Z",
+  "features": [
+    {
+      "id": "upload",
+      "title": "Upload photos",
+      "story": "As a user I can use upload photos.",
+      "acceptance": [
+        "run() in src/upload.mjs returns \"upload works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "scripted",
+          "at": "2026-10-11T09:58:05.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/upload.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "albums",
+      "title": "Albums",
+      "story": "As a user I can use albums.",
+      "acceptance": [
+        "run() in src/albums.mjs returns \"albums works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "testing",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "share",
+      "title": "Share an album",
+      "story": "As a user I can use share an album.",
+      "acceptance": [
+        "run() in src/share.mjs returns \"share works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "albums"
+      ],
+      "status": "pending",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 4,
+  "notes": []
+}

@@ -1,0 +1,46 @@
+{
+  "id": "2026-10-10-login-lapsed",
+  "kind": "greenfield",
+  "title": "Login lapsed",
+  "request": "Build me Login lapsed",
+  "repoPath": "/fixture/mc-apps/login-lapsed",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-10-login-lapsed",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "failed",
+  "stage": "features",
+  "createdAt": "2026-10-10T14:00:00.000Z",
+  "updatedAt": "2026-10-10T15:00:00.000Z",
+  "features": [
+    {
+      "id": "first",
+      "title": "First thing",
+      "story": "As a user I can use first thing.",
+      "acceptance": [
+        "run() in src/first.mjs returns \"first works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "testing",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [
+    "Log in again: claude needs a new login."
+  ],
+  "gateCRounds": 0,
+  "agentRuns": 0,
+  "notes": [],
+  "failure": {
+    "reason": "No model could run: claude needs a new login.",
+    "decision": "Log in again: claude needs a new login.",
+    "retryable": true
+  }
+}
