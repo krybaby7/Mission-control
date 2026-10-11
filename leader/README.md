@@ -11,7 +11,7 @@ Nothing in this folder has been tried on a real PC yet. Everything marked "not t
 | File | What it is |
 |---|---|
 | `CLAUDE.md` | The leader's standing instructions: its role, the seven commands, how to turn the CEO's sentences into commands, what it must never do, and how to talk. Claude Code reads it when it starts in this folder. |
-| `.claude/settings.json` | The permissions. The seven commands run without asking. File edits and git are refused. Anything else makes Claude Code ask you first. |
+| `.claude/settings.json` | The permissions. `status`, `logs` and `report` run without asking. `stop`, `run`, `new` and `feature` make Claude Code ask you first (see "What the leader will ask you"). File edits, git and `logs --follow` are refused. Claude Code also runs its own read-only commands (such as `ls`, `cat`, `grep`, `echo`) and reads files inside this folder without asking, and asks about anything else. |
 | `README.md` | This file. |
 
 The longer explanation is in [docs/leader.md](../docs/leader.md).
@@ -33,16 +33,26 @@ Not tried here: Claude Code's own steps in Ubuntu, and the leader's behaviour wi
 
 ## Reach the leader from the Claude app (Remote Control)
 
-To talk to the same session from the Claude app on your iPad or phone, start it with Remote Control instead. In the Ubuntu window:
+There are two different Remote Control commands, and only one of them gives you one leader on the PC and in the app. This is from Anthropic's Remote Control documentation (https://code.claude.com/docs/en/remote-control); none of it was tried here.
+
+To type to the leader in the Ubuntu window and also from the app, start it like this:
 
 ```
 cd ~/Mission-control/leader
-claude remote-control
+claude --remote-control "Leader"
 ```
 
-The session should then appear in the Claude Code app (or in the Claude Desktop app). Keep the Ubuntu window open and the PC awake, as for a night run. Run `claude remote-control --help` to see the options your version has.
+This is one session. You can type in the window, and the same session is open in the app. If the leader is already running, type `/remote-control Leader` in it instead. To find it: open claude.ai/code in a browser (an iPad browser works), or open the Claude app and tap Code. Look for the session called "Leader"; Remote Control sessions show a computer icon with a green dot while they are online.
 
-Not tried here. Whether the session appears, what the app lets the CEO do in it, and what happens to a night run started from it when the connection drops are all unverified.
+Do not use `claude remote-control` (without the dashes in front) for this. That is server mode: it starts its own session that you open from claude.ai/code or the app, and you cannot type to it in that terminal.
+
+What it needs:
+
+- A claude.ai login (Pro, Max, Team or Enterprise). API keys do not work. On Team or Enterprise, an Owner must first turn on the Remote Control toggle in the Claude Code admin settings. Log in once with `claude` and `/login`.
+- The first time, Claude Code asks "Enable Remote Control? (y/n)" (in a running session it is a dialog called "Enable Remote Control"). Claude Code also asks once whether you trust the folder (server mode words it "Trust <folder>? [y/N]"). Answer yes to both.
+- Keep the Ubuntu window open and the PC awake, as for a night run. If the window is closed, the session goes offline.
+
+Not tried here. Whether the session appears, what the app lets the CEO do in it, and what happens to a night run started from it when the connection drops are all unverified. `claude remote-control --help` only works when you are signed in with an eligible account.
 
 ## The dashboard and the leader together
 
@@ -52,7 +62,8 @@ Not tried here. Whether the session appears, what the app lets the CEO do in it,
 
 ## What the leader will ask you
 
-- It may ask permission for anything outside the seven commands, for example reading a file. Say no unless you know why.
+- It asks you before `stop`, `run`, `new` and `feature` (a prompt in the Ubuntu window, and in the app when you use Remote Control). That is on purpose: reports and logs are written by AIs, and a human tap is the guard against a command that came from such a text. Read what it is about to run, then answer **Yes** once. Never choose "Yes, and don't ask again": Claude Code would save that command as always allowed in the file `.claude/settings.local.json` at the top of the repository, for everyone who starts the leader, and the guard would be gone. If you want fewer prompts anyway, the owner can move entries from `ask` to `allow` in `.claude/settings.json`; the page [docs/leader.md](../docs/leader.md) explains the trade.
+- It may also ask permission for anything outside the seven commands. Say no unless you know why.
 - Before `run`, it tells you what is queued and when the run will stop. Before `stop`, it always asks.
 - A run started by the leader is a background task of the chat session. If the session ends, the run may stop (progress is kept and the next run continues; not tried here). For a night that must not depend on a chat, start it yourself or use the scheduled task from the setup guide.
 

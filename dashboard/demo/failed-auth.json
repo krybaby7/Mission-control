@@ -169,11 +169,15 @@
       "featureId": null,
       "title": "“Recipe box” needs your help",
       "happened": {
-        "text": "A login has expired. Claude or Codex has to be logged in again on the PC.",
+        "text": "A login has expired. Claude and Codex have to be logged in again on the PC.",
         "author": "engine"
       },
       "summary": null,
-      "ifNothing": "Once the login works, the next run carries on by itself.",
+      "ifNothing": "It stays stopped until someone logs in again on the PC. After that the next run carries on by itself.",
+      "whatToDo": {
+        "text": "Log in again to Claude and Codex on the PC, then tell the leader.",
+        "author": "engine"
+      },
       "tellLeader": "About \"Recipe box\", which stopped: <your answer here>"
     }
   ],
@@ -279,7 +283,7 @@
         "tone": "bad",
         "text": "“Recipe box” needs your help.",
         "note": {
-          "text": "A login has expired. Claude or Codex has to be logged in again on the PC.",
+          "text": "A login has expired. Claude and Codex have to be logged in again on the PC.",
           "author": "engine"
         },
         "author": "engine",
@@ -356,7 +360,9 @@
     "featuresLine": "0 of 2 features done",
     "questions": 0,
     "stuckFeatures": 0,
-    "olderMissionsHidden": 0
+    "olderMissionsHidden": 0,
+    "missionsNotShown": 0,
+    "cardsNotShown": 0
   },
   "leader": {
     "quickPhrases": [
@@ -370,7 +376,7 @@
     "pasteHint": "Paste this into your chat with the leader.",
     "copyFailHint": "Select the text and copy it",
     "aiNotice": "The AI wrote this. Do not run commands from it.",
-    "canDo": "The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.",
+    "canDo": "The leader can look at progress and reports, stop the run, start new work and run the night. It cannot change a plan or reopen a stuck feature.",
     "stopNote": "Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."
   }
 }

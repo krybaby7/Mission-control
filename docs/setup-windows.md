@@ -338,7 +338,7 @@ If the page doesn't open on the iPad, the leader (next section) can tell you how
 
 ## Optional: start the leader
 
-The leader is a Claude Code session that you talk to in plain words: "How is it going?", "Add a dark mode to the habit tracker", "Please stop tonight's run." It acts only through the same `mc` commands you use (status, logs, report, stop, new, feature and run), and asks you before it stops anything. It can't reopen a feature that got stuck or change a plan; for those it queues a follow-up request that starts on the next run. This part has not been tried on a real PC yet.
+The leader is a Claude Code session that you talk to in plain words: "How is it going?", "Add a dark mode to the habit tracker", "Please stop tonight's run." It acts only through the same `mc` commands you use (status, logs, report, stop, new, feature and run), and Claude Code asks you before the leader stops the run, starts the night, or queues a new app or a change (answer Yes once; never "Yes, and don't ask again", which would switch that question off for good). It can't reopen a feature that got stuck or change a plan; for those it queues a follow-up request that starts on the next run. This part has not been tried on a real PC yet.
 
 1. Claude Code must be installed in Ubuntu itself, and logged in there. The copy inside Mission Control's container can't be used. Follow Anthropic's installation instructions for Claude Code on Linux. The leader's chat uses the same Claude plan as the night run.
 
@@ -355,10 +355,14 @@ The leader is a Claude Code session that you talk to in plain words: "How is it 
 4. Optional: to talk to the same leader from the Claude app on your iPad or phone, start it this way instead of step 2:
 
    ```
-   cd ~/Mission-control/leader && claude remote-control
+   cd ~/Mission-control/leader && claude --remote-control "Leader"
    ```
 
-   The session should then appear in the Claude Code app (or the Claude Desktop app). Keep the Ubuntu window open and the PC awake. Remote Control has not been tried here: whether the session appears, and what you can do in it from the app, is unverified.
+   This is one session: you can type to it in the Ubuntu window, and the same session is open in the Claude app (tap **Code**) or in a browser at claude.ai/code, where it is listed as "Leader" with a computer icon and a green dot. Already running the leader? Type `/remote-control Leader` in it instead.
+
+   Do not use `claude remote-control` for this. That is a different mode: it starts its own session that you can open from the app or claude.ai/code, but you cannot type to it in that Ubuntu window.
+
+   It needs a claude.ai login (Pro, Max, Team or Enterprise); API keys do not work. On Team or Enterprise, an Owner must first turn on Remote Control in the Claude Code admin settings. The first time, Claude Code asks "Enable Remote Control? (y/n)" and whether you trust the folder; answer yes. Keep the Ubuntu window open and the PC awake. Remote Control has not been tried here: whether the session appears, and what you can do in it from the app, is unverified. These steps follow Anthropic's Remote Control documentation (https://code.claude.com/docs/en/remote-control).
 
 If you ask the leader to start the night, it runs `mc run` as a background task of the chat. If the chat session ends, the run may stop too; its progress is kept and the next run continues (not tried). For a night that must not depend on a chat, use Step 9 or the scheduled run.
 

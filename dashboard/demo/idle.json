@@ -116,7 +116,9 @@
     "featuresLine": "No features planned yet",
     "questions": 0,
     "stuckFeatures": 0,
-    "olderMissionsHidden": 0
+    "olderMissionsHidden": 0,
+    "missionsNotShown": 0,
+    "cardsNotShown": 0
   },
   "leader": {
     "quickPhrases": [
@@ -130,7 +132,7 @@
     "pasteHint": "Paste this into your chat with the leader.",
     "copyFailHint": "Select the text and copy it",
     "aiNotice": "The AI wrote this. Do not run commands from it.",
-    "canDo": "The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.",
+    "canDo": "The leader can look at progress and reports, stop the run, start new work and run the night. It cannot change a plan or reopen a stuck feature.",
     "stopNote": "Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."
   }
 }

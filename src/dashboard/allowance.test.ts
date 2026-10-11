@@ -58,6 +58,15 @@ describe("T-ALLOW rows and the missing file", () => {
     expect(a.fileChangedText).toBe("Usage figures last changed at 01:38");
   });
 
+  // M3: quota.json can be days old, and "last changed at 01:38" would read as this morning.
+  it("the time of the file follows the one time rule: a file changed on another day names the weekday", () => {
+    expect(build(empty, { mtime: at("2026-10-11T00:00:00.000Z") }).fileChangedText).toBe("Usage figures last changed at 00:00");
+    expect(build(empty, { mtime: at("2026-10-10T23:59:59.000Z") }).fileChangedText).toBe("Usage figures last changed at Sat 23:59");
+    expect(build(empty, { mtime: at("2026-10-08T01:38:12.000Z") }).fileChangedText).toBe("Usage figures last changed at Thu 01:38");
+    // A time in the future of the snapshot (a clock that is off) is worded by the same rule.
+    expect(build(empty, { mtime: at("2026-10-12T01:38:12.000Z") }).fileChangedText).toBe("Usage figures last changed at Mon 01:38");
+  });
+
   it("a provider other than the configured ones gets a row, and the Test AI has its own name", () => {
     const a = build(quota({ utilization: [reading("mock", "five_hour", 0.1, RESET_TODAY)], limits: [{ provider: "zeta", kind: "weekly", until: at(RESET_THU) }] }));
     expect(a.providers.map((p) => [p.id, p.label])).toEqual([
@@ -325,6 +334,11 @@ describe("T-ALLOW notes", () => {
     expect(row(a, "codex").pill.state).toBe("plenty");
   });
 
+  it("a model block that ends on another day says the weekday (M3)", () => {
+    const a = build(quota({ modelBlocks: [{ provider: "claude", model: "m", until: at("2026-10-14T15:26:00.000Z") }], utilization: [reading("claude", "five_hour", 0.2, RESET_TODAY)] }));
+    expect(row(a, "claude").note).toBe("One kind of model is limited until Wed 15:26.");
+  });
+
   it("the model sentence follows the first sentence that applies", () => {
     const a = build(quota({ modelBlocks: [{ provider: "claude", model: "m", until: at("2026-10-11T11:15:00.000Z") }] }));
     expect(row(a, "claude").note).toBe("No usage reading yet. One kind of model is limited until 11:15.");
@@ -342,6 +356,32 @@ describe("T-ALLOW notes", () => {
       }),
     );
     expect(row(a, "claude").note).toBe("One kind of model is limited until 11:15.");
+  });
+});
+
+// m2: provider names, window ids and block kinds come from a file. A word that is also a member of Object.prototype must
+// be an ordinary unknown word, not a function.
+describe("T-ALLOW words that are also members of Object.prototype (m2)", () => {
+  const WORDS = ["constructor", "toString", "__proto__", "valueOf", "hasOwnProperty"];
+
+  it.each(WORDS)("%s as a provider is an extra row named after itself, with no function text", (word) => {
+    const a = build(quota({ limits: [{ provider: word, kind: "weekly", until: at(RESET_THU) }], utilization: [reading(word, "five_hour", 0.3, RESET_TODAY)] }));
+    const extra = a.providers.find((p) => p.id === word);
+    expect(extra?.label).toBe(word);
+    expect(extra?.limitedText).toBe("Waiting for the weekly limit to reset. Work resumes Thu 09:00.");
+    expect(JSON.stringify(a)).not.toMatch(/function|native code/);
+  });
+
+  it.each(WORDS)("%s as a block kind is a usage limit", (word) => {
+    const a = build(quota({ limits: [{ provider: "claude", kind: word, until: at(RESET_THU) }] }));
+    expect(row(a, "claude").limitedText).toBe("Waiting for a usage limit to reset. Work resumes Thu 09:00.");
+  });
+
+  it.each(WORDS)("%s as a window id is no paced window: it never blocks and has no pause mark", (word) => {
+    const a = build(quota({ utilization: [reading("claude", word, 0.99, RESET_THU)] }));
+    expect(row(a, "claude").windows.map((w) => [w.id, w.pauseAt])).toEqual([[word, null]]);
+    expect(row(a, "claude").limitedUntil).toBeNull();
+    expect(row(a, "claude").pill.state).toBe("nearly_out");
   });
 });
 

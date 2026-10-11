@@ -121,6 +121,7 @@ export function fakeCard(missionId: string, kind: NeedsYouCard["kind"], featureI
     happened: { text: "It happened.", author: "engine" },
     summary: null,
     ifNothing: "Nothing happens.",
+    whatToDo: null,
     tellLeader: 'About "x": <your answer here>',
   };
 }

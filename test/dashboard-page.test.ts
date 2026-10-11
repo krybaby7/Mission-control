@@ -220,12 +220,16 @@ describe("T-PAGE the page's words (docs/dashboard-spec.md 17.1)", () => {
     " checks written for this feature",
     "No checks written for this feature",
     "repair round",
-    "Allowance (usage left in your plans)",
+    "Allowance (how much of your plans is used)",
     "work pauses here",
     "Open from before (",
     "Updated ",
     " s ago)",
     "Earlier events are not shown (",
+    "1 more mission is not shown. The lamp above counts it.",
+    " more missions are not shown. The lamp above counts them.",
+    "1 more thing for you is not shown. The lamp on the Tonight tab counts it.",
+    " more things for you are not shown. The lamp on the Tonight tab counts them.",
     ").",
     " times)",
     "What you got",
@@ -244,6 +248,22 @@ describe("T-PAGE the page's words (docs/dashboard-spec.md 17.1)", () => {
     "Cannot reach Mission Control.",
     "Demo data. This is not live.",
     "Now:",
+    // review round: what to do, the bar's own button, a calm strip that never contradicts the lamp, folded finished
+    // missions, the debrief link, the sheet that says it cannot send, and where a stopped mission stopped
+    "What to do",
+    "Tell the leader about tonight",
+    "Nothing for you to decide. See the note above.",
+    "Built and checked on the first try.",
+    " features done ",
+    "(show)",
+    "(hide)",
+    "Morning debrief ready. See what you got.",
+    "This page cannot send messages. Pick or type an answer, tap Copy, then paste it into your chat with the leader.",
+    "This page cannot stop the run. Tap Copy, then paste the sentence into your chat with the leader.",
+    "Your message (preview)",
+    "Choose a quick answer or type your own words first, then tap Copy.",
+    "Stopped here",
+    "Paused here",
   ];
 
   it.each(PAGE_WORDS.map((w) => [w] as const))("contains %j", (word) => {
@@ -268,6 +288,146 @@ describe("T-PAGE the page's words (docs/dashboard-spec.md 17.1)", () => {
 
   it("uses curly quotes in what it shows and straight ones only to build the sentence for the chat", () => {
     for (const text of visibleText.filter((t) => /^[A-Z][^"]*$/.test(t))) expect(text).not.toContain('"');
+  });
+});
+
+/** The source of one function of the script, from its `function name(` to the next function of the same indent. */
+function functionSource(name: string): string {
+  const start = lexed.noComments.indexOf(`  function ${name}(`);
+  expect(start, `function ${name}`).toBeGreaterThanOrEqual(0);
+  const end = lexed.noComments.indexOf("\n  }\n", start);
+  return lexed.noComments.slice(start, end + 5);
+}
+
+describe("T-PAGE what the review round asked for (page parts of M5, M6, M7, m8 to m13, m15)", () => {
+  it("M5: the calm strip depends on the lamp: green only for on_track, nothing for idle, a muted line otherwise", () => {
+    const strip = functionSource("strip");
+    expect(strip).toContain("lampState === \"idle\"");
+    expect(strip).toContain("lampState === \"on_track\"");
+    // the green check is drawn inside the on_track branch only, and the other branch says the note above is the thing to read
+    expect(strip.indexOf("lampState === \"on_track\"")).toBeLessThan(strip.indexOf("ic(\"check\")"));
+    expect(strip.indexOf("ic(\"check\")")).toBeLessThan(strip.indexOf("W.calmLook"));
+    // it is painted from the lamp that is showing (the page's own clock can swap the lamp), not only from the snapshot
+    expect(functionSource("paintLamp")).toContain("paintUnderLamp(lamp)");
+    expect(functionSource("paintUnderLamp")).toContain("lamp.state");
+  });
+
+  it("M6: a strip row carries a second line and a card shows What to do, both only when the engine wrote a step", () => {
+    const sub = functionSource("stripSub");
+    expect(sub).toContain("todo.text");
+    expect(sub).toContain("author !== \"ai\"");
+    expect(sub).toContain("what.author === \"engine\"");
+    expect(sub).toContain("firstSentence");
+    expect(lexed.noComments).toContain("c.whatToDo && c.whatToDo.text");
+    // the section sits between What happened and If you do nothing
+    const card = functionSource("card");
+    for (const word of ["W.happened", "W.whatToDo", "W.ifNothing"]) expect(card).toContain(word);
+    expect(card).toContain("add(body, what, todo, nothing)");
+  });
+
+  it("M7: a first-try feature is one calm line, pips only for tries that matter, finished missions fold away, groups are ordered", () => {
+    expect(functionSource("firstTryDone")).toMatch(/f\.state === "done" && f\.reinforcements === 0 && !f\.recovered/);
+    const tile = functionSource("tile");
+    // the calm tile returns before the steps line, the checks line and the button are built
+    expect(tile.indexOf("firstTryDone(f)")).toBeLessThan(tile.indexOf("showTries(f)"));
+    expect(tile.indexOf("W.firstTry")).toBeLessThan(tile.indexOf("tellButton("));
+    expect(tile.slice(tile.indexOf("firstTryDone(f)"), tile.indexOf("showTries(f)"))).toContain("return t;");
+    const tries = functionSource("showTries");
+    for (const id of ["stuck", "being_built", "being_reviewed", "paused"]) expect(tries).toContain(`"${id}"`);
+    expect(tries).toContain("f.reinforcements > 0");
+    expect(lexed.noComments).toMatch(/el\("details", "donebox"\)/);
+    expect(functionSource("missionGroup")).toContain("m.state === \"done\" ? doneFold(m, tiles)");
+    // the order of 5 in the decisions: needs you or failed, stuck, working, waiting, paused, done, queued
+    const order = /var order = \{([^}]*)\}/.exec(lexed.noComments)?.[1] ?? "";
+    const ranks = [...order.matchAll(/(\w+):\s*(\d+)/g)].map((m) => [m[1], Number(m[2])] as const);
+    expect(ranks.map(([id]) => id)).toEqual(["working", "waiting", "paused", "done", "not_started"]);
+    expect(ranks.map(([, rank]) => rank)).toEqual([...ranks.map(([, rank]) => rank)].sort((a, b) => a - b));
+    const rank = functionSource("groupRank");
+    expect(rank.indexOf("needs_you")).toBeLessThan(rank.indexOf("stuck"));
+    expect(rank.indexOf("stuck")).toBeLessThan(rank.indexOf("var order"));
+  });
+
+  it("M7: a folded mission is a native details element, so Enter and Space work, and it keeps its state across redraws", () => {
+    const fold = functionSource("doneFold");
+    expect(fold).toContain("el(\"summary\"");
+    expect(fold).toContain("data-key");
+    expect(fold).toContain("state.doneOpen[m.id]");
+    expect(fold).toContain("W.doneShow");
+    expect(fold).toContain("W.doneHide");
+  });
+
+  it("m8: a sentence that is already said above is not said again (the Now line and the mission sentence)", () => {
+    expect(functionSource("paintLamp")).toContain("snap.now.text !== lamp.sentence");
+    const group = functionSource("missionGroup");
+    expect(group).toContain("m.sentence === snap.lamp.sentence");
+    expect(group).toContain("m.sentence === snap.now.text");
+    expect(group).toContain("m.state === \"needs_you\" && snap.needsYou.some(");
+    // with nothing planned there is one line, not a heading and a line
+    expect(functionSource("renderTonight")).toMatch(/tonight\.length === 0\) features\.appendChild\(el\("p", "empty", W\.emptyMissions\)\);\s*else features\.appendChild\(el\("h2"/);
+  });
+
+  it("m9: the sheet says first that it cannot send, lays out answer, words, preview in that order, and Copy waits for a message", () => {
+    const at = (id: string): number => markup.indexOf(`id="${id}"`);
+    expect(at("sheet-cannot")).toBeGreaterThan(at("sheet-title"));
+    expect(at("sheet-cannot")).toBeLessThan(at("sheet-phrases-box"));
+    expect(at("sheet-phrases-box")).toBeLessThan(at("sheet-own-box"));
+    expect(at("sheet-own-box")).toBeLessThan(at("sheet-msg"));
+    expect(markup).toMatch(/id="sheet-msg"[^>]*\breadonly\b/);
+    expect(lexed.noComments).toMatch(/function canCopy\(\) \{ return sheet\.mode === "stop" \|\| sheet\.answer\.trim\(\) !== ""; \}/);
+    expect(functionSource("copyMessage")).toContain("if (!canCopy())");
+    expect(lexed.noComments).toContain('"aria-disabled"');
+    expect(style).toContain('.btn[aria-disabled="true"]');
+  });
+
+  it("m10: the bar's button is about tonight, the card and tile buttons keep the plain words, Stop shows only while a run is on", () => {
+    expect(markup).toMatch(/<button[^>]*id="gbar-tell"[^>]*>Tell the leader about tonight<\/button>/);
+    expect(functionSource("tellButton")).toContain("W.tell)");
+    expect(functionSource("paintGbar")).toContain("snap.run.active || snap.run.stopRequested");
+  });
+
+  it("m11: after the night a link row to the Morning debrief sits under the lamp, only without a live run", () => {
+    expect(functionSource("paintUnderLamp")).toContain("snap.debrief && !snap.run.active");
+    const row = functionSource("debriefRow");
+    expect(row).toContain("W.debriefReady");
+    expect(row).toContain("selectTab(\"debrief\"");
+    expect(row).toContain("el(\"button\"");
+  });
+
+  it("m12: the AI label comes once above a list of short stories, and stays boxed for what is not finished", () => {
+    const list = functionSource("featureList");
+    expect(list).toContain("once");
+    expect(list).toContain("aiLabel(");
+    const mission = functionSource("debriefMission");
+    expect(mission).toMatch(/featureList\(W\.gotHeading, d\.got, snap, true\)/);
+    expect(mission).toMatch(/featureList\(W\.notFinished, d\.leftOut, snap, false\)/);
+    expect(mission).toMatch(/featureList\(W\.recovered, d\.recovered, snap, true\)/);
+  });
+
+  it("m13: at Not responding the frozen live lines are left out, and the greyed content stays readable (opacity of at least 0.9)", () => {
+    expect(functionSource("paintLamp")).toContain("state.level < 2");
+    const rule = /\.gone \.panel > :not\(\.lamp\) \{([^}]*)\}/.exec(style)?.[1] ?? "";
+    expect(rule).toContain("grayscale(1)");
+    expect(Number(/opacity:\s*([0-9.]+)/.exec(rule)?.[1])).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it("m15: a stopped or paused mission does not draw its current step as work, and a card scrolled to clears the top edge", () => {
+    const stepper = functionSource("stepper");
+    expect(stepper).toContain("m.state === \"needs_you\" || m.state === \"paused\"");
+    expect(stepper).toContain("W.stoppedHere");
+    expect(stepper).toContain("W.pausedHere");
+    expect(style).toMatch(/\.card \{[^}]*scroll-margin-top: calc\(16px/);
+    expect(functionSource("goCard")).toContain("requestAnimationFrame");
+  });
+});
+
+describe("T-PAGE a list that the snapshot cut says so (counts.missionsNotShown and counts.cardsNotShown, spec 3.2)", () => {
+  it("says how many missions and cards are not listed, from the two counts, with the lamp counting them", () => {
+    expect(functionSource("renderTonight")).toContain("snap.counts.missionsNotShown");
+    expect(functionSource("renderTonight")).toContain("W.missionNotShown");
+    expect(functionSource("renderTonight")).toContain("W.missionsNotShown");
+    expect(functionSource("renderNeeds")).toContain("snap.counts.cardsNotShown");
+    expect(functionSource("renderNeeds")).toContain("W.cardNotShown");
+    expect(functionSource("renderNeeds")).toContain("W.cardsNotShown");
   });
 });
 

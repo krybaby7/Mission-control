@@ -91,13 +91,15 @@ Two parts, for someone who is not technical (a CEO, say) and looks at an iPad or
 - **The leader is the hands.** A Claude Code session started in the [`leader/`](leader/) folder. The CEO talks to it in plain words ("How is it going?", "Add a dark mode to the habit tracker", "Please stop tonight's run."). It acts only through `mc`: status, logs, report, stop, new, feature and run. On the dashboard, every card and feature has a **Tell the leader** button that gives a ready sentence to paste into the chat. The page itself sends nothing.
 
   ```bash
-  cd leader && claude                    # in the Ubuntu window
-  cd leader && claude remote-control     # the same session, reachable from the Claude app
+  cd leader && claude                          # in the Ubuntu window
+  cd leader && claude --remote-control "Leader"  # one session you can type to on the PC and open in the Claude app (Code tab) or at claude.ai/code
   ```
+
+  (`claude remote-control` is a different mode: its own session that you open from the app, and you cannot type to it in that window. Remote Control needs a claude.ai login, not an API key.) Claude Code asks you to approve the leader's `stop`, `run`, `new` and `feature` commands; answer Yes once.
 
   The leader cannot reopen a feature or change a plan in place. A stuck feature or a question is answered with a follow-up request, which starts on the next run.
 
-**Not tried on a real PC yet:** Docker Desktop and WSL2 networking to a browser or an iPad, iPad Safari, `claude remote-control`, and any real AI output. The dashboard and the leader's instructions are tested against recordings of the real engine run with stand-in AIs. Details: [docs/leader.md](docs/leader.md), [docs/dashboard-spec.md](docs/dashboard-spec.md) (section 20 lists what is unverified).
+**Not tried on a real PC yet:** Docker Desktop and WSL2 networking to a browser or an iPad, iPad Safari, `claude --remote-control`, and any real AI output. The dashboard and the leader's instructions are tested against recordings of the real engine run with stand-in AIs. Details: [docs/leader.md](docs/leader.md), [docs/dashboard-spec.md](docs/dashboard-spec.md) (section 20 lists what is unverified).
 
 ## Documents
 

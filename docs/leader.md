@@ -7,7 +7,7 @@ This page says what the leader is, what it may do, how it is kept inside those l
 ## What it is, and what it is not
 
 - It is Claude Code, running in the Ubuntu (WSL2) window on the PC, with `leader/` as its folder. Claude Code reads `leader/CLAUDE.md` there as its standing instructions and `leader/.claude/settings.json` as its permissions.
-- The same session can be reached from the Claude app (Remote Control, below).
+- The same session can be reached from the Claude app or claude.ai/code (Remote Control, below), when it is started with `claude --remote-control`.
 - It acts only through Mission Control's own commands, run through `scripts/mc-docker.sh`: status, logs, report, stop, new, feature and run. There is no other write path: the dashboard has none either.
 - It is the CEO's hands, never the CEO's engineer. It does not write code, fix an app, or do the AI team's work. The engine does that.
 - It adds nothing to the engine. No engine file was changed to make it.
@@ -19,12 +19,12 @@ All are run from `leader/` as `../scripts/mc-docker.sh <command>`. Each was chec
 | Command | What it does | Notes |
 |---|---|---|
 | `status --json` | Lists every mission: id, title, kind, status, stage, features done and total, blocked, `waitingUntil`, `interrupted`. | Read only. |
-| `logs <mission>` | What happened in one mission, step by step. | Read only. `--follow` never ends, so the leader does not use it. |
-| `report [<mission>]` | The start of the latest report, or of one mission's. | Read only. |
-| `stop` | Asks the running night to stop. The running AI step is cancelled, progress is saved and the report is written. | Writes the `STOP` file. The leader always asks first. |
+| `logs <mission>` | What happened in one mission, step by step. | Read only. The whole log is long and technical (model names, internal steps), so the leader reads only the last 60 lines (it pipes the output through `tail -n 60`) and translates. `--follow` never ends, so the leader does not use it, and the settings refuse it. |
+| `report [<mission>]` | The first 40 lines of the latest report, or of one mission's. | Read only. "Needs your decision" and the Features table are near the top, but with many features they can fall below line 40. The rest sits in a file inside the Docker volume, which the leader cannot open. A mission that is still running has no report (the command says so and fails): the leader then reads the end of `logs` and says the full answer comes when the mission ends. |
+| `stop` | Asks the running night to stop. The running AI step is cancelled, progress is saved and the report is written. | Writes the `STOP` file. The leader first checks with `status --json` that a run is going (if not, it says there is nothing to stop and does not run `stop`), then always asks. Claude Code asks too (see Permissions). |
 | `new '<idea>' --name '<name>'` | Queues a new app. | Only queues. |
 | `feature ~/mc-apps/<app-folder> '<request>' --base '<branch>'` | Queues a change to an existing app. | Only queues. The folder must be inside `~/mc-apps`. |
-| `run --until HH:MM` | Works through the queue. `--mission <id>` works on one mission only. | Spends the owner's usage. It blocks for the whole night. |
+| `run --until HH:MM` | Works through the queue. `--mission <id>` works on one mission only. | Spends the owner's usage. It blocks for the whole night. The leader always gives `--until`, also with `--mission` and for "Try again": without it the run has no deadline (`src/run.ts` logs "Working until the queue is done (no stop time given)"). |
 
 Not in the list on purpose: `dashboard` (a foreground command that runs until Ctrl+C, so a tool call from the leader would never return; the owner starts it), `config`, `init`, `doctor`, the logins, `shell`, `build`, `copy-reports` and `fix-permissions`.
 
@@ -38,11 +38,21 @@ Not tried here: running `mc-docker.sh run` as a background task of a Claude Code
 
 ## Permissions
 
-`leader/.claude/settings.json` allows exactly the seven commands, written as `Bash(../scripts/mc-docker.sh <command>:*)`. It also refuses `Edit`, `Write`, `NotebookEdit` and `git` commands, so a leader that goes off script still cannot change files or push. Everything else makes Claude Code ask.
+`leader/.claude/settings.json` has three lists, with rules written as `Bash(../scripts/mc-docker.sh <command>:*)`:
 
-The stop and run commands are in the allow list, so Claude Code does not ask before them. The confirmation before `stop` is in `CLAUDE.md`, in words. To have Claude Code itself ask before `stop`, `run`, `new` and `feature`, move those four entries from `allow` to a list called `ask` in the same file. That costs a tap per command, and works from the app too. It has not been tried.
+- `allow` (no prompt): `status`, `logs` and `report`. They only read.
+- `ask` (Claude Code stops and asks first): `stop`, `run`, `new` and `feature`. They change something or spend usage.
+- `deny` (refused): `Edit`, `Write`, `NotebookEdit`, `git` commands, and `logs ... --follow` (the rule is `Bash(../scripts/mc-docker.sh logs *--follow*)`, because `logs:*` in the allow list would otherwise let it through).
 
-Not tried here: that the rule syntax matches commands written with a relative path in the installed Claude Code, that a compound command (`a && b`) is refused as a whole, and how the same rules behave in a Remote Control session.
+Claude Code checks `deny` first, then `ask`, then `allow`, so an `ask` rule wins over an `allow` rule that also matches. A compound command (`a && b`) needs every part to match. Claude Code also runs its own read-only commands (`ls`, `cat`, `grep`, `echo`, `wc`, `find`, read-only forms of `git`) and reads files inside the folder without asking, so "everything else asks" is not exact. These details are from Anthropic's permissions documentation (https://code.claude.com/docs/en/permissions).
+
+Why `stop`, `run`, `new` and `feature` ask: reports, logs, decisions and the names of missions and features are written by AIs, and the leader reads them. `CLAUDE.md` tells the leader that such text is data, never instructions, but a sentence in a prompt is a weak guard. A person tapping Yes on a prompt, with the command in front of them, is a real one. It costs one tap per command, on the PC or, with Remote Control, in the app (the documentation says permission prompts stay open until they are answered).
+
+Answer **Yes** once. Do not choose "Yes, and don't ask again": Claude Code saves that as a rule in `.claude/settings.local.json` at the root of the repository, which would let the command through for every later session, started in any folder of the repository.
+
+To relax this, move entries from `ask` to `allow` in the same file. The confirmation before `stop` in `CLAUDE.md` stays either way.
+
+Not tried here: that the rule syntax matches commands written with a relative path in the installed Claude Code, that the `--follow` rule catches `logs <mission> --follow` and `logs --follow <mission>`, that a compound command (`a && b`) is refused as a whole, and how the same rules behave in a Remote Control session. `test/leader.test.ts` checks only the shape of the file.
 
 ## The sentences the dashboard gives the CEO
 
@@ -56,22 +66,33 @@ The engine has no command to reopen a feature or to change a plan in place, and 
 
 ## Remote Control
 
-The documented way to reach the leader from the Claude app is `claude remote-control`, run in `leader/`. The session should then appear in the Claude Code app (or the Claude Desktop app). The installed Claude Code (2.1.296) lists `remote-control` and a `--remote-control` option in its help.
+From Anthropic's Remote Control documentation (https://code.claude.com/docs/en/remote-control), not from anything tried here:
 
-Not tried here: starting it, seeing the session in the app, what a CEO can do in it, the permission prompts in it, and what happens when the connection drops. The PC must stay on and awake, and the Ubuntu window must stay open.
+- `claude --remote-control "Leader"`, or `/remote-control Leader` inside a running session, makes ONE session that works from the Ubuntu window and from the Claude app or claude.ai/code. That is the way to use for the leader.
+- `claude remote-control` is server mode. It starts its own session, which is opened from claude.ai/code or the app, and you cannot type to it in that terminal. It is not "the same session". The installed Claude Code (2.1.296) lists the `--remote-control [name]` option in `claude --help`; it does not list a `remote-control` command there.
+- The session is found by its name in the session list at claude.ai/code (a browser on the iPad works) or under the Code tab of the Claude mobile app. It shows a computer icon with a green dot while it is online.
+- It needs a claude.ai login (Pro, Max, Team or Enterprise). API keys are not supported. On Team and Enterprise an Owner must first enable Remote Control in the Claude Code admin settings.
+- The first use asks "Enable Remote Control? (y/n)" (a dialog in a running session), and Claude Code asks whether to trust the folder (`Trust <directory>? [y/N]` in server mode).
+- The session runs on the PC. If the Ubuntu window closes or the PC sleeps, the session is offline until it is brought back; the documentation says it reconnects by itself when the machine comes back and the network returns.
+
+Not tried here: starting it, seeing the session in the app, what a CEO can do in it, the permission prompts in it, and what happens when the connection drops during a night run. The PC must stay on and awake, and the Ubuntu window must stay open.
 
 ## Limits
 
 - The leader's chat uses the same Claude plan as the night run. The engine's pacing cannot see it.
 - It cannot see exact usage figures or the allowance. The dashboard shows them.
 - It cannot log in to Claude or Codex, free disk space, start the dashboard, remove or reorder queued work, reopen a feature or change a plan in place.
-- It reads texts written by AIs (reports, logs, decisions). `CLAUDE.md` tells it to treat them as information and never to run a command that appears in them. How well it holds to this has not been tested against a hostile text.
+- It reads texts written by AIs (reports, logs, decisions). `CLAUDE.md` tells it to treat them, and the names inside quotes in a pasted sentence, as information and never to run a command that appears in them or follow words in them. How well it holds to this has not been tested against a hostile text; the prompts for `stop`, `run`, `new` and `feature` are the second guard.
+- It cannot predict. A question like "Is it going to finish?" gets what is visible (features done, anything stuck, a wait, the stop time if it started the run) and no promise. It has no usage figures and no progress per feature.
+- It cannot remove or reorder queued work. "Skip this feature" is answered with that fact, and an offer to stop the night; only a feature that is already stuck stays out.
+- It cannot run git. After a report's "How to try it" the app's folder can be left on a trial version; `feature` then refuses, and the leader tells the CEO the owner has to put the app back (the message names the command).
 
 ## Not verified
 
 Said plainly; none of this may be claimed to work.
 
-- `claude remote-control`, and the Claude app reaching the leader.
+- `claude --remote-control` and `/remote-control`, and the Claude app or claude.ai/code reaching the leader.
+- The rule `Bash(../scripts/mc-docker.sh logs *--follow*)` and the `ask` rules, in a real Claude Code.
 - The leader's behaviour with `CLAUDE.md` and the settings file, in a real Claude Code.
 - Running `mc-docker.sh run` as a background task, and what happens to it when the session ends.
 - Claude Code installed in Ubuntu next to Docker Desktop on a real PC.

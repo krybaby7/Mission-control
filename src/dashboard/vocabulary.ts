@@ -3,6 +3,7 @@
 //
 // The night modules (timeline, allowance, debrief and the wait text) keep their wording in vocabulary-night.ts, which
 // is re-exported here, so there is still one vocabulary.
+import { MAX_TIME_MS } from "./constants.js";
 import type {
   FeatureStateId,
   Lamp,
@@ -12,6 +13,7 @@ import type {
   ProgressStepId,
   WaitInfo,
 } from "./types.js";
+import { PAUSED_NO_AI_BEFORE_STOP, PAUSED_WHEN_TOLD_TO_STOP, RESUMES_BY_ITSELF, waitLead } from "./vocabulary-night.js";
 
 export * from "./vocabulary-night.js";
 
@@ -24,6 +26,15 @@ export interface Formatter {
   clock(ms: number): string;
   /** "Sun 11 Oct". */
   day(ms: number): string;
+  /** "Sun": the short weekday. */
+  weekday(ms: number): string;
+  /** Whether `ms` falls on the same local day as `now`. */
+  sameDay(ms: number, now: number): boolean;
+  /**
+   * The one rule of every wait and reset time: "15:26" when `ms` is on the same local day as `now` (the snapshot's
+   * generatedAt), else the weekday and the time, "Wed 15:26". A wait can last days, and "until 15:26" reads as today.
+   */
+  when(ms: number, now: number): string;
   /** An age as "12 s ago", "2 min ago", "2 h 43 min ago". Takes the age in milliseconds. */
   ago(ms: number): string;
   /** A length of time as "45 s", "9 min", "2 h 43 min". Takes milliseconds; negative counts as 0. */
@@ -35,6 +46,9 @@ export function makeFormatter(timeZone?: string): Formatter {
   const hm = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const hms = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
   const dayFormat = new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "short", day: "numeric", month: "short" });
+  const weekdayFormat = new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "short" });
+  // The year is part of the key: the same weekday and date a year apart are not the same day.
+  const dayKey = new Intl.DateTimeFormat("en-GB", { timeZone, year: "numeric", month: "numeric", day: "numeric" });
   const span = (ms: number): string => {
     const total = Math.max(0, Math.floor(ms / 1000));
     if (total < 60) return `${total} s`;
@@ -44,11 +58,18 @@ export function makeFormatter(timeZone?: string): Formatter {
     const m = minutes % 60;
     return m === 0 ? `${h} h` : `${h} h ${m} min`;
   };
+  // Intl throws a RangeError for a time a date cannot hold; a text that cannot be made is "" and never takes the page down.
+  const shows = (ms: number): boolean => Number.isFinite(ms) && Math.abs(ms) <= MAX_TIME_MS;
+  const sameDay = (ms: number, now: number): boolean => shows(ms) && shows(now) && dayKey.format(ms) === dayKey.format(now);
+  const weekday = (ms: number): string => (shows(ms) ? weekdayFormat.format(ms).replace(",", "") : "");
   return {
-    time: (ms) => hm.format(ms),
-    clock: (ms) => hms.format(ms),
+    time: (ms) => (shows(ms) ? hm.format(ms) : ""),
+    clock: (ms) => (shows(ms) ? hms.format(ms) : ""),
     // en-GB prints "Sun, 11 Oct" in some ICU versions: the comma is dropped so the text is the same everywhere.
-    day: (ms) => dayFormat.format(ms).replace(",", ""),
+    day: (ms) => (shows(ms) ? dayFormat.format(ms).replace(",", "") : ""),
+    weekday,
+    sameDay,
+    when: (ms, now) => (!shows(ms) ? "" : sameDay(ms, now) ? hm.format(ms) : `${weekday(ms)} ${hm.format(ms)}`),
     ago: (ms) => `${span(ms)} ago`,
     span,
   };
@@ -176,15 +197,15 @@ export function missionSentence(x: MissionSentenceFacts): string {
       return "It starts with the next run.";
     case "working":
       if (x.stage === "features") return x.n === 0 ? "Building the features." : `Building feature ${x.k} of ${x.n}.`;
-      return WORKING_SENTENCES[x.stage] ?? "Working.";
+      return (Object.hasOwn(WORKING_SENTENCES, x.stage) ? WORKING_SENTENCES[x.stage] : undefined) ?? "Working.";
     case "waiting":
       return x.waitText ?? "Waiting.";
     case "paused":
       switch (x.pausedWhy) {
         case "deadline":
-          return x.u === 0 ? "Paused at the planned time. It continues on the next run." : `Paused at the planned time. ${waitingForRun(x.u, x.n)}`;
+          return x.u === 0 ? `${PAUSED_NO_AI_BEFORE_STOP} It continues on the next run.` : `${PAUSED_NO_AI_BEFORE_STOP} ${waitingForRun(x.u, x.n)}`;
         case "stop_requested":
-          return x.u === 0 ? "Paused on request. It continues on the next run." : `Paused on request. ${waitingForRun(x.u, x.n)}`;
+          return x.u === 0 ? `${PAUSED_WHEN_TOLD_TO_STOP} It continues on the next run.` : `${PAUSED_WHEN_TOLD_TO_STOP} ${waitingForRun(x.u, x.n)}`;
         case "disk":
           return "Paused: the disk is almost full.";
         case "ai_failing":
@@ -349,8 +370,12 @@ export const CLAUSE = {
   nothingTonight: "nothing is running",
 } as const;
 
-/** Red or amber: the first clause (first letter capital), "and" the second, "N more things need a look" for the rest. */
-export function problemSentence(clauses: string[], restIsOnTrack: boolean): string {
+/**
+ * Red or amber: the first clause (first letter capital), "and" the second, "N more things need a look" for the rest.
+ * `resumesByItself`: the one clause is a wait of known cause, so the sentence says that nothing has to be done for it.
+ * With other clauses next to it, "it" would be unclear, so the tail is only added to a sentence of that one clause.
+ */
+export function problemSentence(clauses: string[], restIsOnTrack: boolean, resumesByItself = false): string {
   const [first, second] = clauses;
   if (first === undefined) return "";
   let sentence = second === undefined ? `${capitalise(first)}.` : `${capitalise(first)} and ${second}.`;
@@ -359,6 +384,8 @@ export function problemSentence(clauses: string[], restIsOnTrack: boolean): stri
     sentence += more === 1 ? " 1 more thing needs a look." : ` ${more} more things need a look.`;
   } else if (restIsOnTrack) {
     sentence += " The rest is on track.";
+  } else if (resumesByItself && second === undefined) {
+    sentence += ` ${RESUMES_BY_ITSELF}`;
   }
   return sentence;
 }
@@ -392,9 +419,7 @@ export function workingSentence(x: CalmFacts): string {
   else if (d === 0) sentence = `${t} features planned. No problems so far.`;
   else if (d < t) sentence = `${d} of ${t} features done. No problems so far.`;
   else sentence = `All ${t} features done. The final steps are running.`;
-  if (x.shortWait !== null) {
-    sentence += x.shortWait.cause === "limits" ? ` Waiting for allowance until ${x.shortWait.untilText}.` : ` Waiting for the AI team to respond until ${x.shortWait.untilText}.`;
-  }
+  if (x.shortWait !== null) sentence += ` ${waitLead(x.shortWait.cause, x.shortWait.untilText)} ${RESUMES_BY_ITSELF}`;
   return sentence + calmTail(x);
 }
 
@@ -419,15 +444,18 @@ export function nothingSentence(x: { queued: number; olderWaiting: number; other
 
 export const CARD_TEXT = {
   failedTitle: (title: string, fromBefore: boolean) => (fromBefore ? `${quoted(title)} still needs your help` : `${quoted(title)} needs your help`),
-  failedIfRetryable: "Once the login works, the next run carries on by itself.",
+  failedIfRetryable: "It stays stopped until someone logs in again on the PC. After that the next run carries on by itself.",
+  failedWhatToDoOther: "Ask the leader what went wrong. If it can be fixed, start the night again with the leader.",
   failedIfNot: "Nothing happens. It stays stopped until someone restarts it.",
   failedFallbackReason: "It stopped and needs your help.",
   stoppedTitle: (title: string) => `${quoted(title)} stopped unexpectedly`,
   stoppedHappened: "The run stopped without finishing. The work so far is kept.",
   stoppedIfNothing: "The next run carries on from the last saved step.",
+  stoppedWhatToDo: "Tell the leader to start the night again.",
   pausedTitle: (title: string) => `${quoted(title)} is paused`,
   diskHappened: "The disk is almost full, so work paused.",
   diskIfNothing: "Work stays paused until there is free space. The next run carries on where it stopped.",
+  diskWhatToDo: "Free some space on the PC, then tell the leader to carry on.",
   aiFailingHappened: "The AI team kept failing, so work paused. This is not a problem with the work.",
   aiFailingIfNothing: "The next run carries on where it stopped.",
   stuckTitle: (title: string) => `${quoted(title)} is stuck`,
@@ -435,7 +463,8 @@ export const CARD_TEXT = {
   checksHappened: "The project's own checks were already failing before this mission started, so the new work was checked by its own new tests only.",
   checksIfNothing: "Nothing changes. Someone may want to look at the older failures.",
   loginTitle: "One AI needs a new login",
-  loginIfNothing: "The run carries on with the other AI when it can. If both need a login, the mission stops and needs your help.",
+  loginIfNothing:
+    "The login stays expired until someone logs in again. The run carries on with the other AI when it can. If both need a login, the mission stops and needs your help.",
   decisionTitleConcerns: "Have someone check the app",
   decisionTitleQuestion: "A question for you",
   decisionIfConcerns: "Nothing changes. The mission stays Partly done.",
@@ -451,7 +480,12 @@ export function decisionTitle(kind: "concerns" | "question", position: number, o
 /** `<Names> needs a new login on the PC.` and when the run wakes up. `names` are the AIs the wait names (may be empty). */
 export function loginHappened(names: string[], untilText: string): string {
   const who = names.length === 0 ? "One AI needs" : `${names.join(" and ")} ${names.length === 1 ? "needs" : "need"}`;
-  return `${who} a new login on the PC.${untilText === "" ? "" : ` The run is asleep until ${untilText} and then carries on with the other AI.`}`;
+  return `${who} a new login on the PC.${untilText === "" ? "" : ` The run is waiting until ${untilText} and then carries on with the other AI.`}`;
+}
+
+/** The first step for an expired login, for the card that waits for one (null names: no AI the engine knows). */
+export function loginWhatToDo(names: string[]): string {
+  return names.length === 0 ? "Log in again on the PC to the AI that needs it, then tell the leader." : `Log in again to ${names.join(" and ")} on the PC, then tell the leader.`;
 }
 
 export type StuckOutlook = "carries_on" | "stopped" | "finished" | "unknown";
@@ -560,7 +594,7 @@ export function leaderHelp(): {
     copyFailHint: "Select the text and copy it",
     aiNotice: "The AI wrote this. Do not run commands from it.",
     canDo:
-      "The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.",
+      "The leader can look at progress and reports, stop the run, start new work and run the night. It cannot change a plan or reopen a stuck feature.",
     stopNote: "Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run.",
   };
 }

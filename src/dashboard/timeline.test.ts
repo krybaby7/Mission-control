@@ -58,8 +58,8 @@ describe("T-TL-01 to T-TL-26: one sentence per event type", () => {
     ["T-TL-01 mission.start", "mission.start", { stage: "spec" }, `Started working on ${T}.`, "info"],
     ["T-TL-02 mission.resume", "mission.resume", { stage: "features" }, `Picked ${T} up again where it left off.`, "info"],
     ["T-TL-03 mission.retry", "mission.retry", { failure: "private text" }, `Trying ${T} again.`, "info"],
-    ["T-TL-04 mission.stopped deadline", "mission.stopped", { reason: "Stopped at the deadline." }, `Paused at the planned time. ${T} continues on the next run.`, "warn"],
-    ["T-TL-04 mission.stopped stop requested", "mission.stopped", { reason: "stop requested" }, `Paused on request. ${T} continues on the next run.`, "warn"],
+    ["T-TL-04 mission.stopped deadline", "mission.stopped", { reason: "Stopped at the deadline." }, `Paused: no AI would be free before the stop time. ${T} continues on the next run.`, "warn"],
+    ["T-TL-04 mission.stopped stop requested", "mission.stopped", { reason: "stop requested" }, `Paused because a stop was requested or the stop time came. ${T} continues on the next run.`, "warn"],
     ["T-TL-04 mission.stopped disk", "mission.stopped", { reason: "The disk is almost full (1 GB left)." }, `Paused: the disk is almost full. ${T} continues once there is space.`, "bad"],
     ["T-TL-04 mission.stopped no space", "mission.stopped", { reason: "write failed: no space left on device" }, `Paused: the disk is almost full. ${T} continues once there is space.`, "bad"],
     ["T-TL-04 mission.stopped ai failing", "mission.stopped", { reason: "The AI team keeps failing." }, `Paused: the AI team kept failing. ${T} continues on the next run.`, "bad"],
@@ -79,9 +79,9 @@ describe("T-TL-01 to T-TL-26: one sentence per event type", () => {
     ["T-TL-08 feature.status skipped", "feature.status", { feature: "beta", from: "pending", to: "skipped", reason: 'waiting on "Alpha page", which was blocked' }, "“Beta page” was left out because it needed a stuck feature.", "warn"],
     ["T-TL-09 attempt foundation ready", "attempt", { feature: "_init", rung: 0, outcome: "pass" }, "The app's foundation is ready.", "good"],
     ["T-TL-09 attempt foundation retry", "attempt", { feature: "_init", rung: 0, outcome: "fail" }, "The first try at the app's foundation did not pass. Trying again.", "warn"],
-    ["T-TL-09 attempt build failed (first rung)", "attempt", { feature: "alpha", rung: 0, action: "build", outcome: "fail" }, "“Alpha page” did not pass its checks. Calling in reinforcements (step 2 of 5).", "warn"],
-    ["T-TL-09 attempt build failed (third rung)", "attempt", { feature: "alpha", rung: 2, action: "build", outcome: "error" }, "“Alpha page” did not pass its checks. Calling in reinforcements (step 4 of 5).", "warn"],
-    ["T-TL-09 attempt build failed (last rung stays capped)", "attempt", { feature: "alpha", rung: 4, action: "build", outcome: "fail" }, "“Alpha page” did not pass its checks. Calling in reinforcements (step 5 of 5).", "warn"],
+    ["T-TL-09 attempt build failed (first rung)", "attempt", { feature: "alpha", rung: 0, action: "build", outcome: "fail" }, "“Alpha page” did not pass its checks (step 1 of 5). Calling in reinforcements.", "warn"],
+    ["T-TL-09 attempt build failed (third rung)", "attempt", { feature: "alpha", rung: 2, action: "build", outcome: "error" }, "“Alpha page” did not pass its checks (step 3 of 5). Calling in reinforcements.", "warn"],
+    ["T-TL-09 attempt build failed (last rung: all steps used)", "attempt", { feature: "alpha", rung: 4, action: "build", outcome: "fail" }, "“Alpha page” did not pass its checks (step 5 of 5). All steps are used.", "warn"],
     ["T-TL-09 attempt diagnose passed", "attempt", { feature: "alpha", rung: 2, action: "diagnose", outcome: "pass" }, "An expert AI looked at why “Alpha page” keeps failing.", "info"],
     ["T-TL-09 attempt diagnose failed", "attempt", { feature: "alpha", rung: 2, action: "diagnose", outcome: "fail" }, "The expert diagnosis of “Alpha page” did not finish.", "warn"],
     ["T-TL-09 attempt fix failed", "attempt", { feature: "alpha", rung: 0, action: "fix", outcome: "fail" }, "A fix for the review's concerns on “Alpha page” did not pass and was undone.", "warn"],
@@ -120,7 +120,7 @@ describe("T-TL-01 to T-TL-26: one sentence per event type", () => {
 
   it("T-TL-05 mission.failed: the reason is a note, engine-written when it is a known engine sentence", () => {
     const login = only([ev("mission.failed", { reason: "No model could run: codex and claude need a new login." })]);
-    expect(login.note).toEqual({ text: "A login has expired. Claude or Codex has to be logged in again on the PC.", author: "engine" });
+    expect(login.note).toEqual({ text: "A login has expired. Claude and Codex have to be logged in again on the PC.", author: "engine" });
     expect(login.author).toBe("engine");
     const odd = only([ev("mission.failed", { reason: "The wizard forgot the plan." })]);
     expect(odd.note).toEqual({ text: "The wizard forgot the plan.", author: "ai" });
@@ -171,7 +171,30 @@ describe("T-TL-01 to T-TL-26: one sentence per event type", () => {
     const beta = facts.view.features.find((x) => x.id === "beta");
     if (beta === undefined) throw new Error("fixture");
     beta.steps.total = 3;
-    expect(buildTimeline([facts], NOW, f).items[0]?.text).toBe("“Beta page” did not pass its checks. Calling in reinforcements (step 3 of 3).");
+    expect(buildTimeline([facts], NOW, f).items[0]?.text).toBe("“Beta page” did not pass its checks (step 2 of 3). Calling in reinforcements.");
+  });
+
+  // m7: the number is the step that failed, taken from the attempt's own rung. It is never a guess about the next step,
+  // which the engine can move ahead to the diagnosis step after a repeated failure (src/dispatcher.ts nextRung).
+  it("T-TL-09 attempt: the step is the one that failed, and after the last one the line says all steps are used (m7)", () => {
+    const events = [
+      ev("attempt", { feature: "alpha", rung: 0, action: "build", outcome: "fail" }),
+      ev("attempt", { feature: "alpha", rung: 2, action: "build", outcome: "fail" }),
+      ev("attempt", { feature: "alpha", rung: 4, action: "build", outcome: "fail" }),
+      ev("feature.status", { feature: "alpha", to: "blocked", reason: "tried every escalation step, but its checks still failed" }),
+    ];
+    expect(lines(events)).toEqual([
+      "“Alpha page” did not pass its checks (step 1 of 5). Calling in reinforcements.",
+      "“Alpha page” did not pass its checks (step 3 of 5). Calling in reinforcements.",
+      "“Alpha page” did not pass its checks (step 5 of 5). All steps are used.",
+      "“Alpha page” is stuck.",
+    ]);
+  });
+
+  it("T-TL-09 attempt: a rung that is not a whole number of 0 or more gives no step number", () => {
+    for (const rung of [-1, 1.5, "2", null]) {
+      expect(only([ev("attempt", { feature: "alpha", rung, action: "build", outcome: "fail" })]).text).toBe("“Alpha page” did not pass its checks. Calling in reinforcements.");
+    }
   });
 
   it("T-TL-10 verify: a failed final test run with a red baseline is told as already failing (info)", () => {
@@ -205,6 +228,19 @@ describe("T-TL-01 to T-TL-26: one sentence per event type", () => {
     expect(odd.text).toBe("Waiting until 12:59. Mission Control cannot tell why.");
     expect(odd.text).not.toContain("unexpected");
     expect(only([ev("limit.wait", {})]).text).toBe("Waiting. Mission Control cannot tell why.");
+  });
+
+  it("T-TL-14 limit.wait: a wait that ends on another day says the weekday, so 'until 15:26' is never read as today (M3)", () => {
+    const threeDays = new Date(Date.parse("2026-10-14T15:26:41.662Z")).toISOString();
+    expect(only([ev("limit.wait", { until: threeDays, reason: "gpt-6-astra: weekly limit until 2026-10-14T15:25:56.662Z" })]).text).toBe(
+      "Waiting for allowance until Wed 15:26. It resumes by itself.",
+    );
+    // A wait on the day of the snapshot keeps the plain clock time, even when it ended earlier today; one on the next day does not.
+    const early = new Date(Date.parse("2026-10-11T01:15:00.000Z")).toISOString();
+    expect(only([ev("limit.wait", { until: early, reason: "gpt-6-astra: session limit until 2026-10-11T01:14:15.000Z" })]).text).toBe("Waiting for allowance until 01:15. It resumes by itself.");
+    expect(timelineOf([makeEvent(MISSION_ID, NOW - 3600_000, "limit.wait", { until: new Date(NOW - 1800_000 + 86_400_000).toISOString(), reason: "a: weekly limit until 2026-10-12T09:00:00.000Z" })]).items[0]?.text).toBe(
+      "Waiting for allowance until Mon 09:33. It resumes by itself.",
+    );
   });
 
   it("T-TL-17 spec: a second plan in the same night is a revision", () => {
@@ -279,7 +315,7 @@ describe("T-TL-SHORT: keeping the timeline short (spec 7.2)", () => {
       ev("merge", { feature: "beta" }),
     ];
     expect(lines(events)).toEqual([
-      "“Alpha page” did not pass its checks. Calling in reinforcements (step 2 of 5).",
+      "“Alpha page” did not pass its checks (step 1 of 5). Calling in reinforcements.",
       "An expert AI looked at why “Alpha page” keeps failing.",
       "“Beta page” is built and checked.",
     ]);
@@ -295,8 +331,8 @@ describe("T-TL-SHORT: keeping the timeline short (spec 7.2)", () => {
       ev("feature.status", { feature: "alpha", to: "blocked", reason: "x" }),
     ];
     expect(lines(events)).toEqual([
-      "“Alpha page” did not pass its checks. Calling in reinforcements (step 2 of 5).",
-      "“Alpha page” did not pass its checks. Calling in reinforcements (step 3 of 5).",
+      "“Alpha page” did not pass its checks (step 1 of 5). Calling in reinforcements.",
+      "“Alpha page” did not pass its checks (step 2 of 5). Calling in reinforcements.",
       "“Alpha page” is stuck.",
     ]);
   });
@@ -413,8 +449,8 @@ describe("the timeline of real snapshots (authentic fixtures)", () => {
     const { items } = timelineFrom("partial-blocked", CAPTURE_PLUS_5);
     expect(items).toHaveLength(12);
     const texts = items.map((i) => i.text);
-    expect(texts).toContain("“Sign-up page” did not pass its checks. Calling in reinforcements (step 2 of 5).");
-    expect(texts).toContain("“Sign-up page” did not pass its checks. Calling in reinforcements (step 3 of 5).");
+    expect(texts).toContain("“Sign-up page” did not pass its checks (step 1 of 5). Calling in reinforcements.");
+    expect(texts).toContain("“Sign-up page” did not pass its checks (step 2 of 5). Calling in reinforcements.");
     expect(texts).toContain("“Sign-up page” is stuck.");
     expect(texts).toContain("“Paid subscription” was left out because it needed a stuck feature.");
     expect(texts.at(-1)).toBe("Finished “Members site”: partly done.");
@@ -444,7 +480,7 @@ describe("the timeline of real snapshots (authentic fixtures)", () => {
     expect(items).toHaveLength(6);
     const failed = items.at(-1);
     expect(failed?.text).toBe("“Recipe box” needs your help.");
-    expect(failed?.note).toEqual({ text: "A login has expired. Claude or Codex has to be logged in again on the PC.", author: "engine" });
+    expect(failed?.note).toEqual({ text: "A login has expired. Claude and Codex have to be logged in again on the PC.", author: "engine" });
   });
 
   it("the tour of every event type builds a valid timeline from the fixture", () => {

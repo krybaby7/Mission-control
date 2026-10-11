@@ -1,9 +1,9 @@
-import { rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { copyHome, makeEvent, touch, withLock } from "../../test/dashboard-helpers.js";
 import { buildHome, featureWith, FIN, HOUR, iso, MID, MINUTE, missionAt, runEvents, SECOND, snap } from "../../test/dashboard-kit.js";
-import { STALE_BUSY_AFTER_MS, TONIGHT_WINDOW_MS, WAIT_OVER_GRACE_MS } from "./constants.js";
+import { MAX_MISSION_FOLDERS, STALE_BUSY_AFTER_MS, TONIGHT_WINDOW_MS, WAIT_OVER_GRACE_MS } from "./constants.js";
 import { isSavedBusy, readLabel } from "./missions.js";
 import { builtInSettings } from "./snapshot.js";
 import type { FeatureStateId, MissionStateId, Snapshot } from "./types.js";
@@ -717,5 +717,140 @@ describe("T-SCOPE: tonight and before (spec 12)", () => {
     expect(Date.now() - started).toBeLessThan(5000);
     expect(s.missions).toEqual([]);
     expect(s.counts.olderMissionsHidden).toBe(300);
+  });
+});
+
+// m5: rules of the spec that the first tests left unpinned. Each of these fails when its rule is broken.
+describe("scope, states and views: rules that need their own test (m5)", () => {
+  const live = (now: number, minutesAgo = 10) => ({ at: iso(now - minutesAgo * MINUTE) });
+
+  it("S13: a failed mission that needs its owner, last saved 20 hours ago, stays 'from before' under a live run (amber, not red)", () => {
+    const m = missionAt(MID, "2026-10-10-old", { status: "failed", stage: "features", age: 20 * HOUR, failure: { reason: "Something broke.", retryable: false } });
+    const s = snap(buildHome({ missions: [{ mission: m, events: [] }], lock: live(MID) }, MID), MID);
+    expect(s.missions[0]).toMatchObject({ scope: "before", state: "needs_you" });
+    expect(s.lamp.reasons.map((r) => r.code)).toEqual(["older_failed"]);
+    expect(s.lamp.state).toBe("needs_look");
+    // The same mission, if a plain run would retry it (an expired login), is part of tonight and red.
+    const retry = missionAt(MID, "2026-10-10-old", { status: "failed", stage: "features", age: 20 * HOUR, failure: { reason: "No model could run: claude needs a new login.", retryable: true } });
+    const t = snap(buildHome({ missions: [{ mission: retry, events: [] }], lock: live(MID) }, MID), MID);
+    expect(t.missions[0]).toMatchObject({ scope: "tonight", state: "needs_you" });
+    expect(t.lamp.state).toBe("needs_you_now");
+  });
+
+  it("S08: a feature built after a build attempt that hit a limit or errored is 'recovered' too, since the outcome was not pass", () => {
+    const attempts = (outcome: "limited" | "error" | "fail") => [
+      { rung: 0, action: "build" as const, provider: "codex" as const, model: "m", effort: "medium" as const, outcome, summary: "", at: iso(MID) },
+      { rung: 1, action: "build" as const, provider: "codex" as const, model: "m", effort: "medium" as const, outcome: "pass" as const, summary: "", at: iso(MID) },
+    ];
+    for (const outcome of ["fail", "limited", "error"] as const) {
+      const m = missionAt(MID, "2026-10-11-a", { status: "done", stage: "complete", features: [featureWith("f", "done", { attempts: attempts(outcome) })] });
+      const s = snap(buildHome({ missions: [{ mission: m, events: [] }] }, MID), MID);
+      expect(s.missions[0]?.features[0]?.recovered, outcome).toBe(true);
+      expect(s.missions[0]?.features[0]?.reason?.text, outcome).toBe("Built and checked after a retry.");
+    }
+  });
+
+  it("S11: 'Building feature k of n' counts stuck and left-out features as finished", () => {
+    const m = missionAt(MID, "2026-10-11-a", {
+      status: "running",
+      stage: "features",
+      features: [featureWith("a", "done"), featureWith("b", "blocked", { blockedReason: "x" }), featureWith("c", "skipped"), featureWith("d", "pending")],
+    });
+    const s = snap(buildHome({ missions: [{ mission: m, events: [makeEvent(m.id, MID - 5 * SECOND, "feature.status", { feature: "c", to: "skipped" })] }], lock: live(MID) }, MID), MID);
+    expect(s.missions[0]?.sentence).toBe("Building feature 4 of 4.");
+  });
+
+  it("N20: 'Building feature k of n' never says k above n when every feature is already finished", () => {
+    const m = missionAt(MID, "2026-10-11-a", { status: "running", stage: "features", features: [featureWith("a", "done"), featureWith("b", "done")] });
+    const s = snap(buildHome({ missions: [{ mission: m, events: [] }], lock: live(MID) }, MID), MID);
+    expect(s.missions[0]?.sentence).toBe("Building feature 2 of 2.");
+  });
+
+  it("S15: a saved busy mission with an event after the run started is not a leftover, even if its last save is older", () => {
+    const start = MID - 10 * MINUTE;
+    const m = missionAt(MID, "2026-10-11-a", { status: "running", stage: "features", age: 2 * HOUR, features: [featureWith("a", "building")] });
+    const events = [makeEvent(m.id, start - HOUR, "mission.start", {}), makeEvent(m.id, start + MINUTE, "feature.status", { feature: "a", to: "building" })];
+    const s = snap(buildHome({ missions: [{ mission: m, events }], lock: { at: iso(start) } }, MID), MID);
+    expect(s.missions[0]).toMatchObject({ state: "working" });
+    // With only events from before the run, the same mission is a leftover of an earlier night.
+    const before = snap(buildHome({ missions: [{ mission: m, events: events.slice(0, 1) }], lock: { at: iso(start) } }, MID), MID);
+    expect(before.missions[0]).toMatchObject({ state: "paused", pausedWhy: "unexpected" });
+  });
+
+  it("N14: folders beyond MAX_MISSION_FOLDERS are counted as older missions that are hidden", () => {
+    const home = buildHome({ missions: [] }, MID);
+    const extra = 7;
+    for (let i = 0; i < MAX_MISSION_FOLDERS + extra; i++) {
+      const id = `2026-09-01-old-${String(i).padStart(4, "0")}`;
+      const m = missionAt(MID, id, { status: "done", stage: "complete", age: 10 * 24 * HOUR, features: [featureWith("a", "done")] });
+      mkdirSync(join(home, "missions", id), { recursive: true });
+      writeFileSync(join(home, "missions", id, "mission.json"), JSON.stringify(m));
+    }
+    const s = snap(home, MID);
+    expect(s.counts.olderMissionsHidden).toBe(MAX_MISSION_FOLDERS + extra);
+    expect(s.missions).toEqual([]);
+  }, 60_000);
+});
+
+// M2: what the engine writes when the stop time of `mc run --until` arrives is the same as for a STOP file, so the
+// words say "a stop was requested or the stop time came". Proven against the real engine: run.ts StopControl.poll
+// aborts the one controller on the STOP file, a signal and the deadline, and RoleExecutor.checkStop (called before
+// the deadline check) throws StopRequestedError, whose message is "stop requested".
+describe("a mission stopped by a stop request or the stop time (M2)", () => {
+  const NEUTRAL = "Paused because a stop was requested or the stop time came.";
+
+  it("paused-stop (reason 'stop requested', as the engine writes it at the stop time too) is worded for both causes", () => {
+    const s = snap(copyHome("paused-stop"), MID);
+    expect(s.missions[0]).toMatchObject({ state: "paused", pausedWhy: "stop_requested", sentence: `${NEUTRAL} 2 of 3 features are waiting for the next run.` });
+    expect(s.timeline.items.map((i) => i.text)).toContain(`${NEUTRAL} “Garden planner” continues on the next run.`);
+  });
+
+  it("paused-deadline (the wait that would end after the stop time) says no AI would be free before it", () => {
+    const s = snap(copyHome("paused-deadline"), MID);
+    expect(s.missions[0]).toMatchObject({ state: "paused", pausedWhy: "deadline", sentence: "Paused: no AI would be free before the stop time. 2 of 3 features are waiting for the next run." });
+    expect(s.timeline.items.map((i) => i.text)).toContain("Paused: no AI would be free before the stop time. “Garden planner” continues on the next run.");
+  });
+
+  it("no snapshot of any fixture claims a stop was 'on request' or came 'at the planned time'", () => {
+    for (const name of ["paused-stop", "paused-deadline"]) {
+      const json = JSON.stringify(snap(copyHome(name), MID));
+      expect(json, name).not.toMatch(/on request|planned time|at the stop time/i);
+    }
+  });
+});
+
+// m2: reasons and quota keys come from files. Words that are members of Object.prototype must not break the build or
+// leak "function Object() { [native code] }" into a sentence.
+describe("words from a file that are also members of Object.prototype (m2)", () => {
+  it("a wait reason with such a provider does not degrade the snapshot or put function text into a sentence", () => {
+    const m = missionAt(MID, "2026-10-11-a", { status: "waiting", title: "Photo album", features: [featureWith("f", "building")] });
+    for (const reason of [
+      "x: claude needs a new login; y: constructor needs a new login",
+      "Claude: constructor needs a new login",
+      "a: __proto__ needs a new login; b: toString needs a new login; c: valueOf needs a new login",
+    ]) {
+      const events = [makeEvent(m.id, MID - 5 * SECOND, "limit.wait", { until: iso(MID + 20 * MINUTE), reason })];
+      const s = snap(buildHome({ missions: [{ mission: m, events }], lock: { at: iso(MID - 10 * MINUTE) } }, MID), MID);
+      expect(s.missions[0]?.state, reason).toBe("waiting");
+      expect(JSON.stringify(s), reason).not.toMatch(/function|native code/);
+    }
+  });
+
+  it("a failed mission whose stage is named like that keeps its red state and has no step in progress", () => {
+    for (const stage of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      const m = missionAt(MID, "2026-10-11-a", { status: "failed", stage: stage as never, failure: { reason: "The moon was in the wrong phase.", retryable: false } });
+      const s = snap(buildHome({ missions: [{ mission: m, events: [] }] }, MID), MID);
+      expect(s.missions[0], stage).toMatchObject({ state: "needs_you", progressWord: "", sentence: "It needs your help." });
+      expect(s.missions[0]?.progress.every((p) => p.state === "todo"), stage).toBe(true);
+    }
+  });
+
+  it("a mission stage and a quota provider named like that are plain unknown words", () => {
+    const m = missionAt(MID, "2026-10-11-a", { status: "running", stage: "constructor" as never });
+    const quota = { version: 1, limits: { constructor: { kind: "toString", until: MID + HOUR }, __proto__x: { kind: "weekly", until: MID + HOUR } }, modelBlocks: [], utilization: [{ provider: "toString", window: "valueOf", utilization: 0.5, resetsAt: MID + HOUR }] };
+    const s = snap(buildHome({ missions: [{ mission: m, events: [] }], lock: { at: iso(MID - 10 * MINUTE) }, quota }, MID), MID);
+    expect(s.missions[0]).toMatchObject({ state: "unknown", sentence: "This page does not know this state." });
+    expect(s.allowance.providers.map((p) => p.label)).toEqual(expect.arrayContaining(["constructor", "toString"]));
+    expect(JSON.stringify(s)).not.toMatch(/function|native code/);
   });
 });

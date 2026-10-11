@@ -69,7 +69,7 @@ function row(at: number, cls: RowClass, tone: Tone, line: string, featureId: str
 }
 
 /** One event as a row, or null when the table hides it. `revised` is true when an earlier `spec` event is in the window. */
-function translate(type: string, data: Record<string, unknown>, at: number, ctx: Context, f: Formatter, revised: boolean): Row | null {
+function translate(type: string, data: Record<string, unknown>, at: number, ctx: Context, f: Formatter, now: number, revised: boolean): Row | null {
   const t = ctx.title;
   switch (type) {
     case "mission.start":
@@ -112,7 +112,7 @@ function translate(type: string, data: Record<string, unknown>, at: number, ctx:
       return null;
     }
     case "limit.wait":
-      return row(at, "M", "warn", waitInfoFromEvent(data, f.time).text);
+      return row(at, "M", "warn", waitInfoFromEvent(data, (ms) => f.when(ms, now)).text);
     case "error": {
       const feature = featureOf(data, ctx);
       return row(at, "M", "bad", TL.internalError(feature === null ? null : feature.title), feature === null ? null : feature.id);
@@ -186,9 +186,9 @@ function translateAttempt(data: Record<string, unknown>, at: number, ctx: Contex
   switch (data.action) {
     case "build": {
       if (passed) return null;
-      const rung = typeof data.rung === "number" && Number.isFinite(data.rung) ? data.rung : null;
+      const rung = typeof data.rung === "number" && Number.isInteger(data.rung) && data.rung >= 0 ? data.rung : null;
       const of = ctx.ladder.get(feature.id) ?? null;
-      return row(at, "M", "warn", TL.reinforcements(feature.title, rung === null ? null : rung + 2, of), feature.id);
+      return row(at, "M", "warn", TL.reinforcements(feature.title, rung === null ? null : rung + 1, of), feature.id);
     }
     case "diagnose":
       return passed ? row(at, "D", "info", TL.diagnosed(feature.title), feature.id) : row(at, "M", "warn", TL.diagnosisFailed(feature.title), feature.id);
@@ -248,7 +248,8 @@ function mergeRepeats(rows: Row[]): Merged[] {
   return out;
 }
 
-export function buildTimeline(m: MissionFacts[], now: number, f: Formatter): Timeline {
+/** `max` is the most items kept (TIMELINE_MAX_ITEMS unless the snapshot has to be made smaller). */
+export function buildTimeline(m: MissionFacts[], now: number, f: Formatter, max = TIMELINE_MAX_ITEMS): Timeline {
   const windowStart = now - TONIGHT_WINDOW_MS;
   const items: (TimelineItem & { order: number })[] = [];
   let order = 0;
@@ -262,7 +263,7 @@ export function buildTimeline(m: MissionFacts[], now: number, f: Formatter): Tim
       const at = Date.parse(event.at);
       if (!Number.isFinite(at) || at < windowStart) continue;
       const data = isRecord(event.data) ? event.data : {};
-      const translated = translate(event.type, data, at, ctx, f, specSeen);
+      const translated = translate(event.type, data, at, ctx, f, now, specSeen);
       if (event.type === "spec") specSeen = true;
       if (translated !== null) rows.push(translated);
     }
@@ -285,7 +286,7 @@ export function buildTimeline(m: MissionFacts[], now: number, f: Formatter): Tim
 
   // Oldest first; two events at the same instant stay in the order they were read (missions in order, then the file).
   items.sort((a, b) => a.at - b.at || a.order - b.order);
-  const cut = Math.max(0, items.length - TIMELINE_MAX_ITEMS);
+  const cut = Math.max(0, items.length - max);
   return {
     items: items.slice(cut).map(({ order: _order, ...item }) => item),
     earlierNotShown: cut,

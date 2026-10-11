@@ -11,9 +11,11 @@ import {
   decisionTitle,
   explainFailureReason,
   LEADER,
+  loginFailureAis,
   makeLeaderNames,
   type Formatter,
   loginHappened,
+  loginWhatToDo,
   stuckIfNothing,
   type LeaderNames,
   type StuckOutlook,
@@ -74,15 +76,33 @@ function rawBlockedReason(x: MissionFacts, featureId: string): string {
   return x.data.mission?.features.find((f) => f.id === featureId)?.blockedReason ?? "";
 }
 
-function failureReason(x: MissionFacts): Said {
+/** The failure reason as written: the mission's own, else the last mission.failed event's. "" when there is none. */
+function rawFailureReason(x: MissionFacts): string {
   const mission = x.data.mission;
   const fromFile = mission?.failure?.reason;
   const failed = [...(x.data.events ?? [])].reverse().find((e) => e.type === "mission.failed");
-  const reason = fromFile ?? (typeof failed?.data.reason === "string" ? failed.data.reason : "");
+  return fromFile ?? (typeof failed?.data.reason === "string" ? failed.data.reason : "");
+}
+
+function failureReason(x: MissionFacts): Said {
+  const reason = rawFailureReason(x);
   return reason === "" ? { text: CARD_TEXT.failedFallbackReason, author: "engine" } : explainFailureReason(reason);
 }
 
-function missionLevel(x: MissionFacts, o: { kind: CardKind; severity: "now" | "look"; fromBefore: boolean; title: string; happened: Said; ifNothing: string; tellLeader: string }): NeedsYouCard {
+/** What a person does about a failed mission: log in again when that is the cause, else ask the leader (spec 9.1). */
+function failureWhatToDo(x: MissionFacts): Said {
+  const logins = loginFailureAis(rawFailureReason(x));
+  return { text: logins === null ? CARD_TEXT.failedWhatToDoOther : loginWhatToDo(logins), author: "engine" };
+}
+
+function engineSays(text: string): Said {
+  return { text, author: "engine" };
+}
+
+function missionLevel(
+  x: MissionFacts,
+  o: { kind: CardKind; severity: "now" | "look"; fromBefore: boolean; title: string; happened: Said; ifNothing: string; whatToDo: Said | null; tellLeader: string },
+): NeedsYouCard {
   return {
     id: `${o.kind}:${x.view.id}:0`,
     kind: o.kind,
@@ -95,6 +115,7 @@ function missionLevel(x: MissionFacts, o: { kind: CardKind; severity: "now" | "l
     happened: o.happened,
     summary: null,
     ifNothing: o.ifNothing,
+    whatToDo: o.whatToDo,
     tellLeader: o.tellLeader,
   };
 }
@@ -130,6 +151,7 @@ function decisionCards(x: MissionFacts, names: LeaderNames, rank: number): Draft
         happened: concerns === null ? { text: entry, author: "ai" } : { text: concernsHappened(concerns), author: "engine" },
         summary: null,
         ifNothing: concerns === null ? CARD_TEXT.decisionIfOther : CARD_TEXT.decisionIfConcerns,
+        whatToDo: null,
         tellLeader: LEADER.question(names, ref, position, shown.length),
       },
     };
@@ -152,6 +174,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
         title: CARD_TEXT.failedTitle(view.title, false),
         happened: failureReason(x),
         ifNothing: x.data.mission?.failure?.retryable === true ? CARD_TEXT.failedIfRetryable : CARD_TEXT.failedIfNot,
+        whatToDo: failureWhatToDo(x),
         tellLeader: LEADER.failed(names, ref),
       }),
     });
@@ -166,6 +189,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
         title: CARD_TEXT.stoppedTitle(view.title),
         happened: { text: CARD_TEXT.stoppedHappened, author: "engine" },
         ifNothing: CARD_TEXT.stoppedIfNothing,
+        whatToDo: engineSays(CARD_TEXT.stoppedWhatToDo),
         tellLeader: LEADER.runStopped(names, ref),
       }),
     });
@@ -180,6 +204,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
         title: CARD_TEXT.pausedTitle(view.title),
         happened: { text: CARD_TEXT.diskHappened, author: "engine" },
         ifNothing: CARD_TEXT.diskIfNothing,
+        whatToDo: engineSays(CARD_TEXT.diskWhatToDo),
         tellLeader: LEADER.paused(names, ref),
       }),
     });
@@ -194,6 +219,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
         title: CARD_TEXT.pausedTitle(view.title),
         happened: { text: CARD_TEXT.aiFailingHappened, author: "engine" },
         ifNothing: CARD_TEXT.aiFailingIfNothing,
+        whatToDo: null,
         tellLeader: LEADER.paused(names, ref),
       }),
     });
@@ -214,6 +240,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
         happened: f.reason ?? { text: CARD_TEXT.failedFallbackReason, author: "engine" },
         summary: `${f.steps.caption}.`,
         ifNothing: stuckIfNothing(outlookOf(view.state), leftOutBecause(x, f)),
+        whatToDo: null,
         tellLeader: LEADER.stuck(names, ref, f),
       },
     });
@@ -229,6 +256,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
         title: CARD_TEXT.checksTitle(view.title),
         happened: { text: CARD_TEXT.checksHappened, author: "engine" },
         ifNothing: CARD_TEXT.checksIfNothing,
+        whatToDo: null,
         tellLeader: LEADER.checks(names, ref),
       }),
     });
@@ -243,6 +271,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
         title: CARD_TEXT.loginTitle,
         happened: { text: loginHappened(x.wait.loginAis, x.wait.untilText), author: "engine" },
         ifNothing: CARD_TEXT.loginIfNothing,
+        whatToDo: engineSays(loginWhatToDo(x.wait.loginAis)),
         tellLeader: LEADER.login(names, ref),
       }),
     });
@@ -271,6 +300,7 @@ export function buildCards(m: MissionFacts[], _f?: Formatter): NeedsYouCard[] {
           title: CARD_TEXT.failedTitle(x.view.title, true),
           happened: failureReason(x),
           ifNothing: x.data.mission?.failure?.retryable === true ? CARD_TEXT.failedIfRetryable : CARD_TEXT.failedIfNot,
+          whatToDo: failureWhatToDo(x),
           tellLeader: LEADER.failed(names, { id: x.view.id, title: x.view.title }),
         }),
       });

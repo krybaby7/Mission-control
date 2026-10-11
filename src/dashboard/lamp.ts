@@ -125,9 +125,12 @@ function sentenceFor(state: LampStateId, reasons: LampReason[], i: LampInput, x:
   if (state === "needs_you_now" || state === "needs_look") {
     const problems = reasons.filter((r) => r.severity === "now" || r.severity === "look");
     const restIsOnTrack = state === "needs_look" && x.live && problems.every((r) => REST_IS_ON_TRACK.has(r.code));
+    // A long wait of known cause is the only thing to look at: say that it needs nothing from the owner (spec 5.4).
+    const resumesByItself = problems.length === 1 && problems[0]?.code === "long_wait";
     return problemSentence(
       problems.map((r) => r.text),
       restIsOnTrack,
+      resumesByItself,
     );
   }
   const code = (c: LampReasonCode): boolean => reasons.some((r) => r.code === c);

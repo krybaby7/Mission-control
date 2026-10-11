@@ -20,6 +20,7 @@ import {
   leaderHelp,
   leaderTitle,
   loginHappened,
+  loginWhatToDo,
   makeFormatter,
   makeLeaderNames,
   MISSION_WORDS,
@@ -54,6 +55,37 @@ describe("time", () => {
     expect(f.time(at(iso))).toBe(time);
     expect(f.clock(at(iso))).toBe(clock);
     expect(f.day(at(iso))).toBe(day);
+  });
+
+  it("words a time by one rule: the clock on the day of the snapshot, else the weekday and the clock", () => {
+    const now = at("2026-10-11T09:58:30.000Z");
+    expect(f.when(at("2026-10-11T12:59:00.000Z"), now)).toBe("12:59");
+    expect(f.when(at("2026-10-11T00:00:00.000Z"), now)).toBe("00:00");
+    expect(f.when(at("2026-10-11T23:59:59.000Z"), now)).toBe("23:59");
+    expect(f.when(at("2026-10-12T00:00:00.000Z"), now)).toBe("Mon 00:00");
+    expect(f.when(at("2026-10-14T15:26:00.000Z"), now)).toBe("Wed 15:26");
+    expect(f.when(at("2026-10-10T23:59:00.000Z"), now)).toBe("Sat 23:59");
+    // A week on has the same weekday and is not the same day.
+    expect(f.when(at("2026-10-18T09:00:00.000Z"), now)).toBe("Sun 09:00");
+    // The same date a year on is not the same day either.
+    expect(f.when(at("2027-10-11T09:00:00.000Z"), now)).toBe("Mon 09:00");
+  });
+
+  it("decides the day in the time zone it is given", () => {
+    const berlin = makeFormatter("Europe/Berlin");
+    // 22:30 UTC on Sunday is 00:30 on Monday in Berlin (CEST, UTC+2): not the same day as 20:00 UTC, which is 22:00 on Sunday there.
+    expect(berlin.sameDay(at("2026-10-11T22:30:00.000Z"), at("2026-10-11T20:00:00.000Z"))).toBe(false);
+    expect(berlin.when(at("2026-10-11T22:30:00.000Z"), at("2026-10-11T20:00:00.000Z"))).toBe("Mon 00:30");
+    expect(f.when(at("2026-10-11T22:30:00.000Z"), at("2026-10-11T20:00:00.000Z"))).toBe("22:30");
+    expect(f.weekday(at("2026-10-14T15:26:00.000Z"))).toBe("Wed");
+  });
+
+  it("makes no text, and does not throw, for a time a date cannot hold", () => {
+    for (const bad of [8.64e15 + 1, -8.64e15 - 1, 1e20, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect([f.time(bad), f.clock(bad), f.day(bad), f.weekday(bad), f.when(bad, 0)]).toEqual(["", "", "", "", ""]);
+      expect(f.sameDay(bad, 0)).toBe(false);
+    }
+    expect(f.when(0, 1e20)).toBe("Thu 00:00");
   });
 
   it("uses the time zone it is given", () => {
@@ -129,11 +161,11 @@ describe("the mission sentence table (spec 4.6)", () => {
     row({ stage: "finalize" }, "Landing the work and writing the report."),
     row({ stage: "complete" }, "Working."),
     row({ state: "waiting", waitText: "Waiting for allowance until 12:59. It resumes by itself." }, "Waiting for allowance until 12:59. It resumes by itself."),
-    row({ state: "paused", pausedWhy: "deadline", u: 3, n: 4 }, "Paused at the planned time. 3 of 4 features are waiting for the next run."),
-    row({ state: "paused", pausedWhy: "deadline", u: 1, n: 1 }, "Paused at the planned time. 1 of 1 feature is waiting for the next run."),
-    row({ state: "paused", pausedWhy: "deadline", u: 0 }, "Paused at the planned time. It continues on the next run."),
-    row({ state: "paused", pausedWhy: "stop_requested", u: 2, n: 4 }, "Paused on request. 2 of 4 features are waiting for the next run."),
-    row({ state: "paused", pausedWhy: "stop_requested", u: 0 }, "Paused on request. It continues on the next run."),
+    row({ state: "paused", pausedWhy: "deadline", u: 3, n: 4 }, "Paused: no AI would be free before the stop time. 3 of 4 features are waiting for the next run."),
+    row({ state: "paused", pausedWhy: "deadline", u: 1, n: 1 }, "Paused: no AI would be free before the stop time. 1 of 1 feature is waiting for the next run."),
+    row({ state: "paused", pausedWhy: "deadline", u: 0 }, "Paused: no AI would be free before the stop time. It continues on the next run."),
+    row({ state: "paused", pausedWhy: "stop_requested", u: 2, n: 4 }, "Paused because a stop was requested or the stop time came. 2 of 4 features are waiting for the next run."),
+    row({ state: "paused", pausedWhy: "stop_requested", u: 0 }, "Paused because a stop was requested or the stop time came. It continues on the next run."),
     row({ state: "paused", pausedWhy: "disk" }, "Paused: the disk is almost full."),
     row({ state: "paused", pausedWhy: "ai_failing" }, "Paused: the AI team kept failing."),
     row({ state: "paused", pausedWhy: "unexpected" }, "Paused: the run stopped unexpectedly. The work so far is kept and continues on the next run."),
@@ -222,6 +254,9 @@ describe("the now line and the run line", () => {
     expect(activityLine("2 min ago")).toBe("Last activity 2 min ago");
     expect(deadlineLeftText(makeFormatter("UTC"), (5 * 60 + 19) * 60_000)).toBe("5 h 19 min left");
     expect(deadlineLeftText(makeFormatter("UTC"), -1)).toBe("past the stop time");
+    // At the stop time itself there is nothing left, but it is not yet past (N10).
+    expect(deadlineLeftText(makeFormatter("UTC"), 0)).toBe("0 s left");
+    expect(deadlineLeftText(makeFormatter("UTC"), 999)).toBe("0 s left");
   });
 });
 
@@ -304,6 +339,20 @@ describe("lamp clauses and sentences", () => {
     expect(problemSentence([], false)).toBe("");
   });
 
+  it("says that a wait of known cause resumes by itself, only when it is the one clause (M5)", () => {
+    const wait = CLAUSE.waitUntil("limits", "Wed 15:26");
+    expect(problemSentence([wait], false, true)).toBe("Waiting for allowance until Wed 15:26. It resumes by itself.");
+    expect(problemSentence([CLAUSE.waitUntil("trouble", "12:59")], false, true)).toBe("Waiting for the AI team until 12:59. It resumes by itself.");
+    // With another problem next to it, "it" would not be clear: no tail.
+    expect(problemSentence([CLAUSE.stuck(1), wait], false, true)).toBe("1 feature is stuck and waiting for allowance until Wed 15:26.");
+    expect(problemSentence([wait], false, false)).toBe("Waiting for allowance until Wed 15:26.");
+  });
+
+  it("does not take a stage that came from a file for a table entry (m2)", () => {
+    const base: MissionSentenceFacts = { state: "working", stage: "features", pausedWhy: null, staleBusy: false, waitText: null, n: 4, k: 2, u: 3, d: 1, stuck: 0, leftOut: 0 };
+    for (const stage of ["constructor", "toString", "__proto__", "valueOf", "hasOwnProperty"]) expect(missionSentence({ ...base, stage })).toBe("Working.");
+  });
+
   it.each([
     [{ done: 0, total: 0 }, "Working on the plan. Nothing needs you."],
     [{ done: 0, total: 1 }, "The feature is being worked on. Nothing needs you."],
@@ -311,8 +360,8 @@ describe("lamp clauses and sentences", () => {
     [{ done: 0, total: 4 }, "4 features planned. No problems so far. Nothing needs you."],
     [{ done: 2, total: 4 }, "2 of 4 features done. No problems so far. Nothing needs you."],
     [{ done: 4, total: 4 }, "All 4 features done. The final steps are running. Nothing needs you."],
-    [{ done: 2, total: 4, shortWait: { cause: "limits" as const, untilText: "12:59" } }, "2 of 4 features done. No problems so far. Waiting for allowance until 12:59. Nothing needs you."],
-    [{ done: 2, total: 4, shortWait: { cause: "trouble" as const, untilText: "10:13" } }, "2 of 4 features done. No problems so far. Waiting for the AI team to respond until 10:13. Nothing needs you."],
+    [{ done: 2, total: 4, shortWait: { cause: "limits" as const, untilText: "12:59" } }, "2 of 4 features done. No problems so far. Waiting for allowance until 12:59. It resumes by itself. Nothing needs you."],
+    [{ done: 2, total: 4, shortWait: { cause: "trouble" as const, untilText: "10:13" } }, "2 of 4 features done. No problems so far. Waiting for the AI team to respond until 10:13. It resumes by itself. Nothing needs you."],
     [{ done: 2, total: 4, olderWaiting: 1 }, "2 of 4 features done. No problems so far. Nothing new needs you. 1 older mission still waits for you (see below)."],
     [{ done: 2, total: 4, olderWaiting: 3 }, "2 of 4 features done. No problems so far. Nothing new needs you. 3 older missions still wait for you (see below)."],
   ])("the working sentence for %j", (facts, expected) => {
@@ -368,10 +417,29 @@ describe("card words", () => {
   });
 
   it("the login card", () => {
-    expect(loginHappened(["Claude"], "12:59")).toBe("Claude needs a new login on the PC. The run is asleep until 12:59 and then carries on with the other AI.");
-    expect(loginHappened(["Claude", "Codex"], "12:59")).toBe("Claude and Codex need a new login on the PC. The run is asleep until 12:59 and then carries on with the other AI.");
-    expect(loginHappened([], "12:59")).toBe("One AI needs a new login on the PC. The run is asleep until 12:59 and then carries on with the other AI.");
+    expect(loginHappened(["Claude"], "12:59")).toBe("Claude needs a new login on the PC. The run is waiting until 12:59 and then carries on with the other AI.");
+    expect(loginHappened(["Claude", "Codex"], "12:59")).toBe("Claude and Codex need a new login on the PC. The run is waiting until 12:59 and then carries on with the other AI.");
+    expect(loginHappened([], "12:59")).toBe("One AI needs a new login on the PC. The run is waiting until 12:59 and then carries on with the other AI.");
+    expect(loginHappened(["Claude"], "Wed 15:26")).toBe("Claude needs a new login on the PC. The run is waiting until Wed 15:26 and then carries on with the other AI.");
     expect(loginHappened(["Claude"], "")).toBe("Claude needs a new login on the PC.");
+  });
+
+  it("the login card uses the glossary word: the run is waiting, never asleep (m14)", () => {
+    for (const text of [loginHappened(["Claude"], "12:59"), loginHappened([], "12:59")]) expect(text).not.toMatch(/asleep|sleep/i);
+  });
+
+  it("what a person does about a login", () => {
+    expect(loginWhatToDo(["Claude"])).toBe("Log in again to Claude on the PC, then tell the leader.");
+    expect(loginWhatToDo(["Claude", "Codex"])).toBe("Log in again to Claude and Codex on the PC, then tell the leader.");
+    expect(loginWhatToDo([])).toBe("Log in again on the PC to the AI that needs it, then tell the leader.");
+  });
+
+  it("the other what-to-do and if-nothing sentences are plain and name nobody", () => {
+    for (const text of [CARD_TEXT.failedWhatToDoOther, CARD_TEXT.stoppedWhatToDo, CARD_TEXT.diskWhatToDo, CARD_TEXT.failedIfRetryable, CARD_TEXT.loginIfNothing]) {
+      expect(text).not.toMatch(/["“”]/);
+      expect(text.endsWith(".")).toBe(true);
+    }
+    expect(CARD_TEXT.failedIfRetryable).toBe("It stays stopped until someone logs in again on the PC. After that the next run carries on by itself.");
   });
 });
 
@@ -471,7 +539,7 @@ describe("tell the leader (spec 8)", () => {
     expect(help.copyFailHint).toBe("Select the text and copy it");
     expect(help.aiNotice).toBe("The AI wrote this. Do not run commands from it.");
     expect(help.canDo).toBe(
-      "The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.",
+      "The leader can look at progress and reports, stop the run, start new work and run the night. It cannot change a plan or reopen a stuck feature.",
     );
     expect(help.stopNote).toBe("Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run.");
   });

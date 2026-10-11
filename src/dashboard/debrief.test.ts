@@ -163,6 +163,24 @@ describe("T-DEB verdicts", () => {
     expect(night?.verdict.sentence).toBe("5 missions: 1 done, 1 partly done, 1 paused, 2 need your help.");
   });
 
+  // V17: spec 11 orders the verdict needs_you, partly_done, paused, done. A paused mission next to a partly done one must
+  // not hide the partly done one: it is the one with something to look at.
+  it("the worst verdict is chosen in the order needs you, partly done, paused, done (V17)", () => {
+    const m = (id: string, status: Mission["status"], stage: Mission["stage"], o: FakeFactsOptions = {}) => fakeFacts(finished({ id: `2026-10-11-${id}`, title: id, status, stage }), { dispatch: FV_OK, ...o });
+    const done = m("d", "done", "complete");
+    const partly = m("p", "partial", "complete");
+    const paused = m("z", "stopped", "features", { state: "paused", pausedWhy: "stop_requested" });
+    const failed = m("f", "failed", "features");
+    const worst = (list: ReturnType<typeof m>[]) => buildDebrief(list, [], null, f)?.verdict.id;
+    expect(worst([paused, partly])).toBe("partly_done");
+    expect(worst([partly, paused])).toBe("partly_done");
+    expect(worst([done, paused])).toBe("paused");
+    expect(worst([paused, done, partly])).toBe("partly_done");
+    expect(worst([paused, partly, failed, done])).toBe("needs_you");
+    expect(worst([done])).toBe("done");
+    expect(buildDebrief([partly, paused], [], null, f)?.verdict.sentence).toBe("2 missions: 1 partly done, 1 paused.");
+  });
+
   it("the order of the missions is kept, and a mission that is not finished is left out of the count", () => {
     const facts = [
       fakeFacts(finished({ id: "2026-10-11-a", title: "A" }), { dispatch: FV_OK }),

@@ -304,6 +304,31 @@ describe("quota.json", () => {
     expect(readHome(home).quota).toBeNull();
   });
 
+  // m1: a time beyond 8.64e15 ms (a time in the wrong unit, a corrupt file) makes Intl.DateTimeFormat throw. One bad
+  // entry must be skipped, like any other bad entry (E8), and must not take the whole snapshot down.
+  it.each([
+    ["a limit's until", { limits: { claude: { kind: "weekly", until: 1e20 }, codex: { kind: "session", until: 1000 } } }, { limits: [{ provider: "codex", kind: "session", until: 1000 }] }],
+    ["a limit's until just over the largest date", { limits: { claude: { kind: "weekly", until: 8.64e15 + 1 } } }, { limits: [] }],
+    ["a limit's until too close to the largest date for the engine's margin to fit", { limits: { claude: { kind: "weekly", until: 8.64e15 } } }, { limits: [] }],
+    ["a limit's until before the earliest date", { limits: { claude: { kind: "weekly", until: -1e20 } } }, { limits: [] }],
+    ["a model block's until", { modelBlocks: [{ provider: "claude", model: "m", until: 1e20 }, { provider: "claude", model: "n", until: 2000 }] }, { modelBlocks: [{ provider: "claude", model: "n", until: 2000 }] }],
+    [
+      "a reading's resetsAt",
+      { utilization: [{ provider: "claude", window: "five_hour", utilization: 0.5, resetsAt: 1e20 }, { provider: "claude", window: "seven_day", utilization: 0.4, resetsAt: 3000 }] },
+      { utilization: [{ provider: "claude", window: "seven_day", utilization: 0.4, resetsAt: 3000 }] },
+    ],
+    ["a reading in the wrong unit (a percent as a fraction times a million)", { utilization: [{ provider: "claude", window: "five_hour", utilization: 1e308, resetsAt: 3000 }] }, { utilization: [] }],
+    ["a reading of 100 000 percent", { utilization: [{ provider: "claude", window: "five_hour", utilization: 1001, resetsAt: 3000 }] }, { utilization: [] }],
+  ])("skips %s when it is out of range, and keeps the rest", (_name, file, expected) => {
+    const { quota } = readHome(buildHome({ quota: { version: 1, ...file } }, NOW));
+    expect(quota).toMatchObject(expected);
+  });
+
+  it("keeps a reading of 1000 (100 000 percent) and a time at the very end of what a date can hold less the margin", () => {
+    const { quota } = readHome(buildHome({ quota: { utilization: [{ provider: "claude", window: "five_hour", utilization: 1000, resetsAt: 8.64e15 - 45_000 }] } }, NOW));
+    expect(quota?.utilization).toHaveLength(1);
+  });
+
   it("an object with no lists is an empty quota, with its modification time", () => {
     const home = buildHome({ quota: {}, quotaMtimeMs: NOW - 5000 }, NOW);
     expect(readHome(home)).toMatchObject({ quota: { limits: [], modelBlocks: [], utilization: [] }, quotaMtimeMs: NOW - 5000 });

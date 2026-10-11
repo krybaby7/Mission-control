@@ -3,16 +3,21 @@
 import { describe, expect, it } from "vitest";
 import {
   agentTimeLine,
+  aiName,
   deliveredWhy,
   explainFailureReason,
   explainFeatureReason,
+  fileChangedLine,
   finalReviewCaveat,
   finalReviewWhy,
   limitedLine,
+  loginFailureAis,
   nightSentence,
   noReworkWhy,
   nothingOpenWhy,
   parseWaitReason,
+  PAUSED_NO_AI_BEFORE_STOP,
+  PAUSED_WHEN_TOLD_TO_STOP,
   PILL_WORDS,
   providerLabel,
   stopReasonKind,
@@ -22,13 +27,16 @@ import {
   waitText,
   windowLabel,
 } from "./vocabulary-night.js";
+import { makeFormatter } from "./vocabulary.js";
 
 const at = (iso: string): number => Date.parse(iso);
-const clock = (ms: number): string => new Date(ms).toISOString().slice(11, 16);
 const UNTIL = "2026-10-11T12:59:10.596Z";
+/** The snapshot's clock: the one rule words a time on this day as "12:59" and on another day as "Wed 15:26". */
+const NOW = at("2026-10-11T09:58:30.000Z");
+const clock = (ms: number): string => makeFormatter("UTC").when(ms, NOW);
 
-function info(reason: string | null) {
-  return waitInfoFromEvent(reason === null ? { until: UNTIL } : { until: UNTIL, reason }, clock);
+function info(reason: string | null, until = UNTIL) {
+  return waitInfoFromEvent(reason === null ? { until } : { until, reason }, clock);
 }
 
 describe("T-VOC the wait text", () => {
@@ -46,6 +54,36 @@ describe("T-VOC the wait text", () => {
       text: "Waiting for allowance until 12:59. It resumes by itself.",
       loginAis: [],
     });
+  });
+
+  it("a wait that ends on another day says the weekday: 'until 15:26' would read as today (M3)", () => {
+    const threeDays = "2026-10-14T15:26:41.662Z";
+    const limits = info("gpt-6-astra: weekly limit until 2026-10-14T15:25:56.662Z", threeDays);
+    expect(limits).toMatchObject({ untilText: "Wed 15:26", cause: "limits", text: "Waiting for allowance until Wed 15:26. It resumes by itself." });
+    expect(info("m: claude keeps failing (x), trying again at 2026-10-14T15:25:56.662Z", threeDays).text).toBe("Waiting for the AI team to respond until Wed 15:26. It resumes by itself.");
+    expect(info("m: claude needs a new login", threeDays).text).toBe("Waiting for allowance until Wed 15:26. Claude also needs a new login.");
+    expect(info("something unexpected", threeDays).text).toBe("Waiting until Wed 15:26. Mission Control cannot tell why.");
+    // The same day, however late, keeps the plain clock time; the next minute after midnight does not.
+    expect(info("gpt-6-astra: weekly limit until 2026-10-11T23:58:00.000Z", "2026-10-11T23:58:45.000Z").untilText).toBe("23:58");
+    expect(info("gpt-6-astra: weekly limit until 2026-10-12T00:00:00.000Z", "2026-10-12T00:00:45.000Z").untilText).toBe("Mon 00:00");
+  });
+
+  it("every wait of a known cause ends with 'It resumes by itself.' and a login wait never does (M5)", () => {
+    for (const reason of ["a: session limit until 2026-10-11T12:58:25.000Z", "a: codex keeps failing (x), trying again at 2026-10-11T12:58:25.000Z", "a: throttle limit until 2026-10-11T12:58:25.000Z"]) {
+      expect(info(reason).text.endsWith(" It resumes by itself.")).toBe(true);
+    }
+    for (const reason of ["m: claude needs a new login", "something unexpected", null]) expect(info(reason).text).not.toContain("resumes by itself");
+  });
+
+  it("a login part whose provider is a word of Object.prototype is no AI and does not break the sort (m2)", () => {
+    const w = info("x: claude needs a new login; y: constructor needs a new login; z: __proto__ needs a new login; q: toString needs a new login");
+    expect(w.cause).toBe("login");
+    expect(w.loginAis).toEqual(["Claude"]);
+    expect(w.text).toBe("Waiting for allowance until 12:59. Claude also needs a new login.");
+    const none = info("Claude: constructor needs a new login");
+    expect(none.loginAis).toEqual([]);
+    expect(none.text).toBe("Waiting for allowance until 12:59. One AI also needs a new login.");
+    expect(none.text).not.toContain("function");
   });
 
   it("a throttle is trouble: the AI team is busy", () => {
@@ -148,6 +186,28 @@ describe("T-VOC the stop table (4.5)", () => {
   it("the first row wins when several match", () => {
     expect(stopReasonKind("the disk is almost full and the deadline passed")).toBe("disk");
   });
+
+  // The rows are in this order on purpose: the failing AIs' own error text may mention a deadline (V16).
+  it("an AI failure that mentions a deadline is an AI failure, and a full disk that mentions one is a full disk", () => {
+    expect(stopReasonKind("claude and codex keep failing: the deadline was exceeded")).toBe("ai_failing");
+    expect(stopReasonKind("claude and codex kept refusing work (usage limits or overload, 3 runs in a row): request deadline exceeded")).toBe("ai_failing");
+    expect(stopReasonKind("the disk is almost full (a deadline is near)")).toBe("disk");
+    expect(stopReasonKind("write failed: No space left on device (deadline)")).toBe("disk");
+  });
+
+  // Proven against the engine (src/run.ts StopControl.poll, src/executor.ts checkStop): the stop time of a run aborts
+  // the same controller as the STOP file, so a run stopped by its --until time records "stop requested". Only a wait
+  // that would end after the stop time records "deadline". The words must not claim more than the reason says (M2).
+  it("a stop that cannot be told from the stop time is worded for both, and never as 'on request' or 'at the planned time'", () => {
+    expect(stopReasonKind("stop requested")).toBe("stop_requested");
+    const stopped = TL.missionStopped("stop_requested", "Habit tracker");
+    expect(stopped).toEqual({ text: "Paused because a stop was requested or the stop time came. “Habit tracker” continues on the next run.", tone: "warn" });
+    expect(PAUSED_WHEN_TOLD_TO_STOP).toBe("Paused because a stop was requested or the stop time came.");
+    for (const text of [stopped.text, TL.missionStopped("deadline", "T").text, PAUSED_WHEN_TOLD_TO_STOP, PAUSED_NO_AI_BEFORE_STOP]) {
+      expect(text).not.toMatch(/on request|planned time|at the stop time/i);
+    }
+    expect(TL.missionStopped("deadline", "Habit tracker")).toEqual({ text: "Paused: no AI would be free before the stop time. “Habit tracker” continues on the next run.", tone: "warn" });
+  });
 });
 
 describe("T-VOC the feature reason table (9.2)", () => {
@@ -182,8 +242,11 @@ describe("T-VOC the feature reason table (9.2)", () => {
 
 describe("T-VOC the failure reason table (9.3)", () => {
   it.each([
-    ["No model could run: codex and claude need a new login.", "A login has expired. Claude or Codex has to be logged in again on the PC."],
-    ["No model could run: claude needs a new login.", "A login has expired. Claude or Codex has to be logged in again on the PC."],
+    ["No model could run: codex and claude need a new login.", "A login has expired. Claude and Codex have to be logged in again on the PC."],
+    ["No model could run: claude needs a new login.", "A login has expired. Claude has to be logged in again on the PC."],
+    ["No model could run: codex needs a new login.", "A login has expired. Codex has to be logged in again on the PC."],
+    ["No model could run: mock needs a new login.", "A login has expired. Claude or Codex has to be logged in again on the PC."],
+    ["No model could run: constructor and toString need a new login.", "A login has expired. Claude or Codex has to be logged in again on the PC."],
     ['Unknown profile "turbo".', "The mission asks for an AI setup that does not exist."],
     ["The folder /x/y is not a git repository.", "The app's folder is not set up for version history."],
     ["The repository /x/y is a shallow clone.", "The app's folder only has part of its version history."],
@@ -200,6 +263,31 @@ describe("T-VOC the failure reason table (9.3)", () => {
   it("anything else is an AI text", () => {
     expect(explainFailureReason("The wizard forgot the plan.")).toEqual({ text: "The wizard forgot the plan.", author: "ai" });
   });
+
+  it("names the AIs of a login failure, and only the ones the engine knows (M6)", () => {
+    expect(loginFailureAis("No model could run: codex and claude need a new login.")).toEqual(["Claude", "Codex"]);
+    expect(loginFailureAis("No model could run: claude needs a new login.")).toEqual(["Claude"]);
+    expect(loginFailureAis("No model could run: mock needs a new login.")).toEqual([]);
+    expect(loginFailureAis("No model could run: __proto__ and claude need a new login.")).toEqual(["Claude"]);
+    expect(loginFailureAis("The wizard forgot the plan.")).toBeNull();
+    expect(loginFailureAis("Internal error in stage features: No model could run: claude needs a new login.")).toBeNull();
+  });
+});
+
+describe("T-VOC lookups keyed by words from a file (m2)", () => {
+  const WORDS = ["constructor", "toString", "__proto__", "valueOf", "hasOwnProperty", "isPrototypeOf"];
+
+  it.each(WORDS)("%s is not a provider, a block kind or an AI", (word) => {
+    expect(aiName(word)).toBeUndefined();
+    expect(providerLabel(word)).toBe(word);
+    expect(limitedLine(word, "at 12:59")).toBe("Waiting for a usage limit to reset. Work resumes at 12:59.");
+  });
+
+  it("knows the AIs the engine knows", () => {
+    expect([aiName("claude"), aiName("codex"), aiName("gemini")]).toEqual(["Claude", "Codex", undefined]);
+    expect(providerLabel("mock")).toBe("Test AI");
+    expect(limitedLine("weekly", "Wed 09:00")).toBe("Waiting for the weekly limit to reset. Work resumes Wed 09:00.");
+  });
 });
 
 describe("T-VOC allowance words", () => {
@@ -214,6 +302,11 @@ describe("T-VOC allowance words", () => {
   it("window labels carry no model names", () => {
     expect(windowLabel("seven_day_claude-opus-5-5")).toBe("This week, one kind of model");
     expect(windowLabel("seven_day_claude-opus-5-5")).not.toMatch(/opus/);
+  });
+
+  it("the file time follows the one time rule", () => {
+    expect(fileChangedLine("01:38")).toBe("Usage figures last changed at 01:38");
+    expect(fileChangedLine("Wed 01:38")).toBe("Usage figures last changed at Wed 01:38");
   });
 
   it("the block lines", () => {
@@ -272,6 +365,17 @@ describe("T-VOC timeline words", () => {
     for (const text of [TL.missionStart("T"), TL.featureStuck("F"), TL.diagnosed("F"), TL.testsWritten("F", 3), TL.reinforcements("F", 2, 5), TL.checkTimedOut(null)]) {
       expect(text).not.toContain('"');
     }
+  });
+
+  // The step is the one the failed attempt used (its recorded rung plus one). The next step is not stated, because the
+  // engine can jump to the diagnosis step after a repeated failure (src/dispatcher.ts nextRung) (m7).
+  it("the reinforcements sentence states the step that failed, never a guess about the next one", () => {
+    expect(TL.reinforcements("F", 1, 5)).toBe("“F” did not pass its checks (step 1 of 5). Calling in reinforcements.");
+    expect(TL.reinforcements("F", 4, 5)).toBe("“F” did not pass its checks (step 4 of 5). Calling in reinforcements.");
+    expect(TL.reinforcements("F", 5, 5)).toBe("“F” did not pass its checks (step 5 of 5). All steps are used.");
+    expect(TL.reinforcements("F", 9, 5)).toBe("“F” did not pass its checks (step 5 of 5). All steps are used.");
+    expect(TL.reinforcements("F", null, 5)).toBe("“F” did not pass its checks. Calling in reinforcements.");
+    expect(TL.reinforcements("F", 2, null)).toBe("“F” did not pass its checks. Calling in reinforcements.");
   });
 
   it("the plan sentence has the plural right", () => {

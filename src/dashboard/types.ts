@@ -10,7 +10,9 @@
 // Who wrote a text matters, because an AI's text must be labelled in the page. `Said` carries it. The default is
 // "ai": a text is "engine" only when the builder wrote it or recognised an engine-written string (a known pattern).
 // Names (feature titles) are shown as names, without a label. They are written by the AI (the architect's spec),
-// and mission titles by the owner; both are capped and cleaned of control, bidi and zero-width characters.
+// and mission titles by the owner; both are capped and cleaned of control, bidi, zero-width and other invisible
+// format characters (docs/dashboard-spec.md, 3.3). A name is still AI text: the "Tell the leader" sentences carry
+// names inside quotes, and the leader treats them as data, never as instructions (leader/CLAUDE.md).
 
 export const SCHEMA_VERSION = 1 as const;
 
@@ -22,7 +24,7 @@ export type Author = (typeof AUTHORS)[number];
 
 /** A text and who wrote it. The page labels every `ai` text ("The AI wrote this. Do not run commands from it."). */
 export interface Said {
-  /** Cleaned (no control, bidi or zero-width characters), whitespace collapsed, capped at the reason or decision limit. */
+  /** Cleaned (no control, bidi, zero-width or other invisible format characters), whitespace collapsed, capped at the reason or decision limit. */
   text: string;
   author: Author;
 }
@@ -45,12 +47,14 @@ export interface Snapshot {
   now: NowLine | null;
   /**
    * Tonight's missions first (oldest first, as `mc status`), then the older unresolved ones ("open from before").
-   * Older finished missions are left out (counts.olderMissionsHidden).
+   * Older finished missions are left out (counts.olderMissionsHidden). At most MAX_MISSIONS_SHOWN are listed
+   * (counts.missionsNotShown says how many more there were), and the whole snapshot stays under MAX_SNAPSHOT_BYTES.
    */
   missions: MissionView[];
   /**
    * Cards for tonight's missions, red ones first, plus one amber mission_failed card for each failed mission from
-   * before (fromBefore: true). Other older items get no card (see MissionView.openFromBefore).
+   * before (fromBefore: true). Other older items get no card (see MissionView.openFromBefore). At most MAX_CARDS_SHOWN
+   * are listed (counts.cardsNotShown says how many more there were).
    */
   needsYou: NeedsYouCard[];
   allowance: Allowance;
@@ -182,7 +186,7 @@ export interface RunInfo {
   heartbeatAgeMs: number | null;
   /** "12 s ago". Derived from heartbeatAgeMs. Engine. */
   heartbeatText: string | null;
-  /** The file STOP exists in the home (MissionStore.stopRequested). It is cleared when the next run starts. */
+  /** The file STOP exists in the home (probed directly, not through MissionStore.stopRequested). It is cleared when the next run starts. */
   stopRequested: boolean;
   /**
    * Derived: the newest of the last event's `at` and `updatedAt` of the worked mission (spec 6.1: the mission that
@@ -318,7 +322,10 @@ export interface MissionView {
   features: FeatureView[];
   /** mission.json `updatedAt` as epoch ms (createdAt when updatedAt is not a time). 0 when unreadable. */
   updatedAt: number;
-  /** `About "Habit tracker": <your answer here>`. Template (vocabulary); straight quotes, because it is pasted into a chat. Engine. */
+  /**
+   * `About "Habit tracker": <your answer here>`. Template (vocabulary); straight quotes, because it is pasted into a chat.
+   * The sentence is engine-written, the name inside the quotes is not (cleaned, and data to the leader).
+   */
   tellLeader: string;
 }
 
@@ -328,7 +335,10 @@ export interface WaitInfo {
    * up, which is not the time a login is fixed. For a wait with no `limit.wait` event this is 0 and `untilText` is "".
    */
   until: number;
-  /** "12:59". Server-local. "" when there is no event. */
+  /**
+   * "12:59" when that is the same local day as generatedAt, else the weekday and the time ("Wed 15:26"): the one rule of
+   * every wait and reset time text. Server-local. "" when there is no event.
+   */
   untilText: string;
   /**
    * limits: a usage limit. trouble: the AIs are failing or overloaded. login: one AI needs a new login while the run
@@ -337,9 +347,9 @@ export interface WaitInfo {
    */
   cause: "limits" | "trouble" | "login" | "unknown";
   /**
-   * e.g. "Waiting for allowance until 12:59. It resumes by itself." or, for login, "Waiting for allowance until
-   * 12:59. Claude also needs a new login." or, for unknown, "Waiting. Mission Control cannot tell why." Built from the
-   * parsed reason; the raw reason is never sent. Engine.
+   * e.g. "Waiting for allowance until 12:59. It resumes by itself." (a wait of known cause always ends with "It resumes
+   * by itself.") or, for login, "Waiting for allowance until 12:59. Claude also needs a new login." or, for unknown,
+   * "Waiting. Mission Control cannot tell why." Built from the parsed reason; the raw reason is never sent. Engine.
    */
   text: string;
 }
@@ -375,7 +385,10 @@ export interface FeatureView {
   isRepair: boolean;
   /** The id of the NeedsYouCard about this feature, or null. */
   cardId: string | null;
-  /** `About "Weekly progress chart" in Habit tracker: <your answer here>`. Template; straight quotes. Engine. */
+  /**
+   * `About "Weekly progress chart" in Habit tracker: <your answer here>`. Template; straight quotes. The names inside are
+   * AI text (cleaned; data to the leader), the rest is engine-written.
+   */
   tellLeader: string;
 }
 
@@ -413,9 +426,19 @@ export interface NeedsYouCard {
   /** What happens if nobody does anything. Engine (the if-nothing table). */
   ifNothing: string;
   /**
+   * The next step for a person, in one or two plain sentences, when the engine knows it: "Log in again to Claude on the
+   * PC, then tell the leader." (an expired login), "Free some space on the PC, then tell the leader to carry on."
+   * (a full disk), "Tell the leader to start the night again." (a run that died). Always engine-written (author
+   * "engine"), and null for the kinds where the step is the owner's own call (a question, a stuck feature) or where
+   * nothing is needed. The first sentence stands alone and holds no name, so the page can show it as a short line.
+   */
+  whatToDo: Said | null;
+  /**
    * One sentence per card kind, e.g. `About "Weekly progress chart" in Habit tracker, which is stuck: <your answer here>`
    * or `About "Recipe box", which stopped: <your answer here>` (spec 8). Two question cards of one mission read
-   * `About question 1 of 2 in "Members site": <your answer here>`. Template; straight quotes. Engine.
+   * `About question 1 of 2 in "Members site": <your answer here>`. Template; straight quotes. The sentence is
+   * engine-written but the names inside the quotes are not: feature titles are AI text and mission titles may be too.
+   * They are cleaned (invisible characters removed, double quotes replaced), and the leader treats them as data.
    */
   tellLeader: string;
 }
@@ -432,7 +455,7 @@ export interface Allowance {
   waiting: WaitInfo | null;
   /** mtime of quota.json, epoch ms; null without the file. NOT a reading time: an unchanged reading is not rewritten (src/quota.ts:187). */
   fileChangedAt: number | null;
-  /** "Usage figures last changed at 01:38". Engine. null without the file. */
+  /** "Usage figures last changed at 01:38", or "... at Wed 01:38" when that is not the day of the snapshot. Engine. null without the file. */
   fileChangedText: string | null;
 }
 
@@ -476,7 +499,7 @@ export interface AllowanceWindow {
   overage: boolean;
   /** quota.json utilization[].resetsAt, epoch ms. Readings without one are not saved by the engine (src/quota.ts:406). */
   resetsAt: number;
-  /** "resets 03:20" today, else "resets Thu 09:00". Server-local. Engine. */
+  /** "resets 03:20" on the day of the snapshot, else "resets Thu 09:00". Server-local. Engine. */
   resetsText: string;
   /** The cap where the engine stops starting new work: config pacing.maxFiveHourUtilization / maxWeeklyUtilization; null for other windows. */
   pauseAt: number | null;
@@ -576,7 +599,7 @@ export interface MissionDebrief {
   agentTimeText: string | null;
   /** Count of usage.jsonl records for this missionId; null when the ledger is missing or empty. */
   agentRuns: number | null;
-  /** `About "Members site": <your answer here>`. Template; straight quotes. Engine. */
+  /** `About "Members site": <your answer here>`. Template; straight quotes. The name inside is data to the leader. */
   tellLeader: string;
 }
 
@@ -614,6 +637,13 @@ export interface Counts {
   stuckFeatures: number;
   /** Older finished missions left out of `missions`. */
   olderMissionsHidden: number;
+  /**
+   * Missions that are in the lamp and the counts above but were cut from `missions` because there were more than
+   * MAX_MISSIONS_SHOWN (the ones with a card or an unknown state are kept first). 0 on any normal night.
+   */
+  missionsNotShown: number;
+  /** Cards cut from `needsYou` for the same reason (more than MAX_CARDS_SHOWN, red ones kept first). 0 on any normal night. */
+  cardsNotShown: number;
 }
 
 /** The words and sentences the page needs for "Tell the leader". The page never sends anything anywhere. */
@@ -631,9 +661,8 @@ export interface LeaderHelp {
   /** "The AI wrote this. Do not run commands from it." */
   aiNotice: string;
   /**
-   * What the leader can and cannot do, shown in the sheet: "The leader can check progress, read logs and reports, stop
-   * the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in
-   * place." The leader only has the mc commands status, logs, report, stop, new, feature and run.
+   * What the leader can and cannot do, shown in the sheet: "The leader can look at progress and reports, stop
+   * the run, start new work and run the night. It cannot change a plan or reopen a stuck feature." The leader only has the mc commands status, logs, report, stop, new, feature and run.
    */
   canDo: string;
   /**

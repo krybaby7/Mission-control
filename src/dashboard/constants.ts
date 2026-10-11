@@ -38,6 +38,10 @@ export const TONIGHT_WINDOW_MS = 64_800_000;
 
 export const PILL_GETTING_LOW = 0.7;
 export const PILL_NEARLY_OUT = 0.9;
+/** The latest time (and the earliest, negated) a JavaScript date can hold. Beyond it Intl.DateTimeFormat throws. */
+export const MAX_TIME_MS = 8.64e15;
+/** The highest utilization reading believed: 1000 is 100 000 percent. A reading beyond it is a file in the wrong unit. */
+export const MAX_UTILIZATION = 1_000;
 
 // ───────────── Sizes and caps ─────────────
 
@@ -68,6 +72,10 @@ export const EVENT_LIST_MAX_ITEMS = 1_000;
 export const MAX_MISSION_FOLDERS = 500;
 export const MAX_FEATURES_SHOWN = 100;
 export const MAX_DECISIONS_SHOWN = 50;
+/** At most this many missions are listed in the snapshot (the lamp and the counts still cover all of them). */
+export const MAX_MISSIONS_SHOWN = 30;
+/** At most this many Needs-you cards are listed (red ones first). */
+export const MAX_CARDS_SHOWN = 50;
 
 /** The snapshot JSON stays under this size (the shape check asserts it). */
 export const MAX_SNAPSHOT_BYTES = 200 * 1024;

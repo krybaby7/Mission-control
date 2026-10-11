@@ -61,6 +61,13 @@ describe("the thresholds of spec 5.1", () => {
     const MiB = 1024 * 1024;
     expect([c.MAX_MISSION_BYTES, c.MAX_DISPATCH_BYTES, c.MAX_EVENTS_BYTES, c.EVENTS_TAIL_BYTES, c.MAX_QUOTA_BYTES, c.MAX_USAGE_BYTES]).toEqual([8 * MiB, 4 * MiB, 8 * MiB, 2 * MiB, 1 * MiB, 32 * MiB]);
     expect([c.MAX_MISSION_FOLDERS, c.MAX_FEATURES_SHOWN, c.MAX_DECISIONS_SHOWN]).toEqual([500, 100, 50]);
+    expect([c.MAX_MISSIONS_SHOWN, c.MAX_CARDS_SHOWN]).toEqual([30, 50]);
+    expect([c.MAX_TIME_MS, c.MAX_UTILIZATION]).toEqual([8.64e15, 1000]);
+  });
+
+  it("the largest time is the largest a JavaScript date holds", () => {
+    expect(Number.isNaN(new Date(c.MAX_TIME_MS).getTime())).toBe(false);
+    expect(Number.isNaN(new Date(c.MAX_TIME_MS + 1).getTime())).toBe(true);
   });
 
   it("follow the engine's own numbers", () => {

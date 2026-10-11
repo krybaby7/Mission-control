@@ -3,12 +3,14 @@
     "allow": [
       "Bash(../scripts/mc-docker.sh status:*)",
       "Bash(../scripts/mc-docker.sh logs:*)",
-      "Bash(../scripts/mc-docker.sh report:*)",
+      "Bash(../scripts/mc-docker.sh report:*)"
+    ],
+    "ask": [
       "Bash(../scripts/mc-docker.sh stop:*)",
       "Bash(../scripts/mc-docker.sh new:*)",
       "Bash(../scripts/mc-docker.sh feature:*)",
       "Bash(../scripts/mc-docker.sh run:*)"
     ],
-    "deny": ["Edit", "Write", "NotebookEdit", "Bash(git:*)"]
+    "deny": ["Edit", "Write", "NotebookEdit", "Bash(git:*)", "Bash(../scripts/mc-docker.sh logs *--follow*)"]
   }
 }

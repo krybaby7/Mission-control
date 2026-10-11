@@ -3,8 +3,15 @@
 // with textContent; this is the second line, not a substitute.
 import { ID_MAX_CHARS } from "./constants.js";
 
-/** C0 controls except tab and newline, DEL, C1 controls, bidi controls and zero-width characters. */
-const REMOVED = /[\u{0}-\u{8}\u{b}-\u{1f}\u{7f}-\u{9f}\u{61c}\u{200b}-\u{200f}\u{202a}-\u{202e}\u{2060}\u{2066}-\u{2069}\u{feff}]/gu;
+/**
+ * Characters that show nothing but can carry text: C0 controls except tab and newline, DEL, C1 controls, every format
+ * character (Unicode category Cf: bidi controls, zero-width characters, soft hyphen, invisible operators, interlinear
+ * marks, and the tag characters U+E0000-U+E007F that can spell hidden ASCII), and the blank fillers and selectors that
+ * category Cf leaves out: combining grapheme joiner, Hangul and Khmer fillers, Mongolian and general variation selectors.
+ * A title written by an AI ends up in the sentence the owner pastes to the leader, so hidden text must not survive.
+ */
+const REMOVED =
+  /[\u{0}-\u{8}\u{b}-\u{1f}\u{7f}-\u{9f}\u{34f}\u{115f}\u{1160}\u{17b4}\u{17b5}\u{180b}-\u{180f}\u{3164}\u{fe00}-\u{fe0f}\u{ffa0}\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}\p{Cf}]/gu;
 const LINE_SEPARATORS = /[\u{2028}\u{2029}]/gu;
 /** A half of a surrogate pair with no other half: it cannot be written as UTF-8, so it becomes the replacement character. */
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;

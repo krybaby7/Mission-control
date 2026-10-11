@@ -76,6 +76,58 @@ describe("T-LAMP-L2 and L3: the run is gone", () => {
   });
 });
 
+// M4: a run that dies during a long wait (a killed container, a PC that went to sleep) leaves the mission saved as
+// "waiting". The saved status must not make the lamp calm: it is amber for the first minute and red from then on, the
+// mission reads Paused, there is no wait banner, and the card says the run stopped.
+describe("T-LAMP-L2 and L3: the run is gone during a wait (M4)", () => {
+  function deadWait(ageMs: number): Snapshot {
+    const m = missionAt(MID, "2026-10-11-a", { title: "Members site", status: "waiting", stage: "gate_a", age: ageMs, features: [featureWith("f", "pending")] });
+    const until = MID + 3 * HOUR;
+    const events = [
+      makeEvent(m.id, MID - ageMs - 2 * MINUTE, "mission.start", { stage: "spec" }),
+      makeEvent(m.id, MID - ageMs, "limit.wait", { until: iso(until), reason: `gpt-6-astra: session limit until ${iso(until - 45_000)}` }),
+    ];
+    return snap(buildHome({ missions: [{ mission: m, events }] }, MID), MID);
+  }
+
+  it("is amber for 59 999 ms after the last save, with no card, a Paused mission and no banner", () => {
+    const s = deadWait(RUN_GONE_GRACE_MS - 1);
+    expect(codes(s)).toEqual(["run_gone_pending"]);
+    expect(s.lamp).toMatchObject({ state: "needs_look", sentence: "Checking whether the run is still going." });
+    expect(s.missions[0]).toMatchObject({ state: "paused", pausedWhy: "unexpected", waiting: null });
+    expect(s.allowance.waiting).toBeNull();
+    expect(s.now).toBeNull();
+    expect(s.needsYou).toEqual([]);
+  });
+
+  it("is red from 60 000 ms on, with the card that says the run stopped", () => {
+    const s = deadWait(RUN_GONE_GRACE_MS);
+    expect(codes(s)).toEqual(["run_gone"]);
+    expect(s.lamp).toMatchObject({ state: "needs_you_now", sentence: "The night's work stopped unexpectedly." });
+    expect(s.missions[0]).toMatchObject({ state: "paused", pausedWhy: "unexpected", waiting: null });
+    expect(s.allowance.waiting).toBeNull();
+    expect(s.needsYou.map((c) => c.kind)).toEqual(["run_stopped"]);
+  });
+
+  it("is never grey 'Idle' next to a mission that says Paused, however long the wait was", () => {
+    for (const age of [0, 30 * SECOND, RUN_GONE_GRACE_MS - 1, RUN_GONE_GRACE_MS, 10 * MINUTE, 5 * HOUR]) {
+      const s = deadWait(age);
+      expect(s.lamp.state, `${age} ms`).not.toBe("idle");
+      expect(s.lamp.state, `${age} ms`).not.toBe("on_track");
+      expect(s.missions[0]?.word).toBe("Paused");
+    }
+  });
+
+  it("is also gone when the lock stopped beating, not only when it is missing", () => {
+    const m = missionAt(MID, "2026-10-11-a", { status: "waiting", stage: "gate_a", age: 10 * MINUTE, features: [featureWith("f", "pending")] });
+    const events = [makeEvent(m.id, MID - 10 * MINUTE, "limit.wait", { until: iso(MID + 3 * HOUR), reason: `x: session limit until ${iso(MID + 3 * HOUR)}` })];
+    const s = snap(buildHome({ missions: [{ mission: m, events }], lock: { at: iso(MID - HOUR), ageMs: LOCK_STALE_MS } }, MID), MID);
+    expect(s.run).toMatchObject({ active: false, heartbeat: "stale" });
+    expect(codes(s)).toEqual(["run_gone"]);
+    expect(s.missions[0]).toMatchObject({ state: "paused", pausedWhy: "unexpected" });
+  });
+});
+
 describe("T-LAMP-L4 and L5: files that cannot be read", () => {
   it("L4: a home that cannot be read gives an amber lamp, not an error (E3)", () => {
     const home = emptyHome();
@@ -332,19 +384,83 @@ describe("T-LAMP-L16 and L17: waits", () => {
     expect(short.lamp.state).toBe("on_track");
     const long = waitOf(LONG_WAIT_MS + 1);
     expect(codes(long)).toEqual(["long_wait"]);
-    expect(long.lamp).toMatchObject({ state: "needs_look", sentence: "Waiting for allowance until 10:58." });
+    expect(long.lamp).toMatchObject({ state: "needs_look", sentence: "Waiting for allowance until 10:58. It resumes by itself." });
   });
 
   it("L17: the sentence for a trouble wait names the AI team", () => {
-    expect(waitOf(2 * HOUR, "trouble").lamp.sentence).toBe("Waiting for the AI team until 11:58.");
+    expect(waitOf(2 * HOUR, "trouble").lamp.sentence).toBe("Waiting for the AI team until 11:58. It resumes by itself.");
   });
 
-  it("L17: a live run asleep for three hours reads 'Waiting for allowance until 12:59.' (spec 5.4)", () => {
+  it("L17: a live run asleep for three hours reads 'Waiting for allowance until 12:59. It resumes by itself.' (spec 5.4)", () => {
     const home = copyHome("limit-waiting");
     live(home, LOCK_AT);
     const s = snap(home, MID);
-    expect(s.lamp.sentence).toBe("Waiting for allowance until 12:59.");
+    expect(s.lamp.sentence).toBe("Waiting for allowance until 12:59. It resumes by itself.");
     expect(s.allowance.waiting?.untilText).toBe("12:59");
+  });
+
+  // M3: a wait can last days. Every place that words it must say the weekday, and all of them the same moment.
+  it("L17: a wait three days long says the weekday everywhere, and every text names the same moment (M3)", () => {
+    const until = MID + 3 * 24 * HOUR + HOUR; // Wed 14 Oct 10:58:30
+    const m = missionAt(MID, "2026-10-11-a", { status: "waiting", stage: "features", features: [featureWith("a", "done"), featureWith("b", "building")] });
+    const reasonText = `claude-opus-5-5: weekly limit until ${iso(until - 45_000)}; gpt-6-astra: weekly limit until ${iso(until - 45_000)}`;
+    const quota = {
+      version: 1,
+      limits: { claude: { kind: "weekly", until: until - 45_000, raw: "x" }, codex: { kind: "weekly", until: until - 45_000, raw: "x" } },
+      modelBlocks: [],
+      utilization: [],
+    };
+    const home = buildHome(
+      { missions: [{ mission: m, events: [makeEvent(m.id, MID - 5 * SECOND, "limit.wait", { until: iso(until), reason: reasonText })] }], lock: { at: iso(MID - 10 * MINUTE) }, quota, quotaMtimeMs: MID - 2 * 24 * HOUR },
+      MID,
+    );
+    const s = snap(home, MID);
+    const wait = "Waiting for allowance until Wed 10:58. It resumes by itself.";
+    expect(codes(s)).toEqual(["long_wait"]);
+    expect(s.lamp.sentence).toBe(wait);
+    expect(s.missions[0]?.sentence).toBe(wait);
+    expect(s.missions[0]?.waiting).toMatchObject({ untilText: "Wed 10:58", text: wait });
+    expect(s.now).toMatchObject({ kind: "waiting", text: wait });
+    expect(s.allowance.waiting).toMatchObject({ untilText: "Wed 10:58", text: wait });
+    expect(s.timeline.items.map((i) => i.text)).toContain(wait);
+    expect(s.missions[0]?.features.find((f) => f.id === "b")?.reason?.text).toBe("On hold until Wed 10:58, waiting for allowance.");
+    expect(s.lamp.reasons[0]?.text).toBe("waiting for allowance until Wed 10:58");
+    // The allowance rows name the same moment, and the file time says which day the figures changed.
+    expect(s.allowance.providers.map((p) => p.limitedText)).toEqual(["Waiting for the weekly limit to reset. Work resumes Wed 10:58.", "Waiting for the weekly limit to reset. Work resumes Wed 10:58."]);
+    expect(s.allowance.fileChangedText).toBe("Usage figures last changed at Fri 09:58");
+    expect(JSON.stringify(s)).not.toMatch(/until 10:58|at 10:58/);
+  });
+
+  it("L17: a long wait of known cause next to another problem keeps its clause, with no 'it' that could mean the other problem (M5)", () => {
+    const m = missionAt(MID, "2026-10-11-a", { status: "waiting", stage: "features", features: [featureWith("a", "blocked", { blockedReason: "x" }), featureWith("b", "building")] });
+    const until = MID + 3 * HOUR;
+    const home = buildHome(
+      { missions: [{ mission: m, events: [makeEvent(m.id, MID - 5 * SECOND, "limit.wait", { until: iso(until), reason: `gpt-6.1-sol: session limit until ${iso(until - 45_000)}` })] }], lock: { at: iso(MID - 10 * MINUTE) } },
+      MID,
+    );
+    const s = snap(home, MID);
+    expect(codes(s)).toEqual(["feature_stuck", "long_wait"]);
+    expect(s.lamp.sentence).toBe("1 feature is stuck and waiting for allowance until 12:58.");
+  });
+
+  it("L17: with two long waits the clause names the first mission's (M32)", () => {
+    const wait = (id: string, createdAgo: number, hours: number) => {
+      const m = missionAt(MID, id, { status: "waiting", createdAt: iso(MID - createdAgo), features: [featureWith("a", "building")] });
+      const until = MID + hours * HOUR;
+      return { mission: m, events: [makeEvent(m.id, MID - 5 * SECOND, "limit.wait", { until: iso(until), reason: `gpt-6.1-sol: session limit until ${iso(until - 45_000)}` })] };
+    };
+    const home = buildHome({ missions: [wait("2026-10-11-a", 9 * HOUR, 2), wait("2026-10-11-b", 8 * HOUR, 5)], lock: { at: iso(MID - 10 * MINUTE) } }, MID);
+    const s = snap(home, MID);
+    expect(reason(s, "long_wait")).toMatchObject({ text: "waiting for allowance until 11:58", missionId: "2026-10-11-a" });
+  });
+
+  it("L17: only a wait of known cause resumes by itself: an unknown or login wait never says so (M5)", () => {
+    const login = copyHome("login-wait");
+    live(login, LOCK_AT);
+    expect(snap(login, MID).lamp.sentence).not.toContain("resumes by itself");
+    const unknown = copyHome("unknown-wait");
+    live(unknown, LOCK_AT);
+    expect(snap(unknown, MID).lamp.sentence).not.toContain("resumes by itself");
   });
 });
 
@@ -433,7 +549,7 @@ describe("T-LAMP-L21: a short wait", () => {
     const home = copyHome("trouble-wait");
     live(home, LOCK_AT);
     const s = snap(home, MID);
-    expect(s.lamp).toMatchObject({ state: "on_track", sentence: "1 of 3 features done. No problems so far. Waiting for the AI team to respond until 10:13. Nothing needs you." });
+    expect(s.lamp).toMatchObject({ state: "on_track", sentence: "1 of 3 features done. No problems so far. Waiting for the AI team to respond until 10:13. It resumes by itself. Nothing needs you." });
     expect(codes(s)).toEqual(["short_wait", "working"]);
     expect(reason(s, "short_wait")).toMatchObject({ severity: "info", text: "waiting for the AI team until 10:13" });
   });
@@ -441,7 +557,7 @@ describe("T-LAMP-L21: a short wait", () => {
   it("says 'allowance' for a usage limit", () => {
     const m = missionAt(MID, "2026-10-11-a", { status: "waiting", features: [featureWith("a", "done"), featureWith("b", "building")] });
     const home = buildHome({ missions: [{ mission: m, events: [makeEvent(m.id, MID - 5000, "limit.wait", { until: iso(MID + 30 * MINUTE), reason: `x: session limit until ${iso(MID + 29 * MINUTE)}` })] }], lock: { at: iso(MID - 10 * MINUTE) } }, MID);
-    expect(snap(home, MID).lamp.sentence).toBe("1 of 2 features done. No problems so far. Waiting for allowance until 10:28. Nothing needs you.");
+    expect(snap(home, MID).lamp.sentence).toBe("1 of 2 features done. No problems so far. Waiting for allowance until 10:28. It resumes by itself. Nothing needs you.");
   });
 });
 
@@ -556,7 +672,7 @@ describe("T-LAMP-ORDER: the worst wins and the sentence is composed", () => {
     expect(snap(copyHome("failed-auth"), FIN).lamp.sentence).toBe("“Recipe box” needs your help.");
     const wait = copyHome("limit-waiting");
     live(wait, LOCK_AT);
-    expect(snap(wait, MID).lamp.sentence).toBe("Waiting for allowance until 12:59.");
+    expect(snap(wait, MID).lamp.sentence).toBe("Waiting for allowance until 12:59. It resumes by itself.");
   });
 
   it("three clauses: the first two, then 'N more things need a look'", () => {

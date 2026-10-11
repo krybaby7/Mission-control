@@ -15,7 +15,6 @@ import {
   providerLabel,
   resetsLine,
   resumeWhen,
-  whenText,
   windowLabel,
   windowSummary,
 } from "./vocabulary-night.js";
@@ -23,6 +22,11 @@ import type { Formatter } from "./vocabulary.js";
 
 /** The windows the engine paces against (src/quota.ts): it stops new work on a provider at their cap. */
 const PACED_KINDS: Record<string, "session" | "weekly"> = { five_hour: "session", seven_day: "weekly" };
+
+/** The block kind of a window id; own entries only, because the id came from a file ("constructor" is not a window). */
+function pacedKind(id: string): "session" | "weekly" | undefined {
+  return Object.hasOwn(PACED_KINDS, id) ? PACED_KINDS[id] : undefined;
+}
 
 interface Block {
   end: number;
@@ -55,18 +59,16 @@ export function buildAllowance(
   f: Formatter,
 ): Allowance {
   const ids = providerIds(q, s);
-  const today = f.day(now);
-  const sameDay = (ms: number): boolean => f.day(ms) === today;
-  const weekday = (ms: number): string => f.day(ms).split(" ")[0] ?? "";
-  const clock = (ms: number): string => f.time(ms);
+  // One rule for every time here: the clock time on the day of the snapshot, else the weekday and the time.
+  const when = (ms: number): string => f.when(ms, now);
 
   const providers = ids.map((id): ProviderAllowance => {
-    const windows = readWindows(q, id, now, s, sameDay, weekday, clock);
+    const windows = readWindows(q, id, now, s, when);
     const blocks = blocksFor(q, id, windows, now);
     const last = blocks.reduce<Block | null>((best, b) => (best === null || b.end > best.end || (b.end === best.end && b.fromLimit && !best.fromLimit) ? b : best), null);
     const limitedUntil = last === null ? null : last.end;
     const resume = last === null ? 0 : last.end + WAIT_MARGIN_MS;
-    const limitedText = last === null ? null : limitedLine(last.kind, resumeWhen(sameDay(resume), weekday(resume), clock(resume)));
+    const limitedText = last === null ? null : limitedLine(last.kind, resumeWhen(f.sameDay(resume, now), f.weekday(resume), f.time(resume)));
 
     const highest = windows.reduce((m, w) => Math.max(m, w.usedFraction), 0);
     let state: PillStateId = "plenty";
@@ -75,7 +77,7 @@ export function buildAllowance(
     else if (highest >= PILL_NEARLY_OUT) state = "nearly_out";
     else if (highest >= PILL_GETTING_LOW) state = "getting_low";
 
-    return { id, label: providerLabel(id), pill: { state, word: PILL_WORDS[state] }, windows, note: noteFor(q, id, windows, now, clock), limitedUntil, limitedText };
+    return { id, label: providerLabel(id), pill: { state, word: PILL_WORDS[state] }, windows, note: noteFor(q, id, windows, now, when), limitedUntil, limitedText };
   });
 
   const hasFile = q !== null && quotaMtimeMs !== null;
@@ -84,7 +86,7 @@ export function buildAllowance(
     // Copied field by field: the caller's object may carry more than the snapshot is allowed to show.
     waiting: wait === null ? null : { until: wait.until, untilText: wait.untilText, cause: wait.cause, text: wait.text },
     fileChangedAt: hasFile ? quotaMtimeMs : null,
-    fileChangedText: hasFile ? fileChangedLine(clock(quotaMtimeMs)) : null,
+    fileChangedText: hasFile ? fileChangedLine(when(quotaMtimeMs)) : null,
   };
 }
 
@@ -111,9 +113,7 @@ function readWindows(
   provider: string,
   now: number,
   s: DashboardSettings,
-  sameDay: (ms: number) => boolean,
-  weekday: (ms: number) => string,
-  clock: (ms: number) => string,
+  when: (ms: number) => string,
 ): AllowanceWindow[] {
   if (q === null) return [];
   const byWindow = new Map<string, AllowanceWindow>();
@@ -122,7 +122,7 @@ function readWindows(
     if (typeof u.window !== "string" || u.window === "" || !finite(u.utilization) || u.utilization < 0 || !finite(u.resetsAt) || u.resetsAt <= now) continue;
     const id = clean(u.window, ID_MAX_CHARS);
     const usedPercent = Math.round(u.utilization * 100);
-    const resetsText = resetsLine(whenText(sameDay(u.resetsAt), weekday(u.resetsAt), clock(u.resetsAt)));
+    const resetsText = resetsLine(when(u.resetsAt));
     byWindow.set(id, {
       id,
       label: windowLabel(id),
@@ -153,13 +153,13 @@ function blocksFor(q: QuotaData | null, provider: string, windows: AllowanceWind
     }
   }
   for (const w of windows) {
-    const kind = PACED_KINDS[w.id];
+    const kind = pacedKind(w.id);
     if (kind !== undefined && w.pauseAt !== null && w.usedFraction >= w.pauseAt) blocks.push({ end: w.resetsAt, kind, fromLimit: false });
   }
   return blocks;
 }
 
-function noteFor(q: QuotaData | null, provider: string, windows: AllowanceWindow[], now: number, clock: (ms: number) => string): string | null {
+function noteFor(q: QuotaData | null, provider: string, windows: AllowanceWindow[], now: number, when: (ms: number) => string): string | null {
   let note: string | null = null;
   if (windows.length === 0) note = NOTE_NO_READING;
   else if (!windows.some((w) => w.id === "five_hour")) note = NOTE_NO_FIVE_HOUR;
@@ -168,7 +168,7 @@ function noteFor(q: QuotaData | null, provider: string, windows: AllowanceWindow
       .filter((b) => typeof b.provider === "string" && clean(b.provider, ID_MAX_CHARS) === provider && finite(b.until) && b.until > now)
       .map((b) => b.until);
     if (ends.length > 0) {
-      const sentence = noteModelLimited(clock(Math.max(...ends)));
+      const sentence = noteModelLimited(when(Math.max(...ends)));
       note = note === null ? sentence : `${note} ${sentence}`;
     }
   }

@@ -6,16 +6,29 @@ import { parseUntil } from "../run.js";
 import type { Config } from "../types.js";
 import { buildAllowance } from "./allowance.js";
 import { attachCardIds, buildCards } from "./cards.js";
-import { LOCK_FRESH_MS, LOCK_STALE_MS, PAGE_NOT_RESPONDING_AFTER_MS, PAGE_STALE_AFTER_MS, POLL_INTERVAL_MS } from "./constants.js";
+import {
+  LOCK_FRESH_MS,
+  LOCK_STALE_MS,
+  MAX_CARDS_SHOWN,
+  MAX_FEATURES_SHOWN,
+  MAX_MISSIONS_SHOWN,
+  MAX_SNAPSHOT_BYTES,
+  PAGE_NOT_RESPONDING_AFTER_MS,
+  PAGE_STALE_AFTER_MS,
+  POLL_INTERVAL_MS,
+  TIMELINE_MAX_ITEMS,
+} from "./constants.js";
 import { buildDebrief } from "./debrief.js";
 import { buildLamp } from "./lamp.js";
-import { buildMissions, buildNow, type MissionFacts, missionActivityAt, scopeMissions, workedMission } from "./missions.js";
+import { buildMissions, buildNow, type MissionFacts, missionActivityAt, pickFeatureViews, scopeMissions, workedMission } from "./missions.js";
 import { type HomeData, jobLogMtime, readDetails, readHome } from "./read.js";
 import { buildTimeline } from "./timeline.js";
 import {
   type Counts,
+  type Debrief,
   type Deadline,
   type HeartbeatId,
+  type NeedsYouCard,
   type RunInfo,
   SCHEMA_VERSION,
   type Snapshot,
@@ -58,6 +71,8 @@ export interface SnapshotOptions {
   timeZone?: string;
   /** Called with the error when the build failed and a degraded snapshot was returned instead (for a log line). */
   onError?: (err: unknown) => void;
+  /** The size the snapshot's JSON must fit, default MAX_SNAPSHOT_BYTES. A test passes less to reach the later, smaller tries. */
+  maxBytes?: number;
 }
 
 export function settingsFromConfig(c: Pick<Config, "ladders" | "pacing" | "families" | "light">): DashboardSettings {
@@ -132,14 +147,14 @@ function finishRun(run: RunInfo, facts: MissionFacts[], data: HomeData, opts: Sn
   if (run.active) {
     line = runLiveLine({ title: worked?.view.title ?? null, kindWord: worked?.view.kindWord ?? "", runningText: run.runningText, deadline });
   } else if (run.heartbeat === "stale" && data.lock !== null) {
-    line = runStoppedAnswering(f.time(data.lock.mtimeMs));
+    line = runStoppedAnswering(f.when(data.lock.mtimeMs, now));
   }
   return { ...run, lastActivityAt, lastActivityText, deadline, line, activityLine: lastActivityText === null ? null : activityLine(lastActivityText) };
 }
 
 // ───────────────────────────── Counts (spec 6.3, 12) ─────────────────────────────
 
-function countsOf(facts: MissionFacts[], cards: ReturnType<typeof buildCards>, data: HomeData, hidden: number): Counts {
+function countsOf(facts: MissionFacts[], cards: ReturnType<typeof buildCards>, data: HomeData, hidden: number, cut: { missions: number; cards: number }): Counts {
   const tonight = facts.filter((x) => x.view.scope === "tonight" && x.view.readable);
   const before = facts.filter((x) => x.view.scope === "before");
   const done = tonight.reduce((sum, x) => sum + x.view.featuresDone, 0);
@@ -158,6 +173,8 @@ function countsOf(facts: MissionFacts[], cards: ReturnType<typeof buildCards>, d
     questions: cards.filter((c) => c.kind === "decision" && !c.fromBefore).length,
     stuckFeatures: tonight.reduce((sum, x) => sum + x.view.features.filter((feature) => feature.state === "stuck").length, 0),
     olderMissionsHidden: hidden + (data.skippedFolders ?? 0),
+    missionsNotShown: cut.missions,
+    cardsNotShown: cut.cards,
   };
 }
 
@@ -185,7 +202,42 @@ function plainWait(wait: (WaitInfo & { loginAis?: string[] }) | null): WaitInfo 
   return wait === null ? null : { until: wait.until, untilText: wait.untilText, cause: wait.cause, text: wait.text };
 }
 
-function build(opts: SnapshotOptions, now: number, f: Formatter): Snapshot {
+/** Which missions are listed when there are more than `max`: the ones that need a look first, in their own order. */
+function pickShown(facts: MissionFacts[], cards: NeedsYouCard[], worked: MissionFacts | null, max: number): MissionFacts[] {
+  if (facts.length <= max) return facts;
+  const red = new Set(cards.filter((c) => c.severity === "now").map((c) => c.missionId));
+  const withCard = new Set(cards.map((c) => c.missionId));
+  const rank = (x: MissionFacts): number => {
+    const needsLook = x === worked || !x.view.readable || x.view.state === "needs_you" || x.view.state === "unknown" || red.has(x.view.id);
+    return needsLook ? 0 : withCard.has(x.view.id) ? 1 : 2;
+  };
+  return facts
+    .map((x, index) => ({ x, index, rank: rank(x) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .slice(0, max)
+    .sort((a, b) => a.index - b.index)
+    .map((c) => c.x);
+}
+
+/** The debrief with its three lists of features cut to `cap` each (the verdict, the ticks and the counts stay exact). */
+function shortenDebrief(debrief: Debrief | null, cap: number): Debrief | null {
+  if (debrief === null || debrief.missions.every((d) => d.got.length <= cap && d.leftOut.length <= cap && d.recovered.length <= cap)) return debrief;
+  return { ...debrief, missions: debrief.missions.map((d) => ({ ...d, got: d.got.slice(0, cap), leftOut: d.leftOut.slice(0, cap), recovered: d.recovered.slice(0, cap) })) };
+}
+
+/**
+ * How much of the lists a build keeps. The first try keeps everything the caps allow; a smaller try is made only to fit
+ * MAX_SNAPSHOT_BYTES. It only shortens what is listed: the lamp, the cards, the counts and the ticks are made from the
+ * whole home first, so a smaller try never turns a problem into a calm lamp.
+ */
+interface Keep {
+  features: number;
+  timeline: number;
+  missions: number;
+  cards: number;
+}
+
+function build(opts: SnapshotOptions, now: number, f: Formatter, keep: Keep): Snapshot {
   const settings = opts.settings ?? builtInSettings();
   const data = readHome(opts.home);
   const lockRun = runFromLock(data, now, f);
@@ -197,11 +249,15 @@ function build(opts: SnapshotOptions, now: number, f: Formatter): Snapshot {
     data.missions.filter((m) => scopes.get(m) !== "hidden").map((m) => m.folder),
   );
 
+  // The lamp, the counts and the debrief's open items look at everything; only the lists below are cut (and counted).
   const facts = buildMissions(data, lockRun, now, f, settings);
-  const cards = buildCards(facts, f);
-  attachCardIds(facts, cards);
+  const allCards = buildCards(facts, f);
   const run = finishRun(lockRun, facts, data, opts, now, f);
-  const counts = countsOf(facts, cards, data, hidden);
+  const shown = pickShown(facts, allCards, run.active ? workedMission(facts) : null, keep.missions);
+  const shownIds = new Set(shown.map((x) => x.view.id));
+  const cards = allCards.filter((c) => shownIds.has(c.missionId)).slice(0, keep.cards);
+  attachCardIds(shown, cards);
+  const counts = countsOf(facts, allCards, data, hidden, { missions: facts.length - shown.length, cards: allCards.length - cards.length });
   const banner = facts.find((x) => x.view.scope === "tonight" && x.view.state === "waiting" && x.wait !== null);
 
   return {
@@ -209,17 +265,39 @@ function build(opts: SnapshotOptions, now: number, f: Formatter): Snapshot {
     generatedAt: now,
     generatedAtText: f.clock(now),
     freshness: freshness(),
-    lamp: buildLamp({ now, home: data.home, run, missions: facts, cards, counts }),
+    lamp: buildLamp({ now, home: data.home, run, missions: facts, cards: allCards, counts }),
     run,
     now: buildNow(facts, run, f, now),
-    missions: facts.map((x) => x.view),
+    missions: shown.map((x) => (x.view.features.length <= keep.features ? x.view : { ...x.view, features: pickFeatureViews(x.view.features, keep.features) })),
     needsYou: cards,
     allowance: buildAllowance(data.quota, data.quotaMtimeMs, settings, plainWait(banner?.wait ?? null), now, f),
-    timeline: buildTimeline(facts, now, f),
-    debrief: buildDebrief(facts, cards, data.usage, f),
+    timeline: buildTimeline(shown, now, f, keep.timeline),
+    debrief: shortenDebrief(buildDebrief(shown, allCards, data.usage, f), keep.features),
     counts,
     leader: leaderHelp(),
   };
+}
+
+/**
+ * Each try keeps less than the one before. A normal night fits the first try; only a home with very many features,
+ * questions and missions needs a later one, and then the cuts are counted (featuresTotal, earlierNotShown,
+ * counts.missionsNotShown, counts.cardsNotShown) and what needs a look is kept first (pickFeatures, pickShown, the
+ * red cards). The last try holds one mission and one card, which is always small.
+ */
+const KEEP_TRIES: readonly Keep[] = [
+  { features: MAX_FEATURES_SHOWN, timeline: TIMELINE_MAX_ITEMS, missions: MAX_MISSIONS_SHOWN, cards: MAX_CARDS_SHOWN },
+  { features: 30, timeline: 20, missions: MAX_MISSIONS_SHOWN, cards: MAX_CARDS_SHOWN },
+  { features: 10, timeline: 8, missions: MAX_MISSIONS_SHOWN, cards: MAX_CARDS_SHOWN },
+  { features: 3, timeline: 3, missions: MAX_MISSIONS_SHOWN, cards: MAX_CARDS_SHOWN },
+  { features: 1, timeline: 0, missions: MAX_MISSIONS_SHOWN, cards: MAX_CARDS_SHOWN },
+  { features: 1, timeline: 0, missions: 15, cards: 25 },
+  { features: 0, timeline: 0, missions: 8, cards: 12 },
+  { features: 0, timeline: 0, missions: 3, cards: 5 },
+  { features: 0, timeline: 0, missions: 1, cards: 1 },
+];
+
+function sizeOf(s: Snapshot): number {
+  return Buffer.byteLength(JSON.stringify(s));
 }
 
 /** What the page can still show when the build itself failed: an amber lamp that says the files cannot be read. */
@@ -252,6 +330,8 @@ function degraded(now: number, f: Formatter): Snapshot {
     questions: 0,
     stuckFeatures: 0,
     olderMissionsHidden: 0,
+    missionsNotShown: 0,
+    cardsNotShown: 0,
   };
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -274,8 +354,14 @@ function degraded(now: number, f: Formatter): Snapshot {
 export function buildSnapshot(opts: SnapshotOptions): Snapshot {
   const now = opts.now !== undefined && Number.isFinite(opts.now) ? opts.now : Date.now();
   const f = safeFormatter(opts.timeZone);
+  const maxBytes = opts.maxBytes ?? MAX_SNAPSHOT_BYTES;
   try {
-    return build(opts, now, f);
+    let snapshot = build(opts, now, f, KEEP_TRIES[0] as Keep);
+    for (const keep of KEEP_TRIES.slice(1)) {
+      if (sizeOf(snapshot) <= maxBytes) break;
+      snapshot = build(opts, now, f, keep);
+    }
+    return snapshot;
   } catch (err) {
     opts.onError?.(err);
     return degraded(now, f);

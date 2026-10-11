@@ -240,7 +240,8 @@ const STAGE_STEPS: Record<string, StepStates> = {
 const ALL_TODO: StepStates = ["todo", "todo", "todo", "todo", "todo"];
 
 function progressOf(stage: string, state: MissionStateId): { progress: ProgressStep[]; progressWord: string } {
-  const steps = state === "not_started" ? ALL_TODO : (STAGE_STEPS[stage] ?? ALL_TODO);
+  // The stage came from a file: only the table's own entries count ("constructor" is not a stage).
+  const steps = state === "not_started" || !Object.hasOwn(STAGE_STEPS, stage) ? ALL_TODO : (STAGE_STEPS[stage] ?? ALL_TODO);
   const progress = PROGRESS_STEPS.map((id, i): ProgressStep => ({ id, word: PROGRESS_WORDS[id], state: steps[i] ?? "todo" }));
   const current = progress.find((p) => p.state === "current");
   const landed = progress.every((p) => p.state === "done");
@@ -313,6 +314,36 @@ interface Context {
   now: number;
   f: Formatter;
   settings: DashboardSettings;
+  /** How many features of one mission are built into its view (the rest are counted in featuresTotal). */
+  featureCap: number;
+}
+
+const KNOWN_FEATURE_STATUSES = new Set(["pending", "testing", "building", "reviewing", "done", "blocked", "skipped"]);
+
+/** The first `cap` of a list when it is longer, chosen by rank (lowest first, then the file order) and then put back in file order. */
+export function pickByRank<T>(list: T[], cap: number, rank: (item: T) => number): T[] {
+  if (list.length <= cap) return list;
+  return list
+    .map((item, index) => ({ item, index, rank: rank(item) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .slice(0, Math.max(0, cap))
+    .sort((a, b) => a.index - b.index)
+    .map((c) => c.item);
+}
+
+/**
+ * The features that are listed when a mission has more than `cap`: the ones that need a look come first (stuck, left out,
+ * unknown), then the ones in progress, then those waiting, then the done ones. The file order is kept inside the list.
+ */
+export function pickFeatures(features: Feature[], cap: number): Feature[] {
+  return pickByRank(features, cap, (f) =>
+    f.status === "blocked" || f.status === "skipped" || !KNOWN_FEATURE_STATUSES.has(f.status) ? 0 : IN_PROGRESS.has(f.status) ? 1 : f.status === "pending" ? 2 : 3,
+  );
+}
+
+/** The same choice for the views that are already built (the output is made smaller after the lamp and the cards looked at everything). */
+export function pickFeatureViews(views: FeatureView[], cap: number): FeatureView[] {
+  return pickByRank(views, cap, (v) => (v.state === "stuck" || v.state === "left_out" || v.state === "unknown" ? 0 : v.state === "done" ? 3 : v.state === "waiting_turn" ? 2 : 1));
 }
 
 function unreadableFacts(data: MissionData): MissionFacts {
@@ -377,7 +408,7 @@ function factsFor(data: MissionData, scope: Scope, cx: Context): MissionFacts {
     lastEventAt < startedAt;
 
   const { state, pausedWhy } = stateOf({ m, live: cx.live, savedBusy, asleep, staleBusy, events });
-  const wait = asleep ? waitInfoFromEvent(lastWait === null ? null : lastWait.data, cx.f.time) : null;
+  const wait = asleep ? waitInfoFromEvent(lastWait === null ? null : lastWait.data, (at) => cx.f.when(at, cx.now)) : null;
   const waitingNow = state === "waiting" ? wait : null;
 
   const n = m.features.length;
@@ -390,7 +421,7 @@ function factsFor(data: MissionData, scope: Scope, cx: Context): MissionFacts {
   const k = Math.min(n, firstInProgress === -1 ? finished + 1 : firstInProgress + 1);
 
   const { progress, progressWord } = progressOf(m.stage, state);
-  const features = m.features.slice(0, MAX_FEATURES_SHOWN).map((f) => featureView(f, featureState(f.status, state), { state, wait: waitingNow }, cx.settings));
+  const features = pickFeatures(m.features, cx.featureCap).map((f) => featureView(f, featureState(f.status, state), { state, wait: waitingNow }, cx.settings));
   const view: MissionView = {
     id: m.id,
     title: m.title,
@@ -433,8 +464,8 @@ function byCreation(a: MissionFacts, b: MissionFacts): number {
  * One MissionFacts per mission that is shown: tonight's first, then the ones open from before (hidden ones are left out).
  * The events and dispatch.json values of the shown missions must have been read (readDetails).
  */
-export function buildMissions(d: HomeData, run: RunFacts, now: number, f: Formatter, s: DashboardSettings): MissionFacts[] {
-  const cx: Context = { live: run.active, run, now, f, settings: s };
+export function buildMissions(d: HomeData, run: RunFacts, now: number, f: Formatter, s: DashboardSettings, featureCap = MAX_FEATURES_SHOWN): MissionFacts[] {
+  const cx: Context = { live: run.active, run, now, f, settings: s, featureCap };
   const scopes = scopeMissions(d, cx.live, now);
   const facts: MissionFacts[] = [];
   for (const entry of d.missions) {

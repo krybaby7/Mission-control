@@ -22,10 +22,13 @@ import {
   MAX_MISSION_BYTES,
   MAX_MISSION_FOLDERS,
   MAX_QUOTA_BYTES,
+  MAX_TIME_MS,
   MAX_USAGE_BYTES,
+  MAX_UTILIZATION,
   NOTE_MAX_CHARS,
   REASON_MAX_CHARS,
   TITLE_MAX_CHARS,
+  WAIT_MARGIN_MS,
 } from "./constants.js";
 import { clean, cleanId } from "./sanitize.js";
 
@@ -91,6 +94,11 @@ export interface DispatchPicks {
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isString = (v: unknown): v is string => typeof v === "string";
 const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+/**
+ * A time a date can show, with room for the engine's margin that the allowance adds to it. A number beyond it (a
+ * time in the wrong unit, a corrupt file) would make every time text throw, and one bad entry must not blind the page.
+ */
+const isTime = (v: unknown): v is number => isNumber(v) && Math.abs(v) <= MAX_TIME_MS - WAIT_MARGIN_MS;
 
 function code(err: unknown): string | undefined {
   return (err as NodeJS.ErrnoException).code;
@@ -234,19 +242,19 @@ function pickQuota(parsed: unknown): QuotaData | null {
   const out: QuotaData = { limits: [], modelBlocks: [], utilization: [] };
   if (isRecord(parsed.limits)) {
     for (const [provider, v] of Object.entries(parsed.limits)) {
-      if (isRecord(v) && isString(v.kind) && isNumber(v.until)) out.limits.push({ provider: cleanId(provider), kind: cleanId(v.kind), until: v.until });
+      if (isRecord(v) && isString(v.kind) && isTime(v.until)) out.limits.push({ provider: cleanId(provider), kind: cleanId(v.kind), until: v.until });
     }
   }
   if (Array.isArray(parsed.modelBlocks)) {
     for (const v of parsed.modelBlocks) {
-      if (isRecord(v) && isString(v.provider) && isString(v.model) && isNumber(v.until)) {
+      if (isRecord(v) && isString(v.provider) && isString(v.model) && isTime(v.until)) {
         out.modelBlocks.push({ provider: cleanId(v.provider), model: cleanId(v.model), until: v.until });
       }
     }
   }
   if (Array.isArray(parsed.utilization)) {
     for (const v of parsed.utilization) {
-      if (isRecord(v) && isString(v.provider) && isString(v.window) && isNumber(v.utilization) && isNumber(v.resetsAt)) {
+      if (isRecord(v) && isString(v.provider) && isString(v.window) && isNumber(v.utilization) && Math.abs(v.utilization) <= MAX_UTILIZATION && isTime(v.resetsAt)) {
         out.utilization.push({ provider: cleanId(v.provider), window: cleanId(v.window), utilization: v.utilization, resetsAt: v.resetsAt });
       }
     }

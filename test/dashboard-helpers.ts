@@ -7,7 +7,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { afterAll } from "vitest";
-import { MAX_SNAPSHOT_BYTES } from "../src/dashboard/constants.js";
+import { MAX_CARDS_SHOWN, MAX_MISSIONS_SHOWN, MAX_SNAPSHOT_BYTES } from "../src/dashboard/constants.js";
 import {
   CARD_KINDS,
   FEATURE_STATES,
@@ -201,7 +201,9 @@ export function writeMission(home: string, mission: Mission, extra: { events?: M
 type Errors = string[];
 type Check = (v: unknown, path: string, errs: Errors) => void;
 
-const CONTROL = /[\u{0}-\u{8}\u{b}-\u{1f}\u{7f}-\u{9f}\u{61c}\u{200b}-\u{200f}\u{2028}\u{2029}\u{202a}-\u{202e}\u{2060}\u{2066}-\u{2069}\u{feff}]/u;
+/** What a snapshot string must not hold: controls, line separators, every format character and the blank fillers and selectors (src/dashboard/sanitize.ts). */
+const CONTROL =
+  /[\u{0}-\u{8}\u{b}-\u{1f}\u{7f}-\u{9f}\u{2028}\u{2029}\u{34f}\u{115f}\u{1160}\u{17b4}\u{17b5}\u{180b}-\u{180f}\u{3164}\u{fe00}-\u{fe0f}\u{ffa0}\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}\p{Cf}]/u;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -311,6 +313,7 @@ const card = obj({
   happened: said,
   summary: nullable(text),
   ifNothing: text,
+  whatToDo: nullable(said),
   tellLeader: text,
 });
 const allowanceWindow = obj({
@@ -405,6 +408,8 @@ const snapshotShape = obj({
     questions: count,
     stuckFeatures: count,
     olderMissionsHidden: count,
+    missionsNotShown: count,
+    cardsNotShown: count,
   }),
   leader: obj({ quickPhrases: arr(text), globalSentence: text, stopSentence: text, pasteHint: text, copyFailHint: text, aiNotice: text, canDo: text, stopNote: text }),
 });
@@ -460,9 +465,19 @@ function crossErrors(s: Record<string, unknown>, errs: Errors): void {
     for (const f of features) if (f.cardId !== null && !cardIds.has(f.cardId)) errs.push(`feature ${String(f.id)}: cardId "${String(f.cardId)}" is not a card`);
     if (m.readable === true && typeof m.featuresTotal === "number" && m.featuresTotal < features.length) errs.push(`missions ${String(m.id)}: featuresTotal is below the features shown`);
   }
-  if (counts.unreadableMissions !== missions.filter((m) => m.readable === false).length) errs.push("counts.unreadableMissions does not match the missions");
-  if (counts.openFromBefore !== missions.filter((m) => m.scope === "before").length) errs.push("counts.openFromBefore does not match the missions");
-  if (counts.tonightMissions !== missions.filter((m) => m.scope === "tonight" && m.readable === true).length) errs.push("counts.tonightMissions does not match the missions");
+  // Counts cover every mission; the list is cut at MAX_MISSIONS_SHOWN and then the counts may be higher (never lower).
+  const cut = counts.missionsNotShown;
+  if (typeof cut !== "number" || cut < 0) errs.push("counts.missionsNotShown must be 0 or more");
+  const agrees = (name: string, shown: number): void => {
+    const total = counts[name];
+    const ok = cut === 0 ? total === shown : typeof total === "number" && typeof cut === "number" && total >= shown && total <= shown + cut;
+    if (!ok) errs.push(`counts.${name} (${String(total)}) does not match the missions (${shown} shown, ${String(cut)} not shown)`);
+  };
+  agrees("unreadableMissions", missions.filter((m) => m.readable === false).length);
+  agrees("openFromBefore", missions.filter((m) => m.scope === "before").length);
+  agrees("tonightMissions", missions.filter((m) => m.scope === "tonight" && m.readable === true).length);
+  if (missions.length > MAX_MISSIONS_SHOWN) errs.push(`missions: ${missions.length} listed, over the limit of ${MAX_MISSIONS_SHOWN}`);
+  if (cards.length > MAX_CARDS_SHOWN) errs.push(`needsYou: ${cards.length} cards, over the limit of ${MAX_CARDS_SHOWN}`);
   const debrief = isRecord(s.debrief) ? s.debrief : null;
   if (debrief !== null) {
     for (const d of (Array.isArray(debrief.missions) ? debrief.missions : []).filter(isRecord)) {

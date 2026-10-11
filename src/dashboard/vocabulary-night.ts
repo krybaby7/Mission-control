@@ -39,6 +39,19 @@ const PART = new RegExp(
 const PROVIDER_WORDS: Record<string, string> = { claude: "Claude", codex: "Codex" };
 
 /**
+ * A table entry for a key that came from a file. `table[key]` would also answer for "constructor", "toString" or
+ * "__proto__" (members of Object.prototype), so only the table's own entries count.
+ */
+function own<T>(table: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
+/** "Claude" or "Codex" for the provider ids the engine knows; undefined for any other word. */
+export function aiName(provider: string): string | undefined {
+  return own(PROVIDER_WORDS, provider);
+}
+
+/**
  * The cause of a wait, read from the shape of the `limit.wait` reason (src/executor.ts, waitReason). The engine does
  * not save a structured cause, so anything that does not match one of the three shapes is `unknown`.
  */
@@ -54,7 +67,7 @@ export function parseWaitReason(reason: string | null): ParsedWait {
     const groups = part.groups ?? {};
     if (groups.login !== undefined) {
       login = true;
-      const word = PROVIDER_WORDS[groups.login];
+      const word = aiName(groups.login);
       if (word !== undefined && !loginAis.includes(word)) loginAis.push(word);
     } else if (groups.trouble !== undefined || groups.kind === "throttle") {
       trouble = true;
@@ -72,26 +85,34 @@ function loginSentence(loginAis: string[]): string {
   return `${loginAis.join(" and ")} also ${loginAis.length === 1 ? "needs" : "need"} a new login.`;
 }
 
+export const RESUMES_BY_ITSELF = "It resumes by itself.";
+
+/** "Waiting for allowance until 12:59." / "Waiting for the AI team to respond until 12:59." The time is already worded by the one time rule. */
+export function waitLead(base: "limits" | "trouble", untilText: string): string {
+  return base === "trouble" ? `Waiting for the AI team to respond until ${untilText}.` : `Waiting for allowance until ${untilText}.`;
+}
+
 /** The text of a wait. `untilText` is "" when no wake-up time is known (then the cause is unknown). */
 export function waitText(parsed: ParsedWait, untilText: string): string {
   if (parsed.cause === "unknown" || untilText === "") {
     return untilText === "" ? "Waiting. Mission Control cannot tell why." : `Waiting until ${untilText}. Mission Control cannot tell why.`;
   }
-  const lead = parsed.base === "trouble" ? `Waiting for the AI team to respond until ${untilText}.` : `Waiting for allowance until ${untilText}.`;
+  const lead = waitLead(parsed.base, untilText);
   if (parsed.cause === "login") return `${lead} ${loginSentence(parsed.loginAis)}`;
-  return `${lead} It resumes by itself.`;
+  return `${lead} ${RESUMES_BY_ITSELF}`;
 }
 
 /**
  * The WaitInfo of one `limit.wait` event (data.until ISO, data.reason). Without a usable time the wait is `unknown`
  * with until 0, as for a wait with no event at all. The raw reason is read here and never leaves this function.
+ * `when` words the wake-up time by the one rule: "12:59" on the day of the snapshot, else "Wed 15:26" (a wait can last days).
  */
-export function waitInfoFromEvent(data: Record<string, unknown> | null, time: (ms: number) => string): WaitInfo & { loginAis: string[] } {
+export function waitInfoFromEvent(data: Record<string, unknown> | null, when: (ms: number) => string): WaitInfo & { loginAis: string[] } {
   const until = data !== null && typeof data.until === "string" ? Date.parse(data.until) : Number.NaN;
   if (!Number.isFinite(until)) return { until: 0, untilText: "", cause: "unknown", text: waitText({ cause: "unknown", loginAis: [], base: "limits" }, ""), loginAis: [] };
   const reason = data !== null && typeof data.reason === "string" ? data.reason : null;
   const parsed = parseWaitReason(reason);
-  const untilText = time(until);
+  const untilText = when(until);
   return { until, untilText, cause: parsed.cause, text: waitText(parsed, untilText), loginAis: parsed.loginAis };
 }
 
@@ -119,7 +140,7 @@ const PROVIDER_LABELS: Record<string, string> = { claude: "Claude", codex: "Code
 
 /** `cleanedId` is the provider key from quota.json after cleaning; an unknown provider is shown as its id. */
 export function providerLabel(cleanedId: string): string {
-  return PROVIDER_LABELS[cleanedId] ?? cleanedId;
+  return own(PROVIDER_LABELS, cleanedId) ?? cleanedId;
 }
 
 /** Window names are the runners' (no model names are ever shown). */
@@ -164,11 +185,12 @@ export function resumeWhen(sameDay: boolean, weekday: string, time: string): str
 
 export function limitedLine(kind: string, when: string): string {
   if (kind === "throttle") return `Waiting because the service is busy. Work resumes ${when}.`;
-  return `Waiting for ${BLOCK_WHAT[kind] ?? BLOCK_WHAT.unknown} to reset. Work resumes ${when}.`;
+  return `Waiting for ${own(BLOCK_WHAT, kind) ?? BLOCK_WHAT.unknown} to reset. Work resumes ${when}.`;
 }
 
-export function fileChangedLine(time: string): string {
-  return `Usage figures last changed at ${time}`;
+/** `when` is the file's time by the one rule: "01:38" on the day of the snapshot, else "Wed 01:38". */
+export function fileChangedLine(when: string): string {
+  return `Usage figures last changed at ${when}`;
 }
 
 // ───────────────────────────── Morning debrief (spec 11) ─────────────────────────────
@@ -348,8 +370,18 @@ export function explainFeatureReason(reason: string): Said {
   return { text: reason, author: "ai" };
 }
 
+/** The engine's failure when no AI can run because of logins (src/dispatcher.ts, end()): "No model could run: claude and codex need a new login." */
+const LOGIN_FAILURE = /^No model could run: (.+) needs? a new login\.$/;
+
+/** The AIs a login failure names ("Claude", "Codex"); empty when it names none the engine knows. Not a login failure: null. */
+export function loginFailureAis(reason: string): string[] | null {
+  const m = LOGIN_FAILURE.exec(reason);
+  if (m === null) return null;
+  const names = (m[1] ?? "").split(" and ").flatMap((p) => aiName(p.trim()) ?? []);
+  return [...new Set(names)].sort((a, b) => a.localeCompare(b));
+}
+
 const FAILURE_REASONS: { test: RegExp; shown: string }[] = [
-  { test: /^No model could run: .+ needs? a new login\.$/, shown: "A login has expired. Claude or Codex has to be logged in again on the PC." },
   { test: /^Unknown profile /, shown: "The mission asks for an AI setup that does not exist." },
   { test: /is not a git repository\.$/, shown: "The app's folder is not set up for version history." },
   { test: /is a shallow clone\.$/, shown: "The app's folder only has part of its version history." },
@@ -363,11 +395,25 @@ const FAILURE_REASONS: { test: RegExp; shown: string }[] = [
 
 /** `reason` is a mission's failure reason, already cleaned. */
 export function explainFailureReason(reason: string): Said {
+  const logins = loginFailureAis(reason);
+  if (logins !== null) {
+    const who = logins.length === 0 ? "Claude or Codex has" : `${logins.join(" and ")} ${logins.length === 1 ? "has" : "have"}`;
+    return { text: `A login has expired. ${who} to be logged in again on the PC.`, author: "engine" };
+  }
   const row = FAILURE_REASONS.find((r) => r.test.test(reason));
   return row === undefined ? { text: reason, author: "ai" } : { text: row.shown, author: "engine" };
 }
 
 export type StopKind = "deadline" | "stop_requested" | "disk" | "ai_failing" | "unknown";
+
+/**
+ * The engine records the reason "stop requested" for a stop file, a signal AND the stop time of `mc run --until`: the
+ * run's stop control aborts on all three and every check throws the same error first (src/run.ts, StopControl.poll).
+ * So the data cannot tell a request from the clock, and the words must not either.
+ */
+export const PAUSED_WHEN_TOLD_TO_STOP = "Paused because a stop was requested or the stop time came.";
+/** Only the wait that would end after the stop time writes the reason "deadline" (src/executor.ts, waitForCandidate). */
+export const PAUSED_NO_AI_BEFORE_STOP = "Paused: no AI would be free before the stop time.";
 
 /** Why a mission paused, from the reason of its `mission.stopped` event (case-insensitive; the first row that matches wins). */
 export function stopReasonKind(reason: unknown): StopKind {
@@ -392,9 +438,9 @@ export const TL = {
   missionStopped(kind: StopKind, t: string): { text: string; tone: Tone } {
     switch (kind) {
       case "deadline":
-        return { text: `Paused at the planned time. ${name(t)} continues on the next run.`, tone: "warn" };
+        return { text: `${PAUSED_NO_AI_BEFORE_STOP} ${name(t)} continues on the next run.`, tone: "warn" };
       case "stop_requested":
-        return { text: `Paused on request. ${name(t)} continues on the next run.`, tone: "warn" };
+        return { text: `${PAUSED_WHEN_TOLD_TO_STOP} ${name(t)} continues on the next run.`, tone: "warn" };
       case "disk":
         return { text: `Paused: the disk is almost full. ${name(t)} continues once there is space.`, tone: "bad" };
       case "ai_failing":
@@ -418,10 +464,15 @@ export const TL = {
   featureLeftOut: (f: string) => `${name(f)} was left out because it needed a stuck feature.`,
   foundationReady: "The app's foundation is ready.",
   foundationRetry: "The first try at the app's foundation did not pass. Trying again.",
-  /** `step` and `of` are the next ladder step and the ladder's size; null when the feature is not known. */
+  /**
+   * `step` is the ladder step the failed attempt used (its recorded rung plus one: the attempt says so itself) and `of`
+   * the ladder's size; null when the attempt or the feature is not known. The next step is not stated: the engine can
+   * jump ahead to the diagnosis step after a repeated failure, so it cannot be told from this event.
+   */
   reinforcements(f: string, step: number | null, of: number | null): string {
-    const lead = `${name(f)} did not pass its checks. Calling in reinforcements`;
-    return step === null || of === null ? `${lead}.` : `${lead} (step ${Math.min(step, of)} of ${of}).`;
+    const lead = `${name(f)} did not pass its checks`;
+    if (step === null || of === null) return `${lead}. Calling in reinforcements.`;
+    return step >= of ? `${lead} (step ${of} of ${of}). All steps are used.` : `${lead} (step ${Math.max(1, step)} of ${of}). Calling in reinforcements.`;
   },
   diagnosed: (f: string) => `An expert AI looked at why ${name(f)} keeps failing.`,
   diagnosisFailed: (f: string) => `The expert diagnosis of ${name(f)} did not finish.`,

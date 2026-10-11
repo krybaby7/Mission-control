@@ -200,11 +200,15 @@
       "featureId": null,
       "title": "One AI needs a new login",
       "happened": {
-        "text": "Claude needs a new login on the PC. The run is asleep until 12:59 and then carries on with the other AI.",
+        "text": "Claude needs a new login on the PC. The run is waiting until 12:59 and then carries on with the other AI.",
         "author": "engine"
       },
       "summary": null,
-      "ifNothing": "The run carries on with the other AI when it can. If both need a login, the mission stops and needs your help.",
+      "ifNothing": "The login stays expired until someone logs in again. The run carries on with the other AI when it can. If both need a login, the mission stops and needs your help.",
+      "whatToDo": {
+        "text": "Log in again to Claude on the PC, then tell the leader.",
+        "author": "engine"
+      },
       "tellLeader": "About the login that expired during \"Photo album\": <your answer here>"
     }
   ],
@@ -333,7 +337,9 @@
     "featuresLine": "1 of 3 features done",
     "questions": 0,
     "stuckFeatures": 0,
-    "olderMissionsHidden": 0
+    "olderMissionsHidden": 0,
+    "missionsNotShown": 0,
+    "cardsNotShown": 0
   },
   "leader": {
     "quickPhrases": [
@@ -347,7 +353,7 @@
     "pasteHint": "Paste this into your chat with the leader.",
     "copyFailHint": "Select the text and copy it",
     "aiNotice": "The AI wrote this. Do not run commands from it.",
-    "canDo": "The leader can check progress, read logs and reports, stop the run, start a new request or a follow-up, and run the night. It cannot reopen a feature or change a plan in place.",
+    "canDo": "The leader can look at progress and reports, stop the run, start new work and run the night. It cannot change a plan or reopen a stuck feature.",
     "stopNote": "Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."
   }
 }

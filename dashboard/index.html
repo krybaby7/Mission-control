@@ -106,7 +106,8 @@ button { cursor: pointer; }
 }
 .panel { display: grid; gap: 18px; align-content: start; }
 .stack { display: grid; gap: 18px; align-content: start; }
-.gone .panel > :not(.lamp) { filter: grayscale(1); opacity: 0.62; }
+.stack:empty { display: none; }
+.gone .panel > :not(.lamp) { filter: grayscale(1); opacity: 0.95; }
 h2 { font-size: 24px; line-height: 1.2; font-weight: 800; }
 h3 { font-size: 20px; line-height: 1.25; font-weight: 750; }
 h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
@@ -145,8 +146,14 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
 .strip-item .ic { color: var(--t-fg); }
 .strip-item:hover { background: var(--surface-2); }
 .strip-item .go { margin-left: auto; color: var(--accent); }
+.strip-text { display: grid; gap: 1px; min-width: 0; }
+.strip-sub { font-size: 15px; font-weight: 400; line-height: 1.4; color: var(--ink-2); }
 .strip.calm { padding: 12px 16px; display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--ink-2); box-shadow: none; }
 .strip.calm .ic { color: var(--ok-solid); }
+.strip.calm.muted { border-color: var(--line); font-weight: 600; color: var(--muted); }
+.linkrow { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 8px 16px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); text-align: left; font-weight: 700; color: var(--ink); box-shadow: var(--shadow); }
+.linkrow .ic { color: var(--accent); }
+.linkrow .go { margin-left: auto; }
 
 /* features */
 .features { display: grid; gap: 14px; }
@@ -167,6 +174,9 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
 .step.done::before, .step.current::before { background: var(--ok-solid); }
 .step.current { color: var(--ink); font-weight: 800; }
 .step.current .dot { color: var(--accent); }
+.step.current.stopped .dot { color: var(--bad-solid); }
+.step.current.paused .dot { color: var(--warn-solid); }
+.step .here { font-size: 14px; font-weight: 700; color: var(--ink-2); }
 .tiles { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 620px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (min-width: 1000px) { .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
@@ -174,6 +184,15 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
 .tile.is-now { border-color: var(--accent); border-left-color: var(--accent); border-width: 2px 2px 2px 6px; }
 .tile-top { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
 .tile-title { overflow-wrap: anywhere; }
+.tile.compact { gap: 6px; }
+.firsttry { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.firsttry .ic { color: var(--ok-solid); }
+.donebox { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.donebox > summary { list-style: none; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 16px; font-weight: 700; cursor: pointer; color: var(--ink-2); }
+.donebox > summary::-webkit-details-marker { display: none; }
+.donebox > summary::before { content: ""; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); flex: none; }
+.donebox[open] > summary::before { transform: rotate(45deg); }
+.donebox .tiles { padding: 4px 12px 14px; }
 .reason { color: var(--ink-2); }
 .steps-line { display: grid; gap: 6px; }
 .steps-text { font-size: 14px; font-weight: 700; color: var(--ink-2); }
@@ -186,6 +205,9 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
 .ai-tag { display: inline-flex; align-items: flex-start; gap: 6px; font-size: 14px; font-weight: 600; color: var(--idle-fg); line-height: 1.35; }
 .ai-tag .ic { width: 1.15em; height: 1.15em; margin-top: 1px; }
 .ai-text { color: var(--ink); }
+.ai-label { display: flex; align-items: flex-start; gap: 6px; font-size: 14px; font-weight: 600; color: var(--idle-fg); line-height: 1.35; }
+.ai-label .ic { width: 1.15em; height: 1.15em; margin-top: 1px; }
+.quote { color: var(--ink); border-left: 3px solid var(--line-strong); padding-left: 10px; }
 
 /* the row of older missions */
 .older { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
@@ -220,7 +242,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
 
 /* needs you tab */
 .cards { display: grid; gap: 18px; max-width: 880px; }
-.card { background: var(--surface); border: 2px solid var(--t-line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+.card { background: var(--surface); border: 2px solid var(--t-line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; scroll-margin-top: calc(16px + var(--sticky-top, 0px)); }
 .card-h { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px; background: var(--t-bg); }
 .card-h .ic { width: 30px; height: 30px; color: var(--t-fg); margin-top: 1px; }
 .card-h h3 { font-size: 21px; color: var(--ink); }
@@ -272,18 +294,20 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
 /* global bar */
 .gbar { position: sticky; bottom: 0; z-index: 20; background: var(--surface); border-top: 1px solid var(--line-strong); padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -4px 16px rgba(19, 32, 44, 0.08); }
 .gbar-in { max-width: 1180px; margin-inline: auto; display: flex; gap: 10px; }
-.gbar-in .btn { flex: 1 1 0; padding: 0 10px; }
-.gbar-in .btn.quiet { flex-grow: 1.25; }
+.gbar-in .btn { flex: 1.6 1 0; padding: 0 10px; }
+.gbar-in .btn.quiet { flex-grow: 1; }
 @media (min-width: 760px) { .gbar-in { justify-content: flex-end; padding-inline: 8px; } .gbar-in .btn, .gbar-in .btn.quiet { flex: 0 0 auto; min-width: 220px; padding: 0 18px; } }
 
 /* the sheet */
 .scrim { position: fixed; inset: 0; z-index: 50; background: rgba(8, 14, 20, 0.62); display: flex; align-items: flex-end; justify-content: center; }
-.sheet { background: var(--surface); color: var(--ink); width: 100%; max-width: 580px; max-height: calc(100vh - 12px); max-height: calc(100dvh - 12px); overflow: auto; border-radius: 18px 18px 0 0; padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 14px; box-shadow: 0 -10px 50px rgba(0, 0, 0, 0.35); border: 1px solid var(--line-strong); }
+.sheet { background: var(--surface); color: var(--ink); width: 100%; max-width: 580px; max-height: calc(100vh - 12px); max-height: calc(100dvh - 12px); border-radius: 18px 18px 0 0; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 -10px 50px rgba(0, 0, 0, 0.35); border: 1px solid var(--line-strong); }
 .sheet:focus { outline: none; }
+.sheet-body { overflow: auto; min-height: 0; padding: 20px 20px 8px; display: grid; gap: 14px; align-content: start; }
 @media (min-width: 700px) { .scrim { align-items: center; padding: 16px; } .sheet { border-radius: 18px; } }
 .sheet h2 { font-size: 26px; }
-.msg { width: 100%; min-height: 96px; resize: vertical; border: 2px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); color: var(--ink); line-height: 1.45; }
-.own { width: 100%; min-height: 76px; resize: vertical; border: 2px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; background: var(--surface); color: var(--ink); line-height: 1.45; }
+.cannot { font-weight: 600; }
+.msg { width: 100%; min-height: 84px; resize: vertical; border: 2px dashed var(--line-strong); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); color: var(--ink); line-height: 1.45; }
+.own { width: 100%; min-height: 64px; resize: vertical; border: 2px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; background: var(--surface); color: var(--ink); line-height: 1.45; }
 .own::placeholder { color: var(--muted); }
 .phrases { display: flex; flex-wrap: wrap; gap: 8px; }
 .phrase { min-height: 44px; padding: 0 14px; border-radius: 999px; border: 2px solid var(--line-strong); background: var(--surface); font-weight: 600; }
@@ -292,9 +316,11 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
 .field label, .field .section-label { font-weight: 700; }
 .status { min-height: 1.45em; font-weight: 700; color: var(--ok-fg); }
 .status.fail { color: var(--warn-fg); }
+.btn[aria-disabled="true"] { background: var(--surface-2); border-color: var(--line-strong); color: var(--muted); cursor: default; }
 .stop-note { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-line); border-radius: 10px; padding: 10px 12px; font-weight: 600; }
-.sheet-btns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.sheet-btns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; padding: 12px 20px calc(16px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); background: var(--surface); }
 .sheet-btns .btn { flex: 1 1 140px; }
+.sheet-btns .status { flex: 1 0 100%; text-align: left; }
 
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
 </style>
@@ -351,6 +377,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
           <p class="lamp-sentence" id="lamp-sentence" aria-live="polite"></p>
           <ul class="lamp-lines" id="lamp-lines"></ul>
         </section>
+        <div id="under-lamp" class="stack"></div>
         <div id="tonight-body" class="stack"></div>
       </section>
       <section class="panel" role="tabpanel" id="panel-needs" aria-labelledby="tab-needs" hidden></section>
@@ -361,7 +388,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
 
   <div class="gbar" id="gbar" hidden>
     <div class="gbar-in">
-      <button type="button" class="btn" id="gbar-tell">Tell the leader</button>
+      <button type="button" class="btn" id="gbar-tell">Tell the leader about tonight</button>
       <button type="button" class="btn quiet" id="gbar-stop">Stop tonight's run</button>
     </div>
   </div>
@@ -369,23 +396,27 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
 
 <div class="scrim" id="scrim" hidden>
   <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1">
-    <h2 id="sheet-title">Tell the leader</h2>
-    <p class="stop-note" id="sheet-stop" hidden></p>
-    <div class="field">
-      <textarea class="msg" id="sheet-msg" readonly rows="4" aria-labelledby="sheet-hint"></textarea>
-      <p class="small muted" id="sheet-hint"></p>
+    <div class="sheet-body">
+      <h2 id="sheet-title">Tell the leader</h2>
+      <p class="cannot" id="sheet-cannot"></p>
+      <p class="stop-note" id="sheet-stop" hidden></p>
+      <div class="field" id="sheet-phrases-box">
+        <p class="section-label" id="sheet-phrases-label">Quick answers</p>
+        <div class="phrases" id="sheet-phrases" role="group" aria-labelledby="sheet-phrases-label"></div>
+      </div>
+      <div class="field" id="sheet-own-box">
+        <label for="sheet-own">Add your own words</label>
+        <textarea class="own" id="sheet-own" rows="2" placeholder="Type here (optional)"></textarea>
+      </div>
+      <div class="field">
+        <p class="section-label" id="sheet-msg-label">Your message (preview)</p>
+        <textarea class="msg" id="sheet-msg" readonly rows="3" aria-labelledby="sheet-msg-label sheet-hint"></textarea>
+        <p class="small muted" id="sheet-hint"></p>
+      </div>
+      <p class="small muted" id="sheet-can"></p>
     </div>
-    <div class="field" id="sheet-phrases-box">
-      <p class="section-label" id="sheet-phrases-label">Quick answers</p>
-      <div class="phrases" id="sheet-phrases" role="group" aria-labelledby="sheet-phrases-label"></div>
-    </div>
-    <div class="field" id="sheet-own-box">
-      <label for="sheet-own">Add your own words</label>
-      <textarea class="own" id="sheet-own" rows="3" placeholder="Type here (optional)"></textarea>
-    </div>
-    <p class="small muted" id="sheet-can"></p>
-    <p class="status" id="sheet-status" role="status" aria-live="polite"></p>
     <div class="sheet-btns">
+      <p class="status" id="sheet-status" role="status" aria-live="polite"></p>
       <button type="button" class="btn" id="sheet-copy">Copy</button>
       <button type="button" class="btn quiet" id="sheet-close">Close</button>
     </div>
@@ -411,22 +442,32 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     needsTop: "These are the things the AI team could not settle alone.",
     happened: "What happened",
     ifNothing: "If you do nothing",
+    whatToDo: "What to do",
     tell: "Tell the leader",
     openQuestion: "Open the question",
     reinforcementsLabel: "Reinforcements called in: ",
     none: "none",
     stepsUsed: " steps used)",
     recovered: "Recovered after a retry",
+    firstTry: "Built and checked on the first try.",
     repairFeature: "Repair feature",
     repairRound: "repair round",
+    stoppedHere: "Stopped here",
+    pausedHere: "Paused here",
+    doneShow: "(show)",
+    doneHide: "(hide)",
     checkOne: "1 check written for this feature",
     checkMany: " checks written for this feature",
     checkNone: "No checks written for this feature",
-    allowance: "Allowance (usage left in your plans)",
+    allowance: "Allowance (how much of your plans is used)",
     pauseHere: "work pauses here",
     openBefore: "Open from before (",
     updated: "Updated ",
     earlier: "Earlier events are not shown (",
+    missionNotShown: "1 more mission is not shown. The lamp above counts it.",
+    missionsNotShown: " more missions are not shown. The lamp above counts them.",
+    cardNotShown: "1 more thing for you is not shown. The lamp on the Tonight tab counts it.",
+    cardsNotShown: " more things for you are not shown. The lamp on the Tonight tab counts them.",
     gotHeading: "What you got",
     notFinished: "Not finished",
     nightResult: "Night result",
@@ -437,6 +478,11 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     copied: "Copied. Paste it into your chat with the leader.",
     emptyMissions: "No missions yet. When one is queued it appears here.",
     emptyCards: "Nothing needs you right now.",
+    calmLook: "Nothing for you to decide. See the note above.",
+    debriefReady: "Morning debrief ready. See what you got.",
+    cannotSend: "This page cannot send messages. Pick or type an answer, tap Copy, then paste it into your chat with the leader.",
+    cannotStop: "This page cannot stop the run. Tap Copy, then paste the sentence into your chat with the leader.",
+    copyFirst: "Choose a quick answer or type your own words first, then tap Copy.",
     emptyTimeline: "Nothing has happened tonight yet.",
     emptyDebrief: "The morning debrief appears when tonight's work has finished or paused.",
     badVersion: "This page and Mission Control are different versions. Reload the page.",
@@ -578,6 +624,21 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     if (!s) return null;
     return s.author === "ai" ? aiBlock(s.text, snap.leader.aiNotice) : el("p", cls || "", s.text);
   }
+  // One label for a whole list of short AI-written lines, then each line as a plain quote.
+  function aiLabel(notice) {
+    var tag = el("p", "ai-label");
+    add(tag, ic("info"), el("span", "", notice));
+    return tag;
+  }
+  function quoted(s, cls) {
+    if (!s) return null;
+    return s.author === "ai" ? el("p", "quote", "\u201C" + s.text + "\u201D") : el("p", cls || "", s.text);
+  }
+  // The first sentence of an engine-written text, for the second line of a row.
+  function firstSentence(text) {
+    var m = /^[\s\S]*?[.!?](?=\s|$)/.exec(String(text || "").trim());
+    return m ? m[0] : String(text || "").trim();
+  }
 
   // ---------------------------------------------------------------------------------------------
   // The state of the page
@@ -597,6 +658,8 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     versionBad: false,
     tab: "tonight",
     beforeOpen: false,
+    doneOpen: {},
+    underKey: "",
     pollTimer: 0,
     polling: false
   };
@@ -634,8 +697,12 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     return sheet.template.split(PLACEHOLDER).join(answer);
   }
 
+  // Copy is for a finished message. With nothing chosen the preview still holds the placeholder, so Copy waits.
+  function canCopy() { return sheet.mode === "stop" || sheet.answer.trim() !== ""; }
+
   function paintSheet() {
     $("sheet-msg").value = composeMessage();
+    $("sheet-copy").setAttribute("aria-disabled", canCopy() ? "false" : "true");
     var pressed = sheet.answer.trim();
     var buttons = $("sheet-phrases").children;
     for (var i = 0; i < buttons.length; i++) {
@@ -660,6 +727,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     sheet.opener = opener || null;
     sheet.openerKey = opener ? opener.getAttribute("data-key") || opener.id || "" : "";
     var stop = mode === "stop";
+    $("sheet-cannot").textContent = stop ? W.cannotStop : W.cannotSend;
     $("sheet-stop").hidden = !stop;
     $("sheet-stop").textContent = stop ? leader.stopNote : "";
     $("sheet-phrases-box").hidden = stop;
@@ -710,6 +778,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
   // Copy: the clipboard API when the page is allowed to use it, else select the text and use the old command
   // (plain http over a LAN has no navigator.clipboard).
   function copyMessage() {
+    if (!canCopy()) { setStatus(W.copyFirst, true); return; }
     var box = $("sheet-msg");
     var text = box.value;
     function legacy() {
@@ -788,26 +857,39 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     // Always drawn in the order of the five steps, whatever order the list arrives in.
     var ordered = m.progress.slice().sort(function (a, b) { return STEP_IDS.indexOf(a.id) - STEP_IDS.indexOf(b.id); });
     ordered.forEach(function (s) {
-      var li = el("li", "step " + s.state);
+      // A mission that stopped or paused did not get past its current step: say so instead of drawing it as work.
+      var halted = s.state === "current" && (m.state === "needs_you" || m.state === "paused");
+      var li = el("li", "step " + s.state + (halted ? (m.state === "needs_you" ? " stopped" : " paused") : ""));
       if (s.state === "current") li.setAttribute("aria-current", "step");
       var dot = el("span", "dot");
-      dot.appendChild(ic(STEP_LOOK[s.state] || "hollow"));
+      dot.appendChild(ic(halted ? (m.state === "needs_you" ? "sq" : "pause") : STEP_LOOK[s.state] || "hollow"));
       var label = s.word;
       if (s.id === "build" && m.repairLap) label = s.word + " (" + W.repairRound + ")";
-      add(li, dot, el("span", "", label), el("span", "sr", s.state));
+      add(li, dot, el("span", "", label), halted ? el("span", "here", m.state === "needs_you" ? W.stoppedHere : W.pausedHere) : el("span", "sr", s.state));
       list.appendChild(li);
     });
     return list;
   }
 
+  // Pips are the tries so far, drawn against the ladder. A finished feature draws only the tries it used.
   function pips(f) {
     var row = el("div", "pips");
     row.setAttribute("aria-hidden", "true");
-    for (var i = 0; i < f.steps.total; i++) {
+    var count = f.state === "done" ? f.steps.used : f.steps.total;
+    for (var i = 0; i < count; i++) {
       var on = i < f.steps.used;
       row.appendChild(el("span", "pip" + (on ? " on " + (i === 0 ? "first" : "reinf") : "")));
     }
     return row;
+  }
+
+  // A feature that was built and checked at the first try needs one calm line and nothing else.
+  function firstTryDone(f) { return f.state === "done" && f.reinforcements === 0 && !f.recovered; }
+  // Pips and the steps line are for tries that matter: reinforcements, or a feature that is not finished.
+  // A feature that has not been tried yet has nothing to say about tries.
+  function showTries(f) {
+    if (f.steps.used === 0) return false;
+    return f.reinforcements > 0 || f.state === "stuck" || f.state === "being_built" || f.state === "being_reviewed" || f.state === "paused";
   }
 
   function checksLine(f) {
@@ -830,12 +912,19 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     var title = el("h4", "tile-title", f.title);
     add(t, top, title);
     add(t, said(f.reason, snap, "reason"));
-    // A feature that has not been tried and is not being worked on has nothing to say about tries.
-    if (f.steps.used > 0 || (f.state !== "waiting_turn" && f.state !== "left_out")) {
+    if (firstTryDone(f)) {
+      t.className += " compact";
+      var calm = el("p", "firsttry");
+      add(calm, ic("check"), el("span", "", W.firstTry));
+      t.appendChild(calm);
+      return t;
+    }
+    if (showTries(f)) {
       var line = el("div", "steps-line");
       var n = f.reinforcements;
+      var used = f.state === "done" ? "" : " (" + f.steps.used + " of " + f.steps.total + W.stepsUsed;
       add(line,
-        el("p", "steps-text", W.reinforcementsLabel + (n === 0 ? W.none : String(n)) + " (" + f.steps.used + " of " + f.steps.total + W.stepsUsed),
+        el("p", "steps-text", W.reinforcementsLabel + (n === 0 ? W.none : String(n)) + used),
         pips(f),
         el("p", "small muted", f.steps.caption));
       t.appendChild(line);
@@ -862,6 +951,26 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     return t;
   }
 
+  // A finished mission keeps its head and folds its features away behind one control (a native details element:
+  // Enter and Space open it, and the browser says whether it is open).
+  function doneFold(m, tiles) {
+    var n = m.features.length;
+    var d = el("details", "donebox");
+    if (state.doneOpen[m.id]) d.open = true;
+    var sum = el("summary", "");
+    sum.setAttribute("data-key", "done:" + m.id);
+    function words() {
+      return (n === 1 ? "The feature is done " : "All " + n + " features done ") + (d.open ? W.doneHide : W.doneShow);
+    }
+    sum.textContent = words();
+    d.addEventListener("toggle", function () {
+      state.doneOpen[m.id] = d.open;
+      sum.textContent = words();
+    });
+    add(d, sum, tiles);
+    return d;
+  }
+
   function missionGroup(m, snap, several) {
     var lk = look(MISSION_LOOK, m.state);
     var group = el("section", "group");
@@ -870,9 +979,16 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     var titleRow = el("div", "mission-title");
     var h = el("h3", "", m.title);
     add(titleRow, h, el("span", "kind", m.kindWord), chip(lk, m.word));
-    add(head, titleRow, el("p", "mission-sentence", m.sentence), stepper(m));
+    add(head, titleRow);
+    // The lamp or the Now line may already say the same sentence: say it once.
+    // A mission that needs your help has its card in the strip: its own "It needs your help." adds nothing.
+    var carded = m.state === "needs_you" && snap.needsYou.some(function (c) { return c.missionId === m.id; });
+    var repeated = carded || m.sentence === snap.lamp.sentence || (snap.now && m.sentence === snap.now.text);
+    // A finished mission among several is folded away below: its steps and its count are not repeated.
+    var folded = m.state === "done" && m.features.length > 0 && several;
+    add(head, repeated ? null : el("p", "mission-sentence", m.sentence), folded ? null : stepper(m));
     // With one mission the heading above already says it; with several, each mission needs its own count.
-    if (m.featuresTotal > 0 && several) head.appendChild(el("p", "small muted", m.featuresLine));
+    if (m.featuresTotal > 0 && several && !folded) head.appendChild(el("p", "small muted", m.featuresLine));
     if (m.features.length === 0) {
       var row = el("div", "tile-actions");
       row.appendChild(tellButton(m.tellLeader, "tell:mission:" + m.id, h, true));
@@ -882,16 +998,41 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     if (m.features.length > 0) {
       var tiles = el("div", "tiles");
       m.features.forEach(function (f) { tiles.appendChild(tile(f, m, snap)); });
-      group.appendChild(tiles);
+      group.appendChild(m.state === "done" ? doneFold(m, tiles) : tiles);
     }
     return group;
   }
 
-  function strip(snap) {
+  // The order of the groups: what needs a person first, then what is stuck, then the work, then what is finished.
+  function groupRank(m, hasCard) {
+    if (m.state === "needs_you") return 0;
+    var stuck = m.features.some(function (f) { return f.state === "stuck"; });
+    if (hasCard[m.id] || stuck || m.state === "partly_done" || m.state === "unknown") return 1;
+    var order = { working: 2, waiting: 3, paused: 4, done: 5, not_started: 6 };
+    return Object.prototype.hasOwnProperty.call(order, m.state) ? order[m.state] : 1;
+  }
+
+  function orderedMissions(list, snap) {
+    var hasCard = {};
+    snap.needsYou.forEach(function (c) { hasCard[c.missionId] = true; });
+    return list
+      .map(function (m, i) { return { m: m, i: i, rank: groupRank(m, hasCard) }; })
+      .sort(function (a, b) { return a.rank - b.rank || a.i - b.i; })
+      .map(function (x) { return x.m; });
+  }
+
+  // What the strip under the lamp says. It must never contradict the lamp: green only when the lamp is green.
+  function strip(snap, lampState) {
     var cards = snap.needsYou;
     if (cards.length === 0) {
+      if (lampState === "idle") return null;
       var calm = el("div", "strip calm");
-      add(calm, ic("check"), el("span", "", W.emptyCards));
+      if (lampState === "on_track") {
+        add(calm, ic("check"), el("span", "", W.emptyCards));
+      } else {
+        calm.className += " muted";
+        calm.appendChild(el("span", "", W.calmLook));
+      }
       return calm;
     }
     var worst = "warn";
@@ -906,11 +1047,52 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
       b.type = "button";
       b.setAttribute("data-key", "strip:" + c.id);
       tone(b, c.severity === "now" ? "bad" : "warn");
-      add(b, ic(CARD_ICON[c.kind] || "tri"), el("span", "", c.title), ic("chev", "go"));
+      var words = el("span", "strip-text");
+      words.appendChild(el("span", "", c.title));
+      var sub = stripSub(c);
+      if (sub) words.appendChild(el("span", "strip-sub", sub));
+      add(b, ic(CARD_ICON[c.kind] || "tri"), words, ic("chev", "go"));
       b.addEventListener("click", function () { goCard(c.id); });
       box.appendChild(b);
     });
     return box;
+  }
+
+  // The second line of a strip row: what to do, else what happened, but only when the engine wrote it.
+  // An AI's text is never boiled down here: the quote on the card carries the label.
+  function stripSub(c) {
+    var todo = c.whatToDo;
+    if (todo && todo.text && todo.author !== "ai") return firstSentence(todo.text);
+    var what = c.happened;
+    if (what && what.author === "engine" && what.text) return firstSentence(what.text);
+    return "";
+  }
+
+  function debriefRow() {
+    var b = el("button", "linkrow");
+    b.type = "button";
+    b.setAttribute("data-key", "debrief-link");
+    add(b, ic("info"), el("span", "", W.debriefReady), ic("chev", "go"));
+    b.addEventListener("click", function () {
+      selectTab("debrief", false);
+      requestAnimationFrame(function () { $("tabs").scrollIntoView({ block: "start" }); });
+    });
+    return b;
+  }
+
+  // Under the lamp: the strip, and a way to the morning debrief when the night is over and one is ready.
+  // It is drawn again when the snapshot or the lamp that is showing changes (the page's own clock can change the lamp).
+  function paintUnderLamp(lamp) {
+    var snap = state.snap;
+    var key = state.sig + "|" + lamp.state;
+    if (state.underKey === key) return;
+    state.underKey = key;
+    var frag = document.createDocumentFragment();
+    add(frag, strip(snap, lamp.state));
+    if (snap.debrief && !snap.run.active) frag.appendChild(debriefRow());
+    var slot = $("under-lamp");
+    clear(slot);
+    slot.appendChild(frag);
   }
 
   function olderRow(snap) {
@@ -919,7 +1101,9 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     var d = el("details", "older");
     if (state.beforeOpen) d.open = true;
     d.addEventListener("toggle", function () { state.beforeOpen = d.open; });
-    d.appendChild(el("summary", "", W.openBefore + snap.counts.openFromBefore + ")"));
+    var sum = el("summary", "", W.openBefore + snap.counts.openFromBefore + ")");
+    sum.setAttribute("data-key", "older");
+    d.appendChild(sum);
     var list = el("div", "older-list");
     before.forEach(function (m) {
       var lk = look(MISSION_LOOK, m.state);
@@ -991,12 +1175,14 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
   function renderTonight(snap) {
     var body = $("tonight-body");
     var frag = document.createDocumentFragment();
-    frag.appendChild(strip(snap));
     var features = el("section", "features");
-    features.appendChild(el("h2", "", snap.counts.featuresLine));
-    var tonight = snap.missions.filter(function (m) { return m.scope !== "before"; });
+    var tonight = orderedMissions(snap.missions.filter(function (m) { return m.scope !== "before"; }), snap);
+    // With nothing planned there is one line to say so, not a heading and a line.
     if (tonight.length === 0) features.appendChild(el("p", "empty", W.emptyMissions));
+    else features.appendChild(el("h2", "", snap.counts.featuresLine));
     tonight.forEach(function (m) { features.appendChild(missionGroup(m, snap, tonight.length > 1)); });
+    var cutMissions = snap.counts.missionsNotShown;
+    if (cutMissions > 0) features.appendChild(el("p", "small muted", cutMissions === 1 ? W.missionNotShown : cutMissions + W.missionsNotShown));
     frag.appendChild(features);
     add(frag, olderRow(snap), allowanceSection(snap));
     clear(body);
@@ -1032,15 +1218,25 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     var lines = $("lamp-lines");
     clear(lines);
     lines.className = state.level > 0 ? "lamp-lines old" : "lamp-lines";
-    if (snap.run.line) lines.appendChild(el("li", "", snap.run.line));
-    if (snap.run.activityLine) lines.appendChild(el("li", "", snap.run.activityLine));
-    if (snap.now) {
-      var li = el("li", "");
-      li.appendChild(el("span", "label", "Now:"));
-      li.appendChild(document.createTextNode(" " + snap.now.text + (snap.now.sinceText ? " (" + snap.now.sinceText + ")" : "")));
-      lines.appendChild(li);
+    // Not responding: the live lines ("running 10 s", "Last activity 7 s ago") are frozen and would look live. Leave them out.
+    if (state.level < 2) {
+      if (snap.run.line) lines.appendChild(el("li", "", snap.run.line));
+      if (snap.run.activityLine) lines.appendChild(el("li", "", snap.run.activityLine));
+      // The Now line is dropped when the lamp sentence already says the same thing.
+      if (snap.now && snap.now.text !== lamp.sentence) {
+        var li = el("li", "");
+        li.appendChild(el("span", "label", "Now:"));
+        li.appendChild(document.createTextNode(" " + snap.now.text + (snap.now.sinceText ? " (" + snap.now.sinceText + ")" : "")));
+        lines.appendChild(li);
+      }
     }
     $("main").className = state.level >= 2 ? "gone" : "";
+    paintUnderLamp(lamp);
+  }
+
+  // Stopping only makes sense while a run is on or a stop is already asked for.
+  function paintGbar(snap) {
+    $("gbar-stop").hidden = !(snap.run.active || snap.run.stopRequested);
   }
 
   function paintFresh() {
@@ -1093,7 +1289,13 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     if (c.summary) what.appendChild(el("p", "small muted", c.summary));
     var nothing = el("div", "sect");
     add(nothing, el("h4", "section-label", W.ifNothing), el("p", "", c.ifNothing));
-    add(body, what, nothing);
+    // Only when the engine knows the next step: the person is named, the AI is named when known.
+    var todo = null;
+    if (c.whatToDo && c.whatToDo.text) {
+      todo = el("div", "sect");
+      add(todo, el("h4", "section-label", W.whatToDo), said(c.whatToDo, snap, ""));
+    }
+    add(body, what, todo, nothing);
     var foot = el("div", "card-foot");
     foot.appendChild(tellButton(c.tellLeader, "tell:card:" + c.id, h, false));
     add(art, head, body, foot);
@@ -1113,6 +1315,8 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
       snap.needsYou.forEach(function (c) { list.appendChild(card(c, snap)); });
       frag.appendChild(list);
     }
+    var cutCards = snap.counts.cardsNotShown;
+    if (cutCards > 0) frag.appendChild(el("p", "small muted", cutCards === 1 ? W.cardNotShown : cutCards + W.cardsNotShown));
     clear(panel);
     panel.appendChild(frag);
   }
@@ -1121,9 +1325,10 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     selectTab("needs", false);
     var node = document.querySelector('[data-card-id="' + cssEscape(cardId) + '"]');
     if (!node) return;
-    node.scrollIntoView({ block: "start" });
     var heading = node.querySelector("h3");
     if (heading) heading.focus({ preventScroll: true });
+    // After the tab has been laid out, so the card sits a little below the top edge and its border shows.
+    requestAnimationFrame(function () { node.scrollIntoView({ block: "start" }); });
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1179,16 +1384,20 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
   // ---------------------------------------------------------------------------------------------
   // Morning debrief
   // ---------------------------------------------------------------------------------------------
-  function featureList(heading, items, snap) {
+  // `once`: short AI-written lines (what was built). The label comes once at the top of the list and each line is a
+  // plain quote. Without it (what did not get finished) every AI text keeps its own box and label.
+  function featureList(heading, items, snap, once) {
     if (!items.length) return null;
     var sect = el("div", "list-block");
     var list = el("ul", "list");
+    var anyAi = false;
     items.forEach(function (f) {
       var li = el("li", "");
-      add(li, el("p", "name", f.title), said(f.note, snap, "muted"));
+      if (once && f.note && f.note.author === "ai") anyAi = true;
+      add(li, el("p", "name", f.title), once ? quoted(f.note, "muted") : said(f.note, snap, "muted"));
       list.appendChild(li);
     });
-    add(sect, el("h4", "section-label", heading), list);
+    add(sect, el("h4", "section-label", heading), anyAi ? aiLabel(snap.leader.aiNotice) : null, list);
     return sect;
   }
 
@@ -1216,9 +1425,9 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     var h = el("h3", "", d.title);
     add(head, h, chip(lk, d.verdict.word));
     add(box, head, el("p", "", d.verdict.sentence));
-    add(box, featureList(W.gotHeading, d.got, snap));
-    add(box, featureList(W.notFinished, d.leftOut, snap));
-    add(box, featureList(W.recovered, d.recovered, snap));
+    add(box, featureList(W.gotHeading, d.got, snap, true));
+    add(box, featureList(W.notFinished, d.leftOut, snap, false));
+    add(box, featureList(W.recovered, d.recovered, snap, true));
     var result = el("div", "list-block");
     add(result, el("h4", "section-label", W.nightResult), el("p", "small muted", d.plannedLine));
     var ticks = el("div", "ticks");
@@ -1319,6 +1528,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     $("tabs").hidden = false;
     $("main").hidden = false;
     $("gbar").hidden = false;
+    paintGbar(snap);
     paintLamp();
     renderTonight(snap);
     renderNeeds(snap);
@@ -1457,6 +1667,10 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
       links.appendChild(a);
     });
     window.addEventListener("hashchange", showDemo);
+    // The demo bar sticks to the top: a card scrolled into view must clear it.
+    function offset() { document.documentElement.style.setProperty("--sticky-top", $("demo-bar").offsetHeight + "px"); }
+    window.addEventListener("resize", offset);
+    offset();
     showDemo();
   }
 
