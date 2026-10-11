@@ -1,9 +1,9 @@
 // The one vocabulary of the dashboard (docs/dashboard-spec.md, 4): every word and sentence a person reads, and the
 // time formatter. No other module contains user-facing prose. Nothing in here reads a file or a clock.
 //
-// The night modules (timeline, allowance, debrief and the wait text) keep their wording in vocabulary-night.ts, which
+// The detail modules (timeline, allowance, debrief and the wait text) keep their wording in vocabulary-details.ts, which
 // is re-exported here, so there is still one vocabulary.
-import { MAX_TIME_MS } from "./constants.js";
+import { DATE_FORM_AFTER_MS, MAX_TIME_MS } from "./constants.js";
 import type {
   FeatureStateId,
   Lamp,
@@ -13,9 +13,9 @@ import type {
   ProgressStepId,
   WaitInfo,
 } from "./types.js";
-import { PAUSED_NO_AI_BEFORE_STOP, PAUSED_WHEN_TOLD_TO_STOP, RESUMES_BY_ITSELF, waitLead } from "./vocabulary-night.js";
+import { PAUSED_NO_AI_BEFORE_STOP, PAUSED_WHEN_TOLD_TO_STOP, RESUMES_BY_ITSELF, waitLead } from "./vocabulary-details.js";
 
-export * from "./vocabulary-night.js";
+export * from "./vocabulary-details.js";
 
 // ───────────────────────────── Time ─────────────────────────────
 
@@ -31,8 +31,10 @@ export interface Formatter {
   /** Whether `ms` falls on the same local day as `now`. */
   sameDay(ms: number, now: number): boolean;
   /**
-   * The one rule of every wait and reset time: "15:26" when `ms` is on the same local day as `now` (the snapshot's
-   * generatedAt), else the weekday and the time, "Wed 15:26". A wait can last days, and "until 15:26" reads as today.
+   * The one rule of every wait, reset and change time: "15:26" when `ms` is on the same local day as `now` (the
+   * snapshot's generatedAt), else the weekday and the time, "Wed 15:26" (a wait can last days, and "until 15:26" reads
+   * as today). From DATE_FORM_AFTER_MS (6 days) away, in either direction, the date too: "Mon 19 Oct 10:03", because
+   * a weekday alone repeats every week.
    */
   when(ms: number, now: number): string;
   /** An age as "12 s ago", "2 min ago", "2 h 43 min ago". Takes the age in milliseconds. */
@@ -69,7 +71,12 @@ export function makeFormatter(timeZone?: string): Formatter {
     day: (ms) => (shows(ms) ? dayFormat.format(ms).replace(",", "") : ""),
     weekday,
     sameDay,
-    when: (ms, now) => (!shows(ms) ? "" : sameDay(ms, now) ? hm.format(ms) : `${weekday(ms)} ${hm.format(ms)}`),
+    when: (ms, now) => {
+      if (!shows(ms)) return "";
+      if (sameDay(ms, now)) return hm.format(ms);
+      const dateForm = shows(now) && Math.abs(ms - now) >= DATE_FORM_AFTER_MS;
+      return `${dateForm ? dayFormat.format(ms).replace(",", "") : weekday(ms)} ${hm.format(ms)}`;
+    },
     ago: (ms) => `${span(ms)} ago`,
     span,
   };
@@ -164,7 +171,7 @@ export interface MissionSentenceFacts {
   state: MissionStateId;
   stage: string;
   pausedWhy: PausedWhy | null;
-  /** A saved busy mission left over from an earlier night under a live run (spec 4.2). */
+  /** A saved busy mission left over from an earlier run, under a live run (spec 4.2). */
   staleBusy: boolean;
   /** WaitInfo.text, for the state waiting. */
   waitText: string | null;
@@ -337,7 +344,7 @@ export function activityLine(lastActivityText: string): string {
 
 export const CLAUSE = {
   missionFailed: (n: number, title: string | null) => (n === 1 && title !== null ? `${quoted(title)} needs your help` : `${n} missions need your help`),
-  runGone: "the night's work stopped unexpectedly",
+  runGone: "the run stopped unexpectedly",
   runGonePending: "checking whether the run is still going",
   homeUnreadable: "Mission Control's files cannot be read",
   unreadableMissions: (n: number) => (n === 1 ? "1 mission file cannot be read" : `${n} mission files cannot be read`),
@@ -357,17 +364,17 @@ export const CLAUSE = {
         ? "1 mission is paused until the next run"
         : `${missions} missions are paused until the next run`,
   partial: (title: string) => `${quoted(title)} finished partly done`,
-  olderFailed: (n: number) => (n === 1 ? "1 older mission needs your help" : `${n} older missions need your help`),
+  earlierFailed: (n: number) => (n === 1 ? "1 earlier mission needs your help" : `${n} earlier missions need your help`),
   waitUnknown: "the run is waiting for an unknown reason",
   waitUntil: (cause: "limits" | "trouble", untilText: string) => (cause === "limits" ? `waiting for allowance until ${untilText}` : `waiting for the AI team until ${untilText}`),
   heartbeatLate: (minutes: number) => `the run has not reported in for ${minutes} min`,
   quiet: (minutes: number) => `the run has been quiet for ${minutes} min`,
   stopRequested: "a stop was requested",
   queued: (n: number) => (n === 1 ? "1 mission waits for the next run" : `${n} missions wait for the next run`),
-  olderItems: (n: number) => (n === 1 ? "1 older mission still waits for you" : `${n} older missions still wait for you`),
+  earlierItems: (n: number) => (n === 1 ? "1 earlier mission still waits for you" : `${n} earlier missions still wait for you`),
   working: "the run is working and nothing needs a look",
   allDone: "everything is done",
-  nothingTonight: "nothing is running",
+  nothingRunning: "nothing is running",
 } as const;
 
 /**
@@ -391,23 +398,23 @@ export function problemSentence(clauses: string[], restIsOnTrack: boolean, resum
 }
 
 export interface CalmFacts {
-  /** Features done and all features over tonight's missions. */
+  /** Features done and all features over the recent missions. */
   done: number;
   total: number;
   /** A short wait of a known cause, if one is on. */
   shortWait: { cause: "limits" | "trouble"; untilText: string } | null;
-  /** Older finished missions that still hold something for the owner (L23). */
-  olderWaiting: number;
-  /** Tonight's queued missions (L22). */
+  /** Earlier finished missions that still hold something for the owner (L23). */
+  earlierWaiting: number;
+  /** Recent queued missions (L22). */
   queued: number;
 }
 
-function olderLine(n: number): string {
-  return `${CLAUSE.olderItems(n).replace(/^./, (c) => c.toUpperCase())} (see below).`;
+function earlierLine(n: number): string {
+  return `${CLAUSE.earlierItems(n).replace(/^./, (c) => c.toUpperCase())} (see below).`;
 }
 
 function calmTail(x: CalmFacts): string {
-  return x.olderWaiting > 0 ? ` Nothing new needs you. ${olderLine(x.olderWaiting)}` : " Nothing needs you.";
+  return x.earlierWaiting > 0 ? ` Nothing new needs you. ${earlierLine(x.earlierWaiting)}` : " Nothing needs you.";
 }
 
 /** L24: a live run with nothing to look at. */
@@ -423,7 +430,7 @@ export function workingSentence(x: CalmFacts): string {
   return sentence + calmTail(x);
 }
 
-/** L25: nothing is running and tonight's work is all done. */
+/** L25: nothing is running and the recent work is all done. */
 export function allDoneSentence(x: CalmFacts & { missions: number }): string {
   let sentence = x.missions === 1 ? (x.total === 1 ? "The feature is done." : `All ${x.total} features are done.`) : `Everything is done: ${x.missions} missions, ${x.total} features.`;
   sentence += calmTail(x);
@@ -431,27 +438,27 @@ export function allDoneSentence(x: CalmFacts & { missions: number }): string {
   return sentence;
 }
 
-/** L26: nothing is running. `otherOlder` counts older missions that only wait for the next run. */
-export function nothingSentence(x: { queued: number; olderWaiting: number; otherOlder: number }): string {
+/** L26: nothing is running. `otherEarlier` counts earlier missions that only wait for the next run. */
+export function nothingSentence(x: { queued: number; earlierWaiting: number; otherEarlier: number }): string {
   const parts: string[] = [];
   if (x.queued > 0) parts.push(`${x.queued === 1 ? "1 mission waits" : `${x.queued} missions wait`} for the next run.`);
-  if (x.olderWaiting > 0) parts.push(olderLine(x.olderWaiting));
-  if (x.otherOlder > 0) parts.push(`${x.otherOlder === 1 ? "1 older mission waits" : `${x.otherOlder} older missions wait`} for the next run (see below).`);
+  if (x.earlierWaiting > 0) parts.push(earlierLine(x.earlierWaiting));
+  if (x.otherEarlier > 0) parts.push(`${x.otherEarlier === 1 ? "1 earlier mission waits" : `${x.otherEarlier} earlier missions wait`} for the next run (see below).`);
   return parts.length === 0 ? "Nothing is running and nothing is queued." : `Nothing is running. ${parts.join(" ")}`;
 }
 
 // ───────────────────────────── Needs-you cards (spec 9.1) ─────────────────────────────
 
 export const CARD_TEXT = {
-  failedTitle: (title: string, fromBefore: boolean) => (fromBefore ? `${quoted(title)} still needs your help` : `${quoted(title)} needs your help`),
+  failedTitle: (title: string, fromEarlier: boolean) => (fromEarlier ? `${quoted(title)} still needs your help` : `${quoted(title)} needs your help`),
   failedIfRetryable: "It stays stopped until someone logs in again on the PC. After that the next run carries on by itself.",
-  failedWhatToDoOther: "Ask the leader what went wrong. If it can be fixed, start the night again with the leader.",
+  failedWhatToDoOther: "Ask the leader what went wrong. If it can be fixed, start the team working again with the leader.",
   failedIfNot: "Nothing happens. It stays stopped until someone restarts it.",
   failedFallbackReason: "It stopped and needs your help.",
   stoppedTitle: (title: string) => `${quoted(title)} stopped unexpectedly`,
   stoppedHappened: "The run stopped without finishing. The work so far is kept.",
   stoppedIfNothing: "The next run carries on from the last saved step.",
-  stoppedWhatToDo: "Tell the leader to start the night again.",
+  stoppedWhatToDo: "Tell the leader to start the team working again.",
   pausedTitle: (title: string) => `${quoted(title)} is paused`,
   diskHappened: "The disk is almost full, so work paused.",
   diskIfNothing: "Work stays paused until there is free space. The next run carries on where it stopped.",
@@ -588,13 +595,13 @@ export function leaderHelp(): {
 } {
   return {
     quickPhrases: ["Your call", "Leave it out", "Try again", "What is going on?"],
-    globalSentence: `About tonight's run: ${LEADER_PLACEHOLDER}`,
-    stopSentence: "Please stop tonight's run.",
+    globalSentence: `About the current work: ${LEADER_PLACEHOLDER}`,
+    stopSentence: "Please stop the current run.",
     pasteHint: "Paste this into your chat with the leader.",
     copyFailHint: "Select the text and copy it",
     aiNotice: "The AI wrote this. Do not run commands from it.",
     canDo:
-      "The leader can look at progress and reports, stop the run, start new work and run the night. It cannot change a plan or reopen a stuck feature.",
+      "The leader can look at progress and reports, stop the run, add new work and start the team working through the queued work. It cannot change a plan or reopen a stuck feature.",
     stopNote: "Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run.",
   };
 }

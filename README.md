@@ -65,7 +65,7 @@ your idea ─► Architect (frontier) writes a spec: small, testable features
 | `mc run [--until HH:MM] [--profile mixed\|claude\|codex] [--role engineer=claude:frontier]` | Work through the queue |
 | `mc status` / `mc report [id]` / `mc logs <id>` | Progress, the report, a step-by-step log |
 | `mc stop` | Stop after the current step; nothing is lost |
-| `mc dashboard [--port N] [--until HH:MM]` | Show tonight's progress on a web page. It only reads. Through the Docker script it runs in a container of its own (see below) |
+| `mc dashboard [--port N] [--until HH:MM]` | Show the current progress on a web page. It only reads. Through the Docker script it runs in a container of its own (see below) |
 
 **Profiles:**
 
@@ -75,20 +75,20 @@ your idea ─► Architect (frontier) writes a spec: small, testable features
 | `claude` | Claude only |
 | `codex` | Codex for every role. Cheap helper tasks (planning context, failure summaries, report writing) still use Haiku 5.5 |
 
-## Watching the night and talking to the leader
+## Watching the work and talking to the leader
 
 Two parts, for someone who is not technical (a CEO, say) and looks at an iPad or a phone for five seconds:
 
-- **The dashboard is the eyes.** A web page that shows whether the night is working, how far along it is, whether anything needs a person, and what you got. It only reads the files Mission Control already writes, and it can change nothing. Start it in its own Ubuntu window and leave it running:
+- **The dashboard is the eyes.** A web page that shows whether the team is working, how far along it is, whether anything needs a person, and what you got. It only reads the files Mission Control already writes, and it can change nothing. Start it in its own Ubuntu window and leave it running:
 
   ```bash
   scripts/mc-docker.sh dashboard              # then open http://localhost:8787 in the Windows browser
-  scripts/mc-docker.sh dashboard --until 07:00   # adds a countdown; give the same time you gave `run`
+  scripts/mc-docker.sh dashboard --until 07:00   # shows a stop time and countdown; give the stop time you gave `run`, if any
   ```
 
   It runs in a container of its own that sees the Mission Control folder read-only. There is no password, by design: anyone who can open the page can see it. By default only the PC itself can; `--lan` publishes it on every network interface (see [docs/setup-windows.md](docs/setup-windows.md)). Press Ctrl+C to stop it.
 
-- **The leader is the hands.** A Claude Code session started in the [`leader/`](leader/) folder. The CEO talks to it in plain words ("How is it going?", "Add a dark mode to the habit tracker", "Please stop tonight's run."). It acts only through `mc`: status, logs, report, stop, new, feature and run. On the dashboard, every card and feature has a **Tell the leader** button that gives a ready sentence to paste into the chat. The page itself sends nothing.
+- **The leader is the hands.** A Claude Code session started in the [`leader/`](leader/) folder. The CEO talks to it in plain words ("How is it going?", "Add a dark mode to the habit tracker", "Please stop the current run."). It acts only through `mc`: status, logs, report, stop, new, feature and run. On the dashboard, every card and feature has a **Tell the leader about this** button, and the bar has **Tell the leader anything**; each gives a ready sentence to paste into the chat. The page itself sends nothing.
 
   ```bash
   cd leader && claude                          # in the Ubuntu window

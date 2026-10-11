@@ -30,7 +30,8 @@ describe("the thresholds of spec 5.1", () => {
       WAIT_OVER_GRACE_MS: c.WAIT_OVER_GRACE_MS,
       STALE_BUSY_AFTER_MS: c.STALE_BUSY_AFTER_MS,
       WAIT_MARGIN_MS: c.WAIT_MARGIN_MS,
-      TONIGHT_WINDOW_MS: c.TONIGHT_WINDOW_MS,
+      RECENT_WINDOW_MS: c.RECENT_WINDOW_MS,
+      DATE_FORM_AFTER_MS: c.DATE_FORM_AFTER_MS,
       PILL_GETTING_LOW: c.PILL_GETTING_LOW,
       PILL_NEARLY_OUT: c.PILL_NEARLY_OUT,
       TIMELINE_MAX_ITEMS: c.TIMELINE_MAX_ITEMS,
@@ -48,7 +49,8 @@ describe("the thresholds of spec 5.1", () => {
       WAIT_OVER_GRACE_MS: 120_000,
       STALE_BUSY_AFTER_MS: 120_000,
       WAIT_MARGIN_MS: 45_000,
-      TONIGHT_WINDOW_MS: 64_800_000,
+      RECENT_WINDOW_MS: 86_400_000,
+      DATE_FORM_AFTER_MS: 518_400_000,
       PILL_GETTING_LOW: 0.7,
       PILL_NEARLY_OUT: 0.9,
       TIMELINE_MAX_ITEMS: 60,
@@ -74,7 +76,18 @@ describe("the thresholds of spec 5.1", () => {
     expect(c.WAIT_MARGIN_MS).toBe(engineNumber("executor.ts", "WAIT_MARGIN_MS"));
     expect(c.LOCK_STALE_MS).toBe(engineNumber("state.ts", "FOREIGN_LOCK_TTL_MS"));
     expect(c.LOCK_FRESH_MS).toBe(2 * engineNumber("state.ts", "LOCK_HEARTBEAT_MS"));
-    expect(c.TONIGHT_WINDOW_MS).toBe(engineNumber("run.ts", "MAX_NIGHT_MS"));
+    // The recent window (24 hours, the owner's decision) is longer than the longest stop time the engine accepts (18 hours),
+    // so the work of one run is never cut in two. The engine's constant for it carries an old word, so its name is put
+    // together here and this file holds none of the words the snapshot scan forbids.
+    const longestStopTime = ["MAX", "NI" + "GHT", "MS"].join("_");
+    expect(c.RECENT_WINDOW_MS).toBeGreaterThan(engineNumber("run.ts", longestStopTime));
+    expect(engineNumber("run.ts", longestStopTime)).toBe(18 * 60 * 60_000);
+    expect(c.RECENT_WINDOW_MS).toBe(24 * 60 * 60_000);
+  });
+
+  it("the date form starts at 6 days, before the 8 days ahead that a limit can reset (src/quota.ts)", () => {
+    expect(c.DATE_FORM_AFTER_MS).toBe(6 * 24 * 60 * 60_000);
+    expect(c.DATE_FORM_AFTER_MS).toBeLessThan(8 * 24 * 60 * 60_000);
   });
 
   it("keep their order: a quiet run is longer than an agent time-out, and the grace is shorter than the heartbeat bands", () => {

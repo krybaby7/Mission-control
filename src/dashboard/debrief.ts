@@ -1,4 +1,4 @@
-// The morning debrief: what the night delivered, in a verdict, three lists and four honest ticks
+// The debrief (the page calls it Results): what the team delivered, in a verdict, three lists and four honest ticks
 // (docs/dashboard-spec.md, section 11). Pure: it only reads what the other modules already built.
 import { REASON_MAX_CHARS } from "./constants.js";
 import type { MissionFacts } from "./missions.js";
@@ -13,7 +13,7 @@ import {
   finalReviewCaveat,
   type FinalReviewWhy,
   finalReviewWhy,
-  nightSentence,
+  overallSentence,
   noReworkWhy,
   nothingOpenWhy,
   plannedLine,
@@ -21,10 +21,10 @@ import {
   UNFINISHED_REVIEW_NOTE,
   verdictSentence,
   VERDICT_WORDS,
-} from "./vocabulary-night.js";
+} from "./vocabulary-details.js";
 import type { Formatter } from "./vocabulary.js";
 
-/** Worst first: the night's verdict is the worst verdict of its missions. */
+/** Worst first: the overall verdict is the worst verdict of its missions. */
 const WORST_FIRST: VerdictId[] = ["needs_you", "partly_done", "paused", "done"];
 
 /** The cards that make up a mission's "open items" (spec 9.4): the one number the tick and the verdict share. */
@@ -32,7 +32,7 @@ const OPEN_CARD_KINDS = new Set<string>(["decision", "feature_stuck", "mission_f
 
 /** A mission is in the debrief when it finished, stopped for a reason a person can read, or needs help. A dead run has a red card instead. */
 function verdictOf(m: MissionFacts): VerdictId | null {
-  if (!m.data.readable || m.data.mission === null || m.view.scope !== "tonight") return null;
+  if (!m.data.readable || m.data.mission === null || m.view.scope !== "recent") return null;
   switch (m.view.state) {
     case "done":
       return "done";
@@ -63,7 +63,7 @@ export function buildDebrief(m: MissionFacts[], cards: NeedsYouCard[], usage: Us
   for (const e of entries) counts[e.id] += 1;
   const worst = WORST_FIRST.find((id) => counts[id] > 0) ?? "done";
   const [only] = missions;
-  const sentence = only !== undefined && missions.length === 1 ? only.verdict.sentence : nightSentence(counts);
+  const sentence = only !== undefined && missions.length === 1 ? only.verdict.sentence : overallSentence(counts);
   return { verdict: verdict(worst, sentence), missions, allowanceNote: DEBRIEF_ALLOWANCE_NOTE, honestyNote: DEBRIEF_HONESTY_NOTE };
 }
 

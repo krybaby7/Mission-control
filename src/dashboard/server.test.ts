@@ -45,7 +45,7 @@ vi.mock("node:fs", async (importOriginal) => {
 const SCRIPT = 'document.title = "Mission Control";';
 const DATA = '{"demo":true}';
 const STYLE = "body { margin: 0; }";
-const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Mission Control</title><style>${STYLE}</style></head><body><p>Tonight</p><script>${SCRIPT}</script><script type="application/json" id="d">${DATA}</script></body></html>`;
+const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Mission Control</title><style>${STYLE}</style></head><body><p>Now</p><script>${SCRIPT}</script><script type="application/json" id="d">${DATA}</script></body></html>`;
 
 const sha = (text: string): string => `'sha256-${createHash("sha256").update(text, "utf8").digest("base64")}'`;
 

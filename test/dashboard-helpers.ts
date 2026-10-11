@@ -285,7 +285,7 @@ const mission = obj({
   kind: lit(["new_app", "change"]),
   kindWord: text,
   scope: lit(SCOPES),
-  openFromBefore: bool,
+  openFromEarlier: bool,
   state: lit(MISSION_STATES),
   word: text,
   sentence: text,
@@ -307,7 +307,7 @@ const card = obj({
   severity: lit(["now", "look"]),
   missionId: text,
   missionTitle: text,
-  fromBefore: bool,
+  fromEarlier: bool,
   featureId: nullable(text),
   title: text,
   happened: said,
@@ -398,10 +398,10 @@ const snapshotShape = obj({
   debrief: nullable(obj({ verdict, missions: arr(missionDebrief), allowanceNote: text, honestyNote: text })),
   counts: obj({
     unreadableMissions: count,
-    openFromBefore: count,
-    olderNeedYou: count,
-    olderWaitingForYou: count,
-    tonightMissions: count,
+    openFromEarlier: count,
+    earlierNeedYou: count,
+    earlierWaitingForYou: count,
+    recentMissions: count,
     featuresDone: count,
     featuresTotal: count,
     featuresLine: text,
@@ -474,8 +474,8 @@ function crossErrors(s: Record<string, unknown>, errs: Errors): void {
     if (!ok) errs.push(`counts.${name} (${String(total)}) does not match the missions (${shown} shown, ${String(cut)} not shown)`);
   };
   agrees("unreadableMissions", missions.filter((m) => m.readable === false).length);
-  agrees("openFromBefore", missions.filter((m) => m.scope === "before").length);
-  agrees("tonightMissions", missions.filter((m) => m.scope === "tonight" && m.readable === true).length);
+  agrees("openFromEarlier", missions.filter((m) => m.scope === "earlier").length);
+  agrees("recentMissions", missions.filter((m) => m.scope === "recent" && m.readable === true).length);
   if (missions.length > MAX_MISSIONS_SHOWN) errs.push(`missions: ${missions.length} listed, over the limit of ${MAX_MISSIONS_SHOWN}`);
   if (cards.length > MAX_CARDS_SHOWN) errs.push(`needsYou: ${cards.length} cards, over the limit of ${MAX_CARDS_SHOWN}`);
   const debrief = isRecord(s.debrief) ? s.debrief : null;

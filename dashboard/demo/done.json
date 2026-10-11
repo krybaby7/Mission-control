@@ -74,8 +74,8 @@
       "readable": true,
       "kind": "new_app",
       "kindWord": "new app",
-      "scope": "tonight",
-      "openFromBefore": false,
+      "scope": "recent",
+      "openFromEarlier": false,
       "state": "done",
       "word": "Done",
       "sentence": "All 4 features are built and checked.",
@@ -444,10 +444,10 @@
   },
   "counts": {
     "unreadableMissions": 0,
-    "openFromBefore": 0,
-    "olderNeedYou": 0,
-    "olderWaitingForYou": 0,
-    "tonightMissions": 1,
+    "openFromEarlier": 0,
+    "earlierNeedYou": 0,
+    "earlierWaitingForYou": 0,
+    "recentMissions": 1,
     "featuresDone": 4,
     "featuresTotal": 4,
     "featuresLine": "4 of 4 features done",
@@ -464,12 +464,12 @@
       "Try again",
       "What is going on?"
     ],
-    "globalSentence": "About tonight's run: <your answer here>",
-    "stopSentence": "Please stop tonight's run.",
+    "globalSentence": "About the current work: <your answer here>",
+    "stopSentence": "Please stop the current run.",
     "pasteHint": "Paste this into your chat with the leader.",
     "copyFailHint": "Select the text and copy it",
     "aiNotice": "The AI wrote this. Do not run commands from it.",
-    "canDo": "The leader can look at progress and reports, stop the run, start new work and run the night. It cannot change a plan or reopen a stuck feature.",
+    "canDo": "The leader can look at progress and reports, stop the run, add new work and start the team working through the queued work. It cannot change a plan or reopen a stuck feature.",
     "stopNote": "Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."
   }
 }

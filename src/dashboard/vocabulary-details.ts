@@ -1,4 +1,4 @@
-// The words of the night modules: the wait text, the timeline, the allowance and the morning debrief.
+// The words of the detail modules: the wait text, the timeline, the allowance and the debrief (the results).
 // vocabulary.ts re-exports this file, so there is still one vocabulary. Nothing in here reads a file or a clock; times
 // arrive already formatted, so these functions are plain string builders.
 import type { PillStateId, Said, TickId, Tone, VerdictId, WaitInfo } from "./types.js";
@@ -105,7 +105,8 @@ export function waitText(parsed: ParsedWait, untilText: string): string {
 /**
  * The WaitInfo of one `limit.wait` event (data.until ISO, data.reason). Without a usable time the wait is `unknown`
  * with until 0, as for a wait with no event at all. The raw reason is read here and never leaves this function.
- * `when` words the wake-up time by the one rule: "12:59" on the day of the snapshot, else "Wed 15:26" (a wait can last days).
+ * `when` words the wake-up time by the one rule: "12:59" on the day of the snapshot, else "Wed 15:26", or "Mon 19 Oct 10:03"
+ * from 6 days away (a wait can last days).
  */
 export function waitInfoFromEvent(data: Record<string, unknown> | null, when: (ms: number) => string): WaitInfo & { loginAis: string[] } {
   const until = data !== null && typeof data.until === "string" ? Date.parse(data.until) : Number.NaN;
@@ -157,11 +158,6 @@ export function windowLabel(id: string): string {
   return "Another limit";
 }
 
-/** "03:20" on the day of the snapshot, else "Thu 09:00". */
-export function whenText(sameDay: boolean, weekday: string, time: string): string {
-  return sameDay ? time : `${weekday} ${time}`;
-}
-
 export function resetsLine(when: string): string {
   return `resets ${when}`;
 }
@@ -178,9 +174,12 @@ const BLOCK_WHAT: Record<string, string> = {
   unknown: "a usage limit",
 };
 
-/** `when` is "at 12:59" on the day of the snapshot, else "Thu 09:00". It is the block's end plus the engine's margin. */
-export function resumeWhen(sameDay: boolean, weekday: string, time: string): string {
-  return sameDay ? `at ${time}` : `${weekday} ${time}`;
+/**
+ * "at 12:59" on the day of the snapshot, else the one time rule's text ("Thu 09:00", or "Mon 19 Oct 10:03" from 6 days
+ * away). `when` is the Formatter's text of the block's end plus the engine's margin.
+ */
+export function resumeWhen(sameDay: boolean, when: string): string {
+  return sameDay ? `at ${when}` : when;
 }
 
 export function limitedLine(kind: string, when: string): string {
@@ -188,12 +187,12 @@ export function limitedLine(kind: string, when: string): string {
   return `Waiting for ${own(BLOCK_WHAT, kind) ?? BLOCK_WHAT.unknown} to reset. Work resumes ${when}.`;
 }
 
-/** `when` is the file's time by the one rule: "01:38" on the day of the snapshot, else "Wed 01:38". */
+/** `when` is the file's time by the one rule: "01:38" on the day of the snapshot, else "Wed 01:38", or "Mon 5 Oct 01:38" from 6 days away. */
 export function fileChangedLine(when: string): string {
   return `Usage figures last changed at ${when}`;
 }
 
-// ───────────────────────────── Morning debrief (spec 11) ─────────────────────────────
+// ───────────────────────────── The debrief, shown as the results (spec 11) ─────────────────────────────
 
 export const VERDICT_WORDS: Record<VerdictId, string> = {
   done: "Done",
@@ -243,7 +242,7 @@ export function verdictSentence(id: VerdictId, v: VerdictFacts): string {
 }
 
 /** "3 missions: 1 done, 1 partly done, 1 needs your help." The counts are of the missions in the debrief. */
-export function nightSentence(counts: Record<VerdictId, number>): string {
+export function overallSentence(counts: Record<VerdictId, number>): string {
   const total = counts.done + counts.partly_done + counts.paused + counts.needs_you;
   const parts: string[] = [];
   if (counts.done > 0) parts.push(`${counts.done} done`);

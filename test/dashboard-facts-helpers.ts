@@ -1,10 +1,10 @@
-// Small stand-ins for the night modules' unit tests (timeline, debrief): a MissionFacts built by hand from a mission and
+// Small stand-ins for the unit tests of the timeline and the debrief: a MissionFacts built by hand from a mission and
 // its events, so those tests do not depend on how the mission views are computed. The whole path is covered by the
 // tests that build a snapshot from a fixture.
 import type { MissionFacts } from "../src/dashboard/missions.js";
 import { type DispatchPicks, readDetails, readHome } from "../src/dashboard/read.js";
 import type { FeatureStateId, FeatureView, MissionStateId, MissionView, NeedsYouCard, PausedWhy, Scope } from "../src/dashboard/types.js";
-import { explainFeatureReason } from "../src/dashboard/vocabulary-night.js";
+import { explainFeatureReason } from "../src/dashboard/vocabulary-details.js";
 import type { Feature, Mission, MissionEvent } from "../src/types.js";
 import { copyHome } from "./dashboard-helpers.js";
 
@@ -59,7 +59,7 @@ const STATE_OF_STATUS: Record<string, MissionStateId> = {
   failed: "needs_you",
 };
 
-/** A MissionFacts with only the fields the night modules read. Everything else is a placeholder. */
+/** A MissionFacts with only the fields the timeline and debrief modules read. Everything else is a placeholder. */
 export function fakeFacts(mission: Mission, o: FakeFactsOptions = {}): MissionFacts {
   const features = mission.features.map(featureView);
   const view = {
@@ -68,8 +68,8 @@ export function fakeFacts(mission: Mission, o: FakeFactsOptions = {}): MissionFa
     readable: o.readable ?? true,
     kind: "new_app",
     kindWord: "new app",
-    scope: o.scope ?? "tonight",
-    openFromBefore: o.scope === "before",
+    scope: o.scope ?? "recent",
+    openFromEarlier: o.scope === "earlier",
     state: o.state ?? STATE_OF_STATUS[mission.status] ?? "unknown",
     word: "",
     sentence: "",
@@ -115,7 +115,7 @@ export function fakeCard(missionId: string, kind: NeedsYouCard["kind"], featureI
     severity: "look",
     missionId,
     missionTitle: missionId,
-    fromBefore: false,
+    fromEarlier: false,
     featureId,
     title: "A card",
     happened: { text: "It happened.", author: "engine" },

@@ -209,15 +209,15 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
 .ai-label .ic { width: 1.15em; height: 1.15em; margin-top: 1px; }
 .quote { color: var(--ink); border-left: 3px solid var(--line-strong); padding-left: 10px; }
 
-/* the row of older missions */
-.older { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
-.older summary { list-style: none; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 16px; font-weight: 700; cursor: pointer; color: var(--ink-2); }
-.older summary::-webkit-details-marker { display: none; }
-.older summary::before { content: ""; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); flex: none; }
-.older[open] summary::before { transform: rotate(45deg); }
-.older-list { display: grid; gap: 10px; padding: 4px 16px 16px; }
-.older-item { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 12px; }
-.older-item:first-child { border-top: 0; padding-top: 0; }
+/* the quiet row of earlier work that is still open */
+.earlier { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.earlier summary { list-style: none; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 16px; font-weight: 700; cursor: pointer; color: var(--ink-2); }
+.earlier summary::-webkit-details-marker { display: none; }
+.earlier summary::before { content: ""; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); flex: none; }
+.earlier[open] summary::before { transform: rotate(45deg); }
+.earlier-list { display: grid; gap: 10px; padding: 4px 16px 16px; }
+.earlier-item { display: grid; gap: 6px; border-top: 1px solid var(--line); padding-top: 12px; }
+.earlier-item:first-child { border-top: 0; padding-top: 0; }
 
 /* allowance */
 .allowance { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 12px; box-shadow: var(--shadow); }
@@ -264,8 +264,8 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
 .tl-body { display: grid; gap: 6px; }
 .tl-item[data-tone="bad"] .tl-text { font-weight: 700; }
 
-/* debrief */
-.debrief { display: grid; gap: 18px; max-width: 980px; }
+/* results */
+.results { display: grid; gap: 18px; max-width: 980px; }
 .verdict { display: flex; align-items: flex-start; gap: 14px; border: 2px solid var(--t-line); background: var(--t-bg); border-radius: 16px; padding: 18px; box-shadow: var(--shadow); }
 .verdict .ic { width: 44px; height: 44px; color: var(--t-fg); stroke-width: 1.8; }
 .verdict-word { font-size: 28px; font-weight: 800; line-height: 1.1; color: var(--t-fg); text-transform: uppercase; letter-spacing: 0.03em; }
@@ -364,32 +364,32 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     <p class="notice" id="notice" role="status" hidden></p>
 
     <div class="tabs" role="tablist" id="tabs" hidden>
-      <button type="button" class="tab" role="tab" id="tab-tonight" aria-controls="panel-tonight" aria-selected="true" data-tab="tonight">Tonight</button>
+      <button type="button" class="tab" role="tab" id="tab-now" aria-controls="panel-now" aria-selected="true" data-tab="now">Now</button>
       <button type="button" class="tab" role="tab" id="tab-needs" aria-controls="panel-needs" aria-selected="false" tabindex="-1" data-tab="needs">Needs you</button>
       <button type="button" class="tab" role="tab" id="tab-timeline" aria-controls="panel-timeline" aria-selected="false" tabindex="-1" data-tab="timeline">Timeline</button>
-      <button type="button" class="tab" role="tab" id="tab-debrief" aria-controls="panel-debrief" aria-selected="false" tabindex="-1" data-tab="debrief">Morning debrief</button>
+      <button type="button" class="tab" role="tab" id="tab-results" aria-controls="panel-results" aria-selected="false" tabindex="-1" data-tab="results">Results</button>
     </div>
 
     <main id="main" hidden>
-      <section class="panel" role="tabpanel" id="panel-tonight" aria-labelledby="tab-tonight">
+      <section class="panel" role="tabpanel" id="panel-now" aria-labelledby="tab-now">
         <section class="lamp" id="lamp" data-tone="idle" aria-labelledby="lamp-word">
           <div class="lamp-head"><span class="lamp-icon" id="lamp-icon"></span><h2 class="lamp-word" id="lamp-word"></h2></div>
           <p class="lamp-sentence" id="lamp-sentence" aria-live="polite"></p>
           <ul class="lamp-lines" id="lamp-lines"></ul>
         </section>
         <div id="under-lamp" class="stack"></div>
-        <div id="tonight-body" class="stack"></div>
+        <div id="now-body" class="stack"></div>
       </section>
       <section class="panel" role="tabpanel" id="panel-needs" aria-labelledby="tab-needs" hidden></section>
       <section class="panel" role="tabpanel" id="panel-timeline" aria-labelledby="tab-timeline" hidden></section>
-      <section class="panel" role="tabpanel" id="panel-debrief" aria-labelledby="tab-debrief" hidden></section>
+      <section class="panel" role="tabpanel" id="panel-results" aria-labelledby="tab-results" hidden></section>
     </main>
   </div>
 
   <div class="gbar" id="gbar" hidden>
     <div class="gbar-in">
-      <button type="button" class="btn" id="gbar-tell">Tell the leader about tonight</button>
-      <button type="button" class="btn quiet" id="gbar-stop">Stop tonight's run</button>
+      <button type="button" class="btn" id="gbar-tell">Tell the leader anything</button>
+      <button type="button" class="btn quiet" id="gbar-stop">Stop the current run</button>
     </div>
   </div>
 </div>
@@ -443,7 +443,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     happened: "What happened",
     ifNothing: "If you do nothing",
     whatToDo: "What to do",
-    tell: "Tell the leader",
+    tell: "Tell the leader about this",
     openQuestion: "Open the question",
     reinforcementsLabel: "Reinforcements called in: ",
     none: "none",
@@ -461,16 +461,16 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     checkNone: "No checks written for this feature",
     allowance: "Allowance (how much of your plans is used)",
     pauseHere: "work pauses here",
-    openBefore: "Open from before (",
+    earlierOpen: "Earlier work still open (",
     updated: "Updated ",
-    earlier: "Earlier events are not shown (",
+    earlierEvents: "Earlier events are not shown (",
     missionNotShown: "1 more mission is not shown. The lamp above counts it.",
     missionsNotShown: " more missions are not shown. The lamp above counts them.",
-    cardNotShown: "1 more thing for you is not shown. The lamp on the Tonight tab counts it.",
-    cardsNotShown: " more things for you are not shown. The lamp on the Tonight tab counts them.",
+    cardNotShown: "1 more thing for you is not shown. The lamp on the Now tab counts it.",
+    cardsNotShown: " more things for you are not shown. The lamp on the Now tab counts them.",
     gotHeading: "What you got",
     notFinished: "Not finished",
-    nightResult: "Night result",
+    howItWent: "How it went",
     allowanceNow: "Allowance now",
     yes: "Yes",
     no: "Not this time",
@@ -479,12 +479,13 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     emptyMissions: "No missions yet. When one is queued it appears here.",
     emptyCards: "Nothing needs you right now.",
     calmLook: "Nothing for you to decide. See the note above.",
-    debriefReady: "Morning debrief ready. See what you got.",
+    calmLookNeeds: "Nothing for you to decide. See the note on the Now tab.",
+    resultsReady: "Results are ready",
     cannotSend: "This page cannot send messages. Pick or type an answer, tap Copy, then paste it into your chat with the leader.",
     cannotStop: "This page cannot stop the run. Tap Copy, then paste the sentence into your chat with the leader.",
     copyFirst: "Choose a quick answer or type your own words first, then tap Copy.",
-    emptyTimeline: "Nothing has happened tonight yet.",
-    emptyDebrief: "The morning debrief appears when tonight's work has finished or paused.",
+    emptyTimeline: "Nothing has happened yet.",
+    emptyResults: "Results appear when work has finished or paused.",
     badVersion: "This page and Mission Control are different versions. Reload the page.",
     cannotReach: "Cannot reach Mission Control."
   };
@@ -561,7 +562,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     todo: "hollow"
   };
   var STEP_IDS = ["plan", "plan_check", "build", "final_check", "landed"];
-  var TABS = ["tonight", "needs", "timeline", "debrief"];
+  var TABS = ["now", "needs", "timeline", "results"];
 
   function look(table, id) {
     return Object.prototype.hasOwnProperty.call(table, id) ? table[id] : UNKNOWN_LOOK;
@@ -656,8 +657,8 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     level: 0,
     firstFailed: false,
     versionBad: false,
-    tab: "tonight",
-    beforeOpen: false,
+    tab: "now",
+    earlierOpen: false,
     doneOpen: {},
     underKey: "",
     pollTimer: 0,
@@ -847,7 +848,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
   $("gbar-stop").setAttribute("data-key", "gbar-stop");
 
   // ---------------------------------------------------------------------------------------------
-  // Tonight
+  // Now
   // ---------------------------------------------------------------------------------------------
   function stepper(m) {
     var list = el("ol", "steps");
@@ -1068,19 +1069,19 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     return "";
   }
 
-  function debriefRow() {
+  function resultsRow() {
     var b = el("button", "linkrow");
     b.type = "button";
-    b.setAttribute("data-key", "debrief-link");
-    add(b, ic("info"), el("span", "", W.debriefReady), ic("chev", "go"));
+    b.setAttribute("data-key", "results-link");
+    add(b, ic("info"), el("span", "", W.resultsReady), ic("chev", "go"));
     b.addEventListener("click", function () {
-      selectTab("debrief", false);
+      selectTab("results", false);
       requestAnimationFrame(function () { $("tabs").scrollIntoView({ block: "start" }); });
     });
     return b;
   }
 
-  // Under the lamp: the strip, and a way to the morning debrief when the night is over and one is ready.
+  // Under the lamp: the strip, and a way to the Results tab when no run is live and results are ready.
   // It is drawn again when the snapshot or the lamp that is showing changes (the page's own clock can change the lamp).
   function paintUnderLamp(lamp) {
     var snap = state.snap;
@@ -1089,29 +1090,31 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     state.underKey = key;
     var frag = document.createDocumentFragment();
     add(frag, strip(snap, lamp.state));
-    if (snap.debrief && !snap.run.active) frag.appendChild(debriefRow());
+    if (snap.debrief && !snap.run.active) frag.appendChild(resultsRow());
     var slot = $("under-lamp");
     clear(slot);
     slot.appendChild(frag);
   }
 
-  function olderRow(snap) {
-    var before = snap.missions.filter(function (m) { return m.scope === "before"; });
-    if (before.length === 0) return null;
-    var d = el("details", "older");
-    if (state.beforeOpen) d.open = true;
-    d.addEventListener("toggle", function () { state.beforeOpen = d.open; });
-    var sum = el("summary", "", W.openBefore + snap.counts.openFromBefore + ")");
-    sum.setAttribute("data-key", "older");
+  // The quiet row: missions from an earlier run that are still open. It never changes the lamp by itself.
+  function earlierRow(snap) {
+    var earlier = snap.missions.filter(function (m) { return m.scope === "earlier"; });
+    if (earlier.length === 0) return null;
+    var d = el("details", "earlier");
+    if (state.earlierOpen) d.open = true;
+    d.addEventListener("toggle", function () { state.earlierOpen = d.open; });
+    var count = typeof snap.counts.openFromEarlier === "number" ? snap.counts.openFromEarlier : earlier.length;
+    var sum = el("summary", "", W.earlierOpen + count + ")");
+    sum.setAttribute("data-key", "earlier");
     d.appendChild(sum);
-    var list = el("div", "older-list");
-    before.forEach(function (m) {
+    var list = el("div", "earlier-list");
+    earlier.forEach(function (m) {
       var lk = look(MISSION_LOOK, m.state);
-      var item = el("div", "older-item");
+      var item = el("div", "earlier-item");
       var titleRow = el("div", "mission-title");
       var h = el("h4", "", m.title);
       add(titleRow, h, chip(lk, m.word));
-      add(item, titleRow, el("p", "small", m.sentence), tellButton(m.tellLeader, "tell:before:" + m.id, h, true));
+      add(item, titleRow, el("p", "small", m.sentence), tellButton(m.tellLeader, "tell:earlier:" + m.id, h, true));
       list.appendChild(item);
     });
     d.appendChild(list);
@@ -1172,19 +1175,20 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     return box;
   }
 
-  function renderTonight(snap) {
-    var body = $("tonight-body");
+  function renderNow(snap) {
+    var body = $("now-body");
     var frag = document.createDocumentFragment();
     var features = el("section", "features");
-    var tonight = orderedMissions(snap.missions.filter(function (m) { return m.scope !== "before"; }), snap);
-    // With nothing planned there is one line to say so, not a heading and a line.
-    if (tonight.length === 0) features.appendChild(el("p", "empty", W.emptyMissions));
+    var current = orderedMissions(snap.missions.filter(function (m) { return m.scope !== "earlier"; }), snap);
+    // With nothing planned there is one line to say so, not a heading and a line. With only earlier work open
+    // the quiet row below is the answer, so the line is left out ("No missions yet" above a listed mission would contradict it).
+    if (current.length === 0) { if (snap.missions.length === 0) features.appendChild(el("p", "empty", W.emptyMissions)); }
     else features.appendChild(el("h2", "", snap.counts.featuresLine));
-    tonight.forEach(function (m) { features.appendChild(missionGroup(m, snap, tonight.length > 1)); });
+    current.forEach(function (m) { features.appendChild(missionGroup(m, snap, current.length > 1)); });
     var cutMissions = snap.counts.missionsNotShown;
     if (cutMissions > 0) features.appendChild(el("p", "small muted", cutMissions === 1 ? W.missionNotShown : cutMissions + W.missionsNotShown));
-    frag.appendChild(features);
-    add(frag, olderRow(snap), allowanceSection(snap));
+    if (features.firstChild) frag.appendChild(features);
+    add(frag, earlierRow(snap), allowanceSection(snap));
     clear(body);
     body.appendChild(frag);
   }
@@ -1232,6 +1236,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     }
     $("main").className = state.level >= 2 ? "gone" : "";
     paintUnderLamp(lamp);
+    paintNeedsEmpty(lamp.state);
   }
 
   // Stopping only makes sense while a run is on or a stop is already asked for.
@@ -1302,6 +1307,18 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     return art;
   }
 
+  // With no cards, the Needs you tab says what the lamp that is showing allows: "Nothing needs you right now." only
+  // beside a green or grey lamp, else a pointer to the note on the Now tab (the same rule as the strip under the lamp).
+  function needsEmptyWords(lampState) {
+    return lampState === "on_track" || lampState === "idle" ? W.emptyCards : W.calmLookNeeds;
+  }
+
+  // The page's own clock can change the lamp, so the empty line is found again and rewritten when it does.
+  function paintNeedsEmpty(lampState) {
+    var node = document.querySelector('[data-empty="needs"]');
+    if (node) setText(node, needsEmptyWords(lampState));
+  }
+
   function renderNeeds(snap) {
     var panel = $("panel-needs");
     var frag = document.createDocumentFragment();
@@ -1309,7 +1326,9 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     frag.appendChild(el("h2", "", n > 0 ? "Needs you (" + n + ")" : "Needs you"));
     frag.appendChild(el("p", "", W.needsTop));
     if (n === 0) {
-      frag.appendChild(el("p", "empty", W.emptyCards));
+      var empty = el("p", "empty", needsEmptyWords(effectiveLamp(snap, state.level).state));
+      empty.setAttribute("data-empty", "needs");
+      frag.appendChild(empty);
     } else {
       var list = el("div", "cards");
       snap.needsYou.forEach(function (c) { list.appendChild(card(c, snap)); });
@@ -1340,7 +1359,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     frag.appendChild(el("h2", "", "Timeline"));
     var items = snap.timeline.items;
     var box = el("div", "timeline");
-    if (snap.timeline.earlierNotShown > 0) box.appendChild(el("p", "small muted", W.earlier + snap.timeline.earlierNotShown + ")."));
+    if (snap.timeline.earlierNotShown > 0) box.appendChild(el("p", "small muted", W.earlierEvents + snap.timeline.earlierNotShown + ")."));
     if (items.length === 0) {
       box.appendChild(el("p", "empty", W.emptyTimeline));
     } else {
@@ -1382,7 +1401,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
   }
 
   // ---------------------------------------------------------------------------------------------
-  // Morning debrief
+  // Results (the snapshot calls them `debrief`)
   // ---------------------------------------------------------------------------------------------
   // `once`: short AI-written lines (what was built). The label comes once at the top of the list and each line is a
   // plain quote. Without it (what did not get finished) every AI text keeps its own box and label.
@@ -1418,7 +1437,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     return row;
   }
 
-  function debriefMission(d, snap) {
+  function resultsMission(d, snap) {
     var lk = look(VERDICT_LOOK, d.verdict.id);
     var box = el("section", "dmission");
     var head = el("div", "dhead");
@@ -1429,7 +1448,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     add(box, featureList(W.notFinished, d.leftOut, snap, false));
     add(box, featureList(W.recovered, d.recovered, snap, true));
     var result = el("div", "list-block");
-    add(result, el("h4", "section-label", W.nightResult), el("p", "small muted", d.plannedLine));
+    add(result, el("h4", "section-label", W.howItWent), el("p", "small muted", d.plannedLine));
     var ticks = el("div", "ticks");
     d.ticks.forEach(function (t) { ticks.appendChild(tickRow(t)); });
     result.appendChild(ticks);
@@ -1439,20 +1458,20 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
       box.appendChild(el("p", "small muted", d.agentTimeText + runs));
     }
     var foot = el("div", "tile-actions");
-    foot.appendChild(tellButton(d.tellLeader, "tell:debrief:" + d.missionId, h, true));
+    foot.appendChild(tellButton(d.tellLeader, "tell:results:" + d.missionId, h, true));
     box.appendChild(foot);
     return box;
   }
 
-  function renderDebrief(snap) {
-    var panel = $("panel-debrief");
+  function renderResults(snap) {
+    var panel = $("panel-results");
     var frag = document.createDocumentFragment();
-    frag.appendChild(el("h2", "", "Morning debrief"));
+    frag.appendChild(el("h2", "", "Results"));
     var d = snap.debrief;
     if (!d) {
-      frag.appendChild(el("p", "empty", W.emptyDebrief));
+      frag.appendChild(el("p", "empty", W.emptyResults));
     } else {
-      var wrap = el("div", "debrief");
+      var wrap = el("div", "results");
       var vk = look(VERDICT_LOOK, d.verdict.id);
       var verdict = el("div", "verdict");
       tone(verdict, vk.tone);
@@ -1460,7 +1479,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
       add(words, el("div", "verdict-word", d.verdict.word), el("p", "verdict-sentence", d.verdict.sentence));
       add(verdict, ic(vk.icon), words);
       wrap.appendChild(verdict);
-      d.missions.forEach(function (m) { wrap.appendChild(debriefMission(m, snap)); });
+      d.missions.forEach(function (m) { wrap.appendChild(resultsMission(m, snap)); });
       var allow = el("section", "dmission");
       allow.appendChild(el("h4", "section-label", W.allowanceNow));
       var pills = el("div", "pills");
@@ -1488,7 +1507,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     setText($("tab-needs"), n > 0 ? "Needs you (" + n + ")" : "Needs you");
     TABS.forEach(function (name) {
       var on = name === state.tab;
-      var tab = $("tab-" + (name === "needs" ? "needs" : name));
+      var tab = $("tab-" + name);
       tab.setAttribute("aria-selected", on ? "true" : "false");
       tab.setAttribute("tabindex", on ? "0" : "-1");
       $("panel-" + name).hidden = !on;
@@ -1530,10 +1549,10 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     $("gbar").hidden = false;
     paintGbar(snap);
     paintLamp();
-    renderTonight(snap);
+    renderNow(snap);
     renderNeeds(snap);
     renderTimeline(snap);
-    renderDebrief(snap);
+    renderResults(snap);
     paintTabs(snap);
     paintFresh();
     if (key && (!active.isConnected || !document.contains(active))) {

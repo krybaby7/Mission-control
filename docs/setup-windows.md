@@ -297,11 +297,11 @@ Only one run can happen at a time. If you start one by hand while the scheduled 
 
 Your apps' files are in File Explorer at `\\wsl.localhost\Ubuntu\home\<your-ubuntu-name>\mc-apps`.
 
-## Optional: watch the night on a web page (the dashboard)
+## Optional: watch the team on a web page (the dashboard)
 
-The dashboard is a web page that shows, in plain words, whether the night is working, how far along it is, whether anything needs you, and what you got in the morning. It only reads Mission Control's files: it can't change, stop or start anything. This part has not been tried on a real PC yet.
+The dashboard is a web page that shows, in plain words, whether the team is working, how far along it is, whether anything needs you, and what you got. It only reads Mission Control's files: it can't change, stop or start anything. This part has not been tried on a real PC yet.
 
-1. Open a second Ubuntu window (leave the one with the night run alone) and run:
+1. Open a second Ubuntu window (leave the one with the run alone) and run:
 
    ```
    mc dashboard
@@ -309,15 +309,15 @@ The dashboard is a web page that shows, in plain words, whether the night is wor
 
    **You should see** a line like `mc-docker: the dashboard is at http://localhost:8787 (Ctrl+C to stop)`. Leave the window open. The dashboard runs in a container of its own, which can only read Mission Control's folder.
 
-2. Open <http://localhost:8787> in your Windows browser. The page has four tabs: **Tonight**, **Needs you**, **Timeline** and **Morning debrief**. It asks for news every few seconds. If it can't, it says **Not updating**, and after a few minutes **Not responding**.
+2. Open <http://localhost:8787> in your Windows browser. The page has four tabs: **Now**, **Needs you**, **Timeline** and **Results**. It asks for news every few seconds. If it can't, it says **Not updating**, and after a few minutes **Not responding**.
 
-3. To see a countdown to the stop time, start it with the same time you gave the night run:
+3. If you gave the run a stop time, you can show it. Start the dashboard with the same time:
 
    ```
    mc dashboard --until 07:00
    ```
 
-   Mission Control doesn't save the stop time, so without `--until` the page shows no countdown.
+   `--until` is only a stop time to show. Mission Control doesn't save the run's stop time, so without `--until` the page shows no stop time and no countdown. A run started without a stop time simply keeps going until the queued work is done.
 
 4. To stop the dashboard, press **Ctrl+C** in its window. If the window is gone and it is still running, `docker stop mission-control-dashboard` stops it.
 
@@ -334,13 +334,13 @@ There is no password, by design. Anyone who can open the page can see your missi
 - The page is plain `http`, with no password.
 - Windows, Docker Desktop and WSL2 each sit between the iPad and the page. Nobody has checked what they let through.
 
-If the page doesn't open on the iPad, the leader (next section) can tell you how the night is going in words, and the ntfy notifications from Step 6 don't depend on the dashboard.
+If the page doesn't open on the iPad, the leader (next section) can tell you how the work is going in words, and the ntfy notifications from Step 6 don't depend on the dashboard.
 
 ## Optional: start the leader
 
-The leader is a Claude Code session that you talk to in plain words: "How is it going?", "Add a dark mode to the habit tracker", "Please stop tonight's run." It acts only through the same `mc` commands you use (status, logs, report, stop, new, feature and run), and Claude Code asks you before the leader stops the run, starts the night, or queues a new app or a change (answer Yes once; never "Yes, and don't ask again", which would switch that question off for good). It can't reopen a feature that got stuck or change a plan; for those it queues a follow-up request that starts on the next run. This part has not been tried on a real PC yet.
+The leader is a Claude Code session that you talk to in plain words: "How is it going?", "Add a dark mode to the habit tracker", "Please stop the current run." It acts only through the same `mc` commands you use (status, logs, report, stop, new, feature and run), and Claude Code asks you before the leader stops the run, starts the team working, or queues a new app or a change (answer Yes once; never "Yes, and don't ask again", which would switch that question off for good). It can't reopen a feature that got stuck or change a plan; for those it queues a follow-up request that starts on the next run. This part has not been tried on a real PC yet.
 
-1. Claude Code must be installed in Ubuntu itself, and logged in there. The copy inside Mission Control's container can't be used. Follow Anthropic's installation instructions for Claude Code on Linux. The leader's chat uses the same Claude plan as the night run.
+1. Claude Code must be installed in Ubuntu itself, and logged in there. The copy inside Mission Control's container can't be used. Follow Anthropic's installation instructions for Claude Code on Linux. The leader's chat uses the same Claude plan as the team's runs.
 
 2. In the Ubuntu window:
 
@@ -350,7 +350,7 @@ The leader is a Claude Code session that you talk to in plain words: "How is it 
 
    Log in when it asks. Then type `How is it going?`. The folder's `CLAUDE.md` and `.claude/settings.json` give the leader its instructions and limits; [leader/README.md](../leader/README.md) explains them.
 
-3. On the dashboard, the **Tell the leader** buttons give you a ready sentence. Copy it and paste it into the chat with the leader.
+3. On the dashboard, the **Tell the leader about this** buttons (on cards and features) and **Tell the leader anything** (on the bar) give you a ready sentence. Copy it and paste it into the chat with the leader.
 
 4. Optional: to talk to the same leader from the Claude app on your iPad or phone, start it this way instead of step 2:
 
@@ -364,7 +364,7 @@ The leader is a Claude Code session that you talk to in plain words: "How is it 
 
    It needs a claude.ai login (Pro, Max, Team or Enterprise); API keys do not work. On Team or Enterprise, an Owner must first turn on Remote Control in the Claude Code admin settings. The first time, Claude Code asks "Enable Remote Control? (y/n)" and whether you trust the folder; answer yes. Keep the Ubuntu window open and the PC awake. Remote Control has not been tried here: whether the session appears, and what you can do in it from the app, is unverified. These steps follow Anthropic's Remote Control documentation (https://code.claude.com/docs/en/remote-control).
 
-If you ask the leader to start the night, it runs `mc run` as a background task of the chat. If the chat session ends, the run may stop too; its progress is kept and the next run continues (not tried). For a night that must not depend on a chat, use Step 9 or the scheduled run.
+If you ask the leader to start the team working, it runs `mc run` as a background task of the chat. It adds a stop time (`--until`) only if you give one; without one, the run keeps going until the queued work is done or you ask it to stop. If the chat session ends, the run may stop too; its progress is kept and the next run continues (not tried). For a run that must not depend on a chat, use Step 9 or the scheduled run.
 
 ## Optional: upload finished work to GitHub
 

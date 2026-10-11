@@ -52,12 +52,12 @@ describe("T-LAMP-L2 and L3: the run is gone", () => {
 
   it("is red from the minute on, with a card", () => {
     const s = gone(RUN_GONE_GRACE_MS);
-    expect(s.lamp).toMatchObject({ state: "needs_you_now", sentence: "The night's work stopped unexpectedly." });
+    expect(s.lamp).toMatchObject({ state: "needs_you_now", sentence: "The run stopped unexpectedly." });
     expect(codes(s)).toEqual(["run_gone"]);
     expect(s.needsYou.map((c) => c.kind)).toEqual(["run_stopped"]);
   });
 
-  it("is never grey 'Idle' while a mission of tonight is saved busy (E11)", () => {
+  it("is never grey 'Idle' while a recent mission is saved busy (E11)", () => {
     for (const age of [0, 30 * SECOND, 5 * MINUTE, 5 * HOUR]) expect(gone(age).lamp.state).not.toBe("idle");
   });
 
@@ -68,11 +68,17 @@ describe("T-LAMP-L2 and L3: the run is gone", () => {
     expect(codes(s)).toEqual(["run_gone"]);
   });
 
-  it("is not made by a mission that is only saved busy from long ago: it is open from before", () => {
+  it("a lock that stopped beating 8 days ago names the date, not a weekday that repeats (V3)", () => {
+    const s = oneMission({ status: "running", age: 10 * MINUTE }, { live: true, lockAgeMs: 8 * 24 * HOUR });
+    expect(s.run).toMatchObject({ active: false, heartbeat: "stale" });
+    expect(s.run.line).toBe("The last run stopped answering at Sat 3 Oct 09:58.");
+  });
+
+  it("is not made by a mission that is only saved busy from long ago: it is earlier work still open", () => {
     const s = oneMission({ status: "running", age: 30 * HOUR });
-    expect(s.missions[0]).toMatchObject({ scope: "before", state: "paused", pausedWhy: "unexpected" });
-    expect(codes(s)).toEqual(["nothing_tonight"]);
-    expect(s.lamp.sentence).toBe("Nothing is running. 1 older mission waits for the next run (see below).");
+    expect(s.missions[0]).toMatchObject({ scope: "earlier", state: "paused", pausedWhy: "unexpected" });
+    expect(codes(s)).toEqual(["nothing_running"]);
+    expect(s.lamp.sentence).toBe("Nothing is running. 1 earlier mission waits for the next run (see below).");
   });
 });
 
@@ -103,7 +109,7 @@ describe("T-LAMP-L2 and L3: the run is gone during a wait (M4)", () => {
   it("is red from 60 000 ms on, with the card that says the run stopped", () => {
     const s = deadWait(RUN_GONE_GRACE_MS);
     expect(codes(s)).toEqual(["run_gone"]);
-    expect(s.lamp).toMatchObject({ state: "needs_you_now", sentence: "The night's work stopped unexpectedly." });
+    expect(s.lamp).toMatchObject({ state: "needs_you_now", sentence: "The run stopped unexpectedly." });
     expect(s.missions[0]).toMatchObject({ state: "paused", pausedWhy: "unexpected", waiting: null });
     expect(s.allowance.waiting).toBeNull();
     expect(s.needsYou.map((c) => c.kind)).toEqual(["run_stopped"]);
@@ -315,42 +321,42 @@ describe("T-LAMP-L14: finished partly done", () => {
   });
 });
 
-describe("T-LAMP-L15 and L23: older missions", () => {
+describe("T-LAMP-L15 and L23: earlier missions", () => {
   const NOW = Date.parse("2026-10-11T10:00:00.000Z");
 
-  it("L15: a failed mission from before is amber, and the sentence never says 'Nothing needs you' (E46)", () => {
+  it("L15: an earlier failed mission is amber, and the sentence never says 'Nothing needs you' (E46)", () => {
     const s = snap(copyHome("scope-mix"), NOW);
-    expect(s.lamp).toMatchObject({ state: "needs_look", sentence: "1 older mission needs your help." });
-    expect(codes(s)).toEqual(["older_failed", "older_items"]);
-    expect(s.counts.olderNeedYou).toBe(1);
+    expect(s.lamp).toMatchObject({ state: "needs_look", sentence: "1 earlier mission needs your help." });
+    expect(codes(s)).toEqual(["earlier_failed", "earlier_items"]);
+    expect(s.counts.earlierNeedYou).toBe(1);
     expect(s.lamp.sentence).not.toContain("Nothing needs you");
   });
 
-  it("L23: older items that wait for the owner change no colour (grey)", () => {
+  it("L23: earlier items that wait for the owner change no colour (grey)", () => {
     const home = copyHome("scope-mix");
-    for (const gone of ["2026-10-10-login-lapsed", "2026-10-11-tonight-work"]) rmSync(join(home, "missions", gone), { recursive: true });
+    for (const gone of ["2026-10-10-login-lapsed", "2026-10-11-recent-work"]) rmSync(join(home, "missions", gone), { recursive: true });
     const s = snap(home, NOW);
-    expect(s.lamp).toMatchObject({ state: "idle", sentence: "Nothing is running. 1 older mission still waits for you (see below). 1 older mission waits for the next run (see below)." });
-    expect(codes(s)).toEqual(["older_items", "nothing_tonight"]);
-    expect(reason(s, "older_items")).toMatchObject({ severity: "info", text: "1 older mission still waits for you" });
+    expect(s.lamp).toMatchObject({ state: "idle", sentence: "Nothing is running. 1 earlier mission still waits for you (see below). 1 earlier mission waits for the next run (see below)." });
+    expect(codes(s)).toEqual(["earlier_items", "nothing_running"]);
+    expect(reason(s, "earlier_items")).toMatchObject({ severity: "info", text: "1 earlier mission still waits for you" });
   });
 
-  it("L23 with a run on: green, and the tail says what is old", () => {
+  it("L23 with a run on: green, and the tail says what is earlier", () => {
     const home = copyHome("scope-mix");
     rmSync(join(home, "missions", "2026-10-10-login-lapsed"), { recursive: true });
     live(home, "2026-10-11T09:55:00.000Z", NOW);
     const s = snap(home, NOW);
     expect(s.lamp.state).toBe("on_track");
-    expect(s.lamp.sentence).toMatch(/Nothing new needs you\. 1 older mission still waits for you \(see below\)\.$/);
+    expect(s.lamp.sentence).toMatch(/Nothing new needs you\. 1 earlier mission still waits for you \(see below\)\.$/);
     expect(s.lamp.sentence).not.toContain("Nothing needs you");
   });
 
-  it("L23 with everything of tonight done: green, with the same tail", () => {
+  it("L23 with every recent mission done: green, with the same tail", () => {
     const home = copyHome("scope-mix");
     for (const gone of ["2026-10-10-login-lapsed", "2026-10-06-queued-long-ago"]) rmSync(join(home, "missions", gone), { recursive: true });
     const s = snap(home, NOW);
-    expect(s.lamp).toMatchObject({ state: "on_track", sentence: "The feature is done. Nothing new needs you. 1 older mission still waits for you (see below)." });
-    expect(codes(s)).toEqual(["older_items", "all_done"]);
+    expect(s.lamp).toMatchObject({ state: "on_track", sentence: "The feature is done. Nothing new needs you. 1 earlier mission still waits for you (see below)." });
+    expect(codes(s)).toEqual(["earlier_items", "all_done"]);
   });
 });
 
@@ -429,6 +435,59 @@ describe("T-LAMP-L16 and L17: waits", () => {
     expect(s.allowance.providers.map((p) => p.limitedText)).toEqual(["Waiting for the weekly limit to reset. Work resumes Wed 10:58.", "Waiting for the weekly limit to reset. Work resumes Wed 10:58."]);
     expect(s.allowance.fileChangedText).toBe("Usage figures last changed at Fri 09:58");
     expect(JSON.stringify(s)).not.toMatch(/until 10:58|at 10:58/);
+  });
+
+  // V3: a weekday alone repeats every week. From 6 days away a wait, a reset and the time the figures changed carry the
+  // date, so "Mon 10:03" is never read as tomorrow. Everything names the same moment, with the same words.
+  it.each([
+    ["5 days 23 h 59 min ahead still names the weekday only", 6 * 24 * HOUR - MINUTE, "Sat 09:57", "Mon 09:59"],
+    ["exactly 6 days ahead carries the date", 6 * 24 * HOUR, "Sat 17 Oct 09:58", "Mon 5 Oct 09:58"],
+    ["8 days ahead (the longest a limit can reset) carries the date", 8 * 24 * HOUR, "Mon 19 Oct 09:58", "Sat 3 Oct 09:58"],
+  ])("V3: a wait %s, and so does every text that names it", (_name, ahead, untilText, changedAt) => {
+    const until = MID + ahead;
+    const m = missionAt(MID, "2026-10-11-a", { status: "waiting", stage: "features", features: [featureWith("a", "done"), featureWith("b", "building")] });
+    const quota = { version: 1, limits: { claude: { kind: "weekly", until: until - 45_000, raw: "x" } }, modelBlocks: [], utilization: [] };
+    const home = buildHome(
+      {
+        missions: [{ mission: m, events: [makeEvent(m.id, MID - 5 * SECOND, "limit.wait", { until: iso(until), reason: `claude-opus-5-5: weekly limit until ${iso(until - 45_000)}` })] }],
+        lock: { at: iso(MID - 10 * MINUTE) },
+        quota,
+        quotaMtimeMs: MID - ahead,
+      },
+      MID,
+    );
+    const s = snap(home, MID);
+    const wait = `Waiting for allowance until ${untilText}. It resumes by itself.`;
+    expect(s.lamp.sentence).toBe(wait);
+    expect(s.missions[0]?.sentence).toBe(wait);
+    expect(s.missions[0]?.waiting).toMatchObject({ untilText, text: wait });
+    expect(s.now).toMatchObject({ kind: "waiting", text: wait });
+    expect(s.allowance.waiting).toMatchObject({ untilText, text: wait });
+    expect(s.timeline.items.map((i) => i.text)).toContain(wait);
+    expect(s.missions[0]?.features.find((f) => f.id === "b")?.reason?.text).toBe(`On hold until ${untilText}, waiting for allowance.`);
+    expect(s.lamp.reasons[0]?.text).toBe(`waiting for allowance until ${untilText}`);
+    expect(s.allowance.providers.find((p) => p.id === "claude")?.limitedText).toBe(`Waiting for the weekly limit to reset. Work resumes ${untilText}.`);
+    expect(s.allowance.fileChangedText).toBe(`Usage figures last changed at ${changedAt}`);
+  });
+
+  it("V3: the verifier's case, a Sunday wait that ends the Monday after, reads 'Mon 19 Oct 10:03' and never 'Mon 10:03'", () => {
+    const now = Date.parse("2026-10-11T10:03:00.000Z");
+    const until = Date.parse("2026-10-19T10:03:00.000Z");
+    const m = missionAt(now, "2026-10-11-a", { status: "waiting", stage: "features", features: [featureWith("b", "building")] });
+    const home = buildHome(
+      { missions: [{ mission: m, events: [makeEvent(m.id, now - 5 * SECOND, "limit.wait", { until: iso(until), reason: `claude-opus-5-5: weekly limit until ${iso(until - 45_000)}` })] }], lock: { at: iso(now - 10 * MINUTE) } },
+      now,
+    );
+    const s = snap(home, now);
+    expect(s.lamp.sentence).toBe("Waiting for allowance until Mon 19 Oct 10:03. It resumes by itself.");
+    expect(JSON.stringify(s)).not.toContain("Mon 10:03");
+    // A wait that ends at midnight carries the date too.
+    const midnight = Date.parse("2026-10-19T00:00:00.000Z");
+    const home2 = buildHome(
+      { missions: [{ mission: m, events: [makeEvent(m.id, now - 5 * SECOND, "limit.wait", { until: iso(midnight), reason: `claude-opus-5-5: weekly limit until ${iso(midnight - 45_000)}` })] }], lock: { at: iso(now - 10 * MINUTE) } },
+      now,
+    );
+    expect(snap(home2, now).lamp.sentence).toBe("Waiting for allowance until Mon 19 Oct 00:00. It resumes by itself.");
   });
 
   it("L17: a long wait of known cause next to another problem keeps its clause, with no 'it' that could mean the other problem (M5)", () => {
@@ -565,7 +624,7 @@ describe("T-LAMP-L22: a queued mission", () => {
   it("makes a grey lamp say it waits for the next run, not an amber one", () => {
     const s = oneMission({ status: "queued", stage: "spec" });
     expect(s.lamp).toMatchObject({ state: "idle", word: "Idle", sentence: "Nothing is running. 1 mission waits for the next run." });
-    expect(codes(s)).toEqual(["queued", "nothing_tonight"]);
+    expect(codes(s)).toEqual(["queued", "nothing_running"]);
     expect(reason(s, "queued")).toMatchObject({ severity: "info", text: "1 mission waits for the next run" });
   });
 
@@ -623,20 +682,20 @@ describe("T-LAMP-L25: all done (green)", () => {
     expect(codes(s)).toEqual(["queued", "all_done"]);
   });
 
-  it("is not made when one mission of tonight is something else", () => {
+  it("is not made when one recent mission is something else", () => {
     const home = buildHome({ missions: [{ mission: missionAt(FIN, "2026-10-11-a", { status: "done", stage: "complete", features: [featureWith("f", "done")] }) }, { mission: missionAt(FIN, "2026-10-11-b", { status: "stopped", stage: "features", features: [featureWith("g", "done")] }) }] }, FIN);
     expect(codes(snap(home, FIN))).not.toContain("all_done");
   });
 });
 
-describe("T-LAMP-L26: nothing tonight (grey)", () => {
+describe("T-LAMP-L26: nothing running (grey)", () => {
   it("an empty home", () => {
     const s = snap(emptyHome(), MID);
     expect(s.lamp).toEqual({
       state: "idle",
       word: "Idle",
       sentence: "Nothing is running and nothing is queued.",
-      reasons: [{ code: "nothing_tonight", severity: "ok", text: "nothing is running", missionId: null, featureId: null }],
+      reasons: [{ code: "nothing_running", severity: "ok", text: "nothing is running", missionId: null, featureId: null }],
     });
   });
 
@@ -648,13 +707,13 @@ describe("T-LAMP-L26: nothing tonight (grey)", () => {
     expect(s.run.line).toBe("A run is on, between missions, running 30 s");
   });
 
-  it("older missions that only wait for the next run are mentioned", () => {
+  it("earlier missions that only wait for the next run are mentioned", () => {
     const home = copyHome("scope-mix");
     rmSync(join(home, "missions", "2026-10-10-login-lapsed"), { recursive: true });
-    rmSync(join(home, "missions", "2026-10-10-older-partial"), { recursive: true });
-    rmSync(join(home, "missions", "2026-10-11-tonight-work"), { recursive: true });
+    rmSync(join(home, "missions", "2026-10-10-earlier-partial"), { recursive: true });
+    rmSync(join(home, "missions", "2026-10-11-recent-work"), { recursive: true });
     const s = snap(home, Date.parse("2026-10-11T10:00:00.000Z"));
-    expect(s.lamp.sentence).toBe("Nothing is running. 1 older mission waits for the next run (see below).");
+    expect(s.lamp.sentence).toBe("Nothing is running. 1 earlier mission waits for the next run (see below).");
   });
 });
 
@@ -753,7 +812,7 @@ describe("T-LAMP-NEVER-GREEN: unknown input is never green", () => {
     ["a wait with no event", () => oneMission({ status: "waiting" }, { live: true })],
     ["a wait for a login", () => snapWait("x: claude needs a new login", MID + 10 * MINUTE)],
     ["a mission done at stage finalize and no lock", () => snap(copyHome("finalize-cut-off"), MID)],
-    ["a mission that failed long ago", () => snap(copyHome("scope-mix"), Date.parse("2026-10-11T10:00:00.000Z"))],
+    ["a mission that failed long ago (earlier work)", () => snap(copyHome("scope-mix"), Date.parse("2026-10-11T10:00:00.000Z"))],
     ["a mission saved busy and a run that is gone", () => oneMission({ status: "running", age: 10 * MINUTE })],
     ["a stale lock", () => oneMission({ status: "running" }, { live: true, lockAgeMs: LOCK_STALE_MS })],
   ])("%s", (_name, build) => {

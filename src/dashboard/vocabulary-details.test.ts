@@ -1,4 +1,4 @@
-// T-VOC for the night wording: the wait text (spec 4.6), the stop table (4.5), the reason tables (9.2, 9.3), and the
+// T-VOC for the detail wording: the wait text (spec 4.6), the stop table (4.5), the reason tables (9.2, 9.3), and the
 // plain words of the allowance, the timeline and the debrief.
 import { describe, expect, it } from "vitest";
 import {
@@ -12,7 +12,7 @@ import {
   finalReviewWhy,
   limitedLine,
   loginFailureAis,
-  nightSentence,
+  overallSentence,
   noReworkWhy,
   nothingOpenWhy,
   parseWaitReason,
@@ -26,7 +26,7 @@ import {
   waitInfoFromEvent,
   waitText,
   windowLabel,
-} from "./vocabulary-night.js";
+} from "./vocabulary-details.js";
 import { makeFormatter } from "./vocabulary.js";
 
 const at = (iso: string): number => Date.parse(iso);
@@ -340,10 +340,10 @@ describe("T-VOC debrief words", () => {
     expect(verdictSentence("done", { ...base, done: 0, total: 0 })).toBe("No features were planned.");
   });
 
-  it("the night sentence lists the verdicts that are present, in a fixed order", () => {
-    expect(nightSentence({ done: 1, partly_done: 1, needs_you: 0, paused: 0 })).toBe("2 missions: 1 done, 1 partly done.");
-    expect(nightSentence({ done: 1, partly_done: 0, needs_you: 1, paused: 1 })).toBe("3 missions: 1 done, 1 paused, 1 needs your help.");
-    expect(nightSentence({ done: 0, partly_done: 0, needs_you: 2, paused: 0 })).toBe("2 missions: 2 need your help.");
+  it("the overall sentence lists the verdicts that are present, in a fixed order", () => {
+    expect(overallSentence({ done: 1, partly_done: 1, needs_you: 0, paused: 0 })).toBe("2 missions: 1 done, 1 partly done.");
+    expect(overallSentence({ done: 1, partly_done: 0, needs_you: 1, paused: 1 })).toBe("3 missions: 1 done, 1 paused, 1 needs your help.");
+    expect(overallSentence({ done: 0, partly_done: 0, needs_you: 2, paused: 0 })).toBe("2 missions: 2 need your help.");
   });
 
   it("the tick texts", () => {

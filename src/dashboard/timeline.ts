@@ -1,13 +1,13 @@
-// The night in plain sentences, from each mission's events.jsonl through the translation table
+// The recent work in plain sentences, from each mission's events.jsonl through the translation table
 // (docs/dashboard-spec.md, section 7). Pure: it gets the missions the other modules built and the clock.
 //
 // Every event type the engine writes is listed in the table. A type that is not listed is hidden and never shown raw
 // (the CLI's own fallback prints the event data, which can hold paths, commits and AI text).
 import { cleanId, clean } from "./sanitize.js";
-import { REASON_MAX_CHARS, TIMELINE_MAX_ITEMS, TONIGHT_WINDOW_MS } from "./constants.js";
+import { REASON_MAX_CHARS, RECENT_WINDOW_MS, TIMELINE_MAX_ITEMS } from "./constants.js";
 import { type MissionFacts, readLabel } from "./missions.js";
 import type { Said, Timeline, TimelineItem, Tone } from "./types.js";
-import { A_FEATURE, explainFailureReason, explainFeatureReason, stopReasonKind, TL, waitInfoFromEvent } from "./vocabulary-night.js";
+import { A_FEATURE, explainFailureReason, explainFeatureReason, stopReasonKind, TL, waitInfoFromEvent } from "./vocabulary-details.js";
 import type { Formatter } from "./vocabulary.js";
 
 /** M: a milestone, always kept. D: a detail, kept only as the newest still-open step of its feature (spec 7.2). */
@@ -250,12 +250,12 @@ function mergeRepeats(rows: Row[]): Merged[] {
 
 /** `max` is the most items kept (TIMELINE_MAX_ITEMS unless the snapshot has to be made smaller). */
 export function buildTimeline(m: MissionFacts[], now: number, f: Formatter, max = TIMELINE_MAX_ITEMS): Timeline {
-  const windowStart = now - TONIGHT_WINDOW_MS;
+  const windowStart = now - RECENT_WINDOW_MS;
   const items: (TimelineItem & { order: number })[] = [];
   let order = 0;
 
   for (const facts of m) {
-    if (!facts.data.readable || facts.view.scope !== "tonight") continue;
+    if (!facts.data.readable || facts.view.scope !== "recent") continue;
     const ctx = contextOf(facts);
     const rows: Row[] = [];
     let specSeen = false;

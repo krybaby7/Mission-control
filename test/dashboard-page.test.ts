@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Script } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { contentSecurityPolicy } from "../src/dashboard/server.js";
-import { CARD_KINDS, FEATURE_STATES, LAMP_STATES, MISSION_STATES, PILL_STATES, PROGRESS_STEPS, TICK_STATES, TONES } from "../src/dashboard/types.js";
+import { CARD_KINDS, FEATURE_STATES, LAMP_STATES, MISSION_STATES, PILL_STATES, PROGRESS_STEPS, SCOPES, TICK_STATES, TONES } from "../src/dashboard/types.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PAGE = join(ROOT, "dashboard", "index.html");
@@ -188,22 +188,37 @@ describe("T-PAGE the page file", () => {
       for (const id of ids) expect(lexed.noComments, `${name}: ${id}`).toMatch(new RegExp(`(?<![A-Za-z0-9_])${id}(?![A-Za-z0-9_])`));
     }
   });
+
+  it("splits the missions by the scope ids of the contract: earlier ones in the quiet row, everything else in the main list", () => {
+    expect([...SCOPES]).toEqual(["recent", "earlier"]);
+    const now = functionSource("renderNow");
+    const row = functionSource("earlierRow");
+    expect(now).toContain('m.scope !== "earlier"');
+    expect(row).toContain('m.scope === "earlier"');
+    // an unknown scope is shown in the main list, never hidden; the count comes from counts.openFromEarlier
+    expect(row).toContain("snap.counts.openFromEarlier");
+    expect(lexed.strings).not.toContain("before");
+  });
 });
 
 describe("T-PAGE the page's words (docs/dashboard-spec.md 17.1)", () => {
   /** Every exact string, and every fixed fragment around a number or a snapshot string, of the "Page words" table. */
   const PAGE_WORDS = [
-    "Tonight",
+    // tabs
+    "Now",
     "Needs you",
     "Needs you (",
     "Timeline",
-    "Morning debrief",
+    "Results",
     "These are the things the AI team could not settle alone.",
     "What happened",
     "If you do nothing",
+    // buttons: on every card and tile, the global bar, and the sentence that opens the stop sheet
+    "Tell the leader about this",
+    "Tell the leader anything",
+    "Stop the current run",
     "Tell the leader",
     "Open the question",
-    "Stop tonight's run",
     "Quick answers",
     "Add your own words",
     "Type here (optional)",
@@ -222,42 +237,44 @@ describe("T-PAGE the page's words (docs/dashboard-spec.md 17.1)", () => {
     "repair round",
     "Allowance (how much of your plans is used)",
     "work pauses here",
-    "Open from before (",
+    "Earlier work still open (",
     "Updated ",
     " s ago)",
     "Earlier events are not shown (",
     "1 more mission is not shown. The lamp above counts it.",
     " more missions are not shown. The lamp above counts them.",
-    "1 more thing for you is not shown. The lamp on the Tonight tab counts it.",
-    " more things for you are not shown. The lamp on the Tonight tab counts them.",
+    "1 more thing for you is not shown. The lamp on the Now tab counts it.",
+    " more things for you are not shown. The lamp on the Now tab counts them.",
     ").",
     " times)",
+    // results
     "What you got",
     "Not finished",
-    "Night result",
+    "How it went",
     "Allowance now",
     " AI runs)",
     "Yes",
     "Not this time",
     "Could not tell",
+    // empty states
     "No missions yet. When one is queued it appears here.",
     "Nothing needs you right now.",
-    "Nothing has happened tonight yet.",
-    "The morning debrief appears when tonight's work has finished or paused.",
+    "Nothing for you to decide. See the note above.",
+    "Nothing for you to decide. See the note on the Now tab.",
+    "Nothing has happened yet.",
+    "Results appear when work has finished or paused.",
+    "Results are ready",
     "This page and Mission Control are different versions. Reload the page.",
     "Cannot reach Mission Control.",
     "Demo data. This is not live.",
     "Now:",
-    // review round: what to do, the bar's own button, a calm strip that never contradicts the lamp, folded finished
-    // missions, the debrief link, the sheet that says it cannot send, and where a stopped mission stopped
+    // review round: what to do, a calm strip that never contradicts the lamp, folded finished missions, the sheet that
+    // says it cannot send, and where a stopped mission stopped
     "What to do",
-    "Tell the leader about tonight",
-    "Nothing for you to decide. See the note above.",
     "Built and checked on the first try.",
     " features done ",
     "(show)",
     "(hide)",
-    "Morning debrief ready. See what you got.",
     "This page cannot send messages. Pick or type an answer, tap Copy, then paste it into your chat with the leader.",
     "This page cannot stop the run. Tap Copy, then paste the sentence into your chat with the leader.",
     "Your message (preview)",
@@ -268,6 +285,32 @@ describe("T-PAGE the page's words (docs/dashboard-spec.md 17.1)", () => {
 
   it.each(PAGE_WORDS.map((w) => [w] as const))("contains %j", (word) => {
     expect(html.includes(word)).toBe(true);
+  });
+
+  it("has the four tabs Now, Needs you, Timeline, Results, in that order, each with its own panel", () => {
+    const tabs = [...markup.matchAll(/<button\b[^>]*\brole="tab"[^>]*\bid="tab-([a-z]+)"[^>]*>([^<]*)<\/button>/g)].map((m) => [m[1], m[2]]);
+    expect(tabs).toEqual([["now", "Now"], ["needs", "Needs you"], ["timeline", "Timeline"], ["results", "Results"]]);
+    for (const [id] of tabs) expect(markup).toMatch(new RegExp(`role="tabpanel" id="panel-${id}" aria-labelledby="tab-${id}"`));
+    expect(lexed.noComments).toContain('var TABS = ["now", "needs", "timeline", "results"];');
+    expect(lexed.noComments).toContain('tab: "now"');
+  });
+
+  it("names its buttons in the owner's words: about this, anything, and the current run", () => {
+    expect(lexed.noComments).toContain('tell: "Tell the leader about this"');
+    expect(markup).toMatch(/<button[^>]*id="gbar-tell"[^>]*>Tell the leader anything<\/button>/);
+    expect(markup).toMatch(/<button[^>]*id="gbar-stop"[^>]*>Stop the current run<\/button>/);
+    expect(markup).toMatch(/<h2 id="sheet-title">Tell the leader<\/h2>/);
+    // the card, tile, earlier-work and results buttons all come from tellButton, which uses the one word W.tell
+    expect(functionSource("tellButton")).toContain("W.tell)");
+    expect(lexed.noComments).not.toMatch(/\bel\("button", [^)]*"Tell the leader/);
+  });
+
+  it("has a header with the product name and the freshness line only", () => {
+    const header = /<header class="top">([\s\S]*?)<\/header>/.exec(markup)?.[1] ?? "";
+    expect([...header.matchAll(/<(h1|p)\b/g)].map((m) => m[1])).toEqual(["h1", "p"]);
+    expect(header).toContain('<h1 class="brand">Mission Control</h1>');
+    expect(header).toContain('id="fresh"');
+    expect(header).not.toMatch(/\bRun,|<time\b/i);
   });
 
   it("has the demo hooks of spec 17.2 and never the demo data block itself", () => {
@@ -284,6 +327,23 @@ describe("T-PAGE the page's words (docs/dashboard-spec.md 17.1)", () => {
     expect(found).toEqual([]);
     expect(html).not.toContain("\u2014");
     expect(html).not.toMatch(/\p{Extended_Pictographic}/u);
+  });
+
+  it("never frames the work around a time of day: not in a string, a comment, an id, a class or an identifier", () => {
+    // The pattern is written with a bracket in each word so that this file does not hold the words it forbids: the
+    // two stems cover every longer form (the evening and early-day words, and their compounds). "midnight" is the one allowed word.
+    const forbidden = /n[i]ght|mor[n]ing/i;
+    const withoutMidnight = (text: string): string => text.replace(/midn[i]ght/gi, "");
+    for (const [name, text] of [["dashboard/index.html", html], ["test/dashboard-page.test.ts", readFileSync(fileURLToPath(import.meta.url), "utf8")] as const]) {
+      const found = withoutMidnight(text).split("\n").filter((line) => forbidden.test(line));
+      expect(found, name).toEqual([]);
+    }
+  });
+
+  it("keeps none of the retired page words or names", () => {
+    for (const retired of ["Open from before", "openBefore", "beforeOpen", "debriefRow", "renderDebrief", "tab-debrief", "panel-debrief", "data-tab=\"debrief\"", "older-list", "openFromBefore"]) {
+      expect(html, retired).not.toContain(retired);
+    }
   });
 
   it("uses curly quotes in what it shows and straight ones only to build the sentence for the chat", () => {
@@ -310,6 +370,21 @@ describe("T-PAGE what the review round asked for (page parts of M5, M6, M7, m8 t
     // it is painted from the lamp that is showing (the page's own clock can swap the lamp), not only from the snapshot
     expect(functionSource("paintLamp")).toContain("paintUnderLamp(lamp)");
     expect(functionSource("paintUnderLamp")).toContain("lamp.state");
+  });
+
+  it("V6: the Needs you tab with no cards also depends on the lamp: the plain line only beside a green or grey lamp, else a pointer to the Now tab", () => {
+    const words = functionSource("needsEmptyWords");
+    expect(words).toContain('lampState === "on_track" || lampState === "idle"');
+    expect(words.indexOf("W.emptyCards")).toBeLessThan(words.indexOf("W.calmLookNeeds"));
+    // drawn from the lamp that is showing, and written again when the page's own clock changes the lamp
+    const needs = functionSource("renderNeeds");
+    expect(needs).toContain("needsEmptyWords(effectiveLamp(snap, state.level).state)");
+    expect(needs).toContain('"data-empty", "needs"');
+    expect(functionSource("paintNeedsEmpty")).toContain("needsEmptyWords(lampState)");
+    expect(functionSource("paintLamp")).toContain("paintNeedsEmpty(lamp.state)");
+    // the two pointers say where the note is: above on the Now tab, on the Now tab from the Needs you tab
+    expect(lexed.noComments).toContain('calmLook: "Nothing for you to decide. See the note above."');
+    expect(lexed.noComments).toContain('calmLookNeeds: "Nothing for you to decide. See the note on the Now tab."');
   });
 
   it("M6: a strip row carries a second line and a card shows What to do, both only when the engine wrote a step", () => {
@@ -362,8 +437,11 @@ describe("T-PAGE what the review round asked for (page parts of M5, M6, M7, m8 t
     expect(group).toContain("m.sentence === snap.lamp.sentence");
     expect(group).toContain("m.sentence === snap.now.text");
     expect(group).toContain("m.state === \"needs_you\" && snap.needsYou.some(");
-    // with nothing planned there is one line, not a heading and a line
-    expect(functionSource("renderTonight")).toMatch(/tonight\.length === 0\) features\.appendChild\(el\("p", "empty", W\.emptyMissions\)\);\s*else features\.appendChild\(el\("h2"/);
+    // with nothing planned there is one line, not a heading and a line; the line says "no missions" only when there is
+    // none at all (with only earlier work open, the quiet row is the answer and "No missions yet" above it would contradict it)
+    const now = functionSource("renderNow");
+    expect(now).toMatch(/current\.length === 0\) \{ if \(snap\.missions\.length === 0\) features\.appendChild\(el\("p", "empty", W\.emptyMissions\)\); \}\s*else features\.appendChild\(el\("h2"/);
+    expect(now).toContain("if (features.firstChild) frag.appendChild(features);");
   });
 
   it("m9: the sheet says first that it cannot send, lays out answer, words, preview in that order, and Copy waits for a message", () => {
@@ -379,25 +457,26 @@ describe("T-PAGE what the review round asked for (page parts of M5, M6, M7, m8 t
     expect(style).toContain('.btn[aria-disabled="true"]');
   });
 
-  it("m10: the bar's button is about tonight, the card and tile buttons keep the plain words, Stop shows only while a run is on", () => {
-    expect(markup).toMatch(/<button[^>]*id="gbar-tell"[^>]*>Tell the leader about tonight<\/button>/);
+  it("m10: the bar's button is about anything, the card and tile buttons are about this, Stop shows only while a run is on", () => {
+    expect(markup).toMatch(/<button[^>]*id="gbar-tell"[^>]*>Tell the leader anything<\/button>/);
     expect(functionSource("tellButton")).toContain("W.tell)");
     expect(functionSource("paintGbar")).toContain("snap.run.active || snap.run.stopRequested");
   });
 
-  it("m11: after the night a link row to the Morning debrief sits under the lamp, only without a live run", () => {
+  it("m11: when results are ready a link row to the Results tab sits under the lamp, only without a live run", () => {
     expect(functionSource("paintUnderLamp")).toContain("snap.debrief && !snap.run.active");
-    const row = functionSource("debriefRow");
-    expect(row).toContain("W.debriefReady");
-    expect(row).toContain("selectTab(\"debrief\"");
+    const row = functionSource("resultsRow");
+    expect(row).toContain("W.resultsReady");
+    expect(row).toContain("selectTab(\"results\"");
     expect(row).toContain("el(\"button\"");
+    expect(lexed.noComments).toContain('resultsReady: "Results are ready"');
   });
 
   it("m12: the AI label comes once above a list of short stories, and stays boxed for what is not finished", () => {
     const list = functionSource("featureList");
     expect(list).toContain("once");
     expect(list).toContain("aiLabel(");
-    const mission = functionSource("debriefMission");
+    const mission = functionSource("resultsMission");
     expect(mission).toMatch(/featureList\(W\.gotHeading, d\.got, snap, true\)/);
     expect(mission).toMatch(/featureList\(W\.notFinished, d\.leftOut, snap, false\)/);
     expect(mission).toMatch(/featureList\(W\.recovered, d\.recovered, snap, true\)/);
@@ -422,9 +501,9 @@ describe("T-PAGE what the review round asked for (page parts of M5, M6, M7, m8 t
 
 describe("T-PAGE a list that the snapshot cut says so (counts.missionsNotShown and counts.cardsNotShown, spec 3.2)", () => {
   it("says how many missions and cards are not listed, from the two counts, with the lamp counting them", () => {
-    expect(functionSource("renderTonight")).toContain("snap.counts.missionsNotShown");
-    expect(functionSource("renderTonight")).toContain("W.missionNotShown");
-    expect(functionSource("renderTonight")).toContain("W.missionsNotShown");
+    expect(functionSource("renderNow")).toContain("snap.counts.missionsNotShown");
+    expect(functionSource("renderNow")).toContain("W.missionNotShown");
+    expect(functionSource("renderNow")).toContain("W.missionsNotShown");
     expect(functionSource("renderNeeds")).toContain("snap.counts.cardsNotShown");
     expect(functionSource("renderNeeds")).toContain("W.cardNotShown");
     expect(functionSource("renderNeeds")).toContain("W.cardsNotShown");

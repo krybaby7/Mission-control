@@ -61,7 +61,7 @@ Setup and maintenance:
   shell                        Open a terminal inside the container; port 3000 reaches your browser
   copy-reports                 Copy reports and screenshots to ~/mc-reports, readable from Windows
   dashboard [--port N] [--lan] [--until HH:MM]
-                               Show tonight's progress on a web page at http://localhost:8787 (it only reads).
+                               Show the team's progress on a web page at http://localhost:8787 (it only reads).
                                --lan lets other devices on your network open it too. Ctrl+C stops it.
   fix-permissions              Repair ownership of the login and data volumes
   help                         Show this help
@@ -322,10 +322,10 @@ run_night() {
   run_container --name "$RUN_CONTAINER" --hostname "$RUN_CONTAINER" -- mc run "$@"
 }
 
-# `dashboard [--port N] [--lan] [--until HH:MM]`: a read-only web page about tonight's run, in a container of its own.
+# `dashboard [--port N] [--lan] [--until HH:MM]`: a read-only web page about the current work, in a container of its own.
 # It gets none of what the other containers get (no logins, no apps folder) and sees the Mission Control folder through
 # a read-only mount, so the operating system enforces that it never writes. `--entrypoint mc` skips docker/entrypoint.sh,
-# which would complain about the read-only folder and the missing logins. No --hostname: a lock held by the night run
+# which would complain about the read-only folder and the missing logins. No --hostname: a lock held by the run container
 # (hostname mission-control-run) must look like another host's, so it is judged by its heartbeat and not by a pid.
 run_dashboard() {
   local port="$DASHBOARD_PORT" stop_time="" publish_host="127.0.0.1:"

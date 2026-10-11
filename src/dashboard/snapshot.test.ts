@@ -7,6 +7,7 @@ import { assertSnapshotShape, copyHome, emptyHome, FIXTURE_ROOT, makeEvent, miss
 import { buildHome, featureWith, FIN, FIXTURE_CASES, fixtureNames, fixtureSnapshot, HOUR, iso, MID, MINUTE, missionAt, runEvents, SECOND, snap } from "../../test/dashboard-kit.js";
 import { MAX_EVENTS_BYTES, MAX_USAGE_BYTES, TITLE_MAX_CHARS } from "./constants.js";
 import { buildSnapshot, builtInSettings, settingsFromConfig } from "./snapshot.js";
+import * as types from "./types.js";
 import { type Snapshot, SCHEMA_VERSION } from "./types.js";
 import { makeFormatter } from "./vocabulary.js";
 
@@ -98,7 +99,7 @@ describe("T-SRC: where each value comes from (spec 6)", () => {
     const s = snap(copyHome("done"), FIN);
     const file = JSON.parse(readFileSync(join(FIXTURE_ROOT, "done", "missions", "2026-10-11-habit-tracker", "mission.json"), "utf8")) as { id: string; title: string; kind: string; features: { id: string; title: string; status: string; frozenTests: unknown[] }[]; updatedAt: string };
     const m = s.missions[0];
-    expect(m).toMatchObject({ id: file.id, title: file.title, kind: "new_app", kindWord: "new app", readable: true, scope: "tonight", openFromBefore: false, updatedAt: Date.parse(file.updatedAt) });
+    expect(m).toMatchObject({ id: file.id, title: file.title, kind: "new_app", kindWord: "new app", readable: true, scope: "recent", openFromEarlier: false, updatedAt: Date.parse(file.updatedAt) });
     expect(m?.featuresTotal).toBe(file.features.length);
     expect(m?.featuresDone).toBe(file.features.filter((f) => f.status === "done").length);
     expect(m?.featuresLine).toBe("4 of 4 features done");
@@ -291,6 +292,56 @@ describe("T-VOC: the words of every snapshot", () => {
     }
   });
 
+  // The product is a team that does what it is asked, at any hour and for any length of work. No word that ties it to a
+  // time of day may appear in anything the engine wrote, in a key of the JSON or in an enum value (camelCase and
+  // snake_case included, so a part of a longer name counts). "midnight" is a time of day and is fine. The pattern is
+  // written with character classes so that this file does not contain the words it forbids.
+  const hasTimeOfDayWord = (text: string): boolean => /n[i]ght|mor[n]ing/i.test(text.replace(/midn[i]ght/gi, ""));
+
+  it("the time-of-day check finds each forbidden word, also inside a longer name, and leaves midnight alone", () => {
+    for (const word of ["ni" + "ght", "ni" + "ghts", "ni" + "ghtly", "to" + "ni" + "ght", "over" + "ni" + "ght", "mor" + "ning", "Mor" + "ning", "to" + "ni" + "ghtMissions", "nothing_to" + "ni" + "ght"]) {
+      expect(hasTimeOfDayWord(`The team works ${word} on it.`), word).toBe(true);
+    }
+    for (const fine of ["Between midnight and 01:00.", "A restart at midnight.", "restart-midnight", "Midnight", "mourning"]) expect(hasTimeOfDayWord(fine), fine).toBe(false);
+  });
+
+  it.each(FIXTURES)("%s: nothing the engine wrote ties the team to a time of day", (name) => {
+    const { display, pasted } = engineStrings(fixtureSnapshot(name));
+    for (const text of [...display, ...pasted]) expect(hasTimeOfDayWord(text), `a time-of-day word in "${text}"`).toBe(false);
+  });
+
+  /** Every object key of a JSON value, at any depth. */
+  function keysOf(value: unknown, into: Set<string> = new Set()): Set<string> {
+    if (Array.isArray(value)) for (const item of value) keysOf(item, into);
+    else if (typeof value === "object" && value !== null) {
+      for (const [key, inner] of Object.entries(value)) {
+        into.add(key);
+        keysOf(inner, into);
+      }
+    }
+    return into;
+  }
+
+  it.each(FIXTURES)("%s: no key of the snapshot JSON is a time-of-day word", (name) => {
+    for (const key of keysOf(fixtureSnapshot(name))) expect(hasTimeOfDayWord(key), `the key "${key}"`).toBe(false);
+  });
+
+  it("no enum value of the contract is a time-of-day word (scopes, lamp reasons, states, kinds)", () => {
+    const values = Object.values(types).flatMap((v) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []));
+    expect(values.length).toBeGreaterThan(50);
+    expect(values).toContain("recent");
+    expect(values).toContain("earlier");
+    for (const value of values) expect(hasTimeOfDayWord(value), `the value "${value}"`).toBe(false);
+  });
+
+  it("the collector looks at the time-of-day words too (a planted one is found, in a string and in a key)", () => {
+    const s = snap(copyHome("done"), FIN);
+    s.lamp.sentence += " It works over" + "ni" + "ght.";
+    expect(engineStrings(s).display.some(hasTimeOfDayWord)).toBe(true);
+    expect([...keysOf({ ["to" + "ni" + "ghtMissions"]: 1 })].some(hasTimeOfDayWord)).toBe(true);
+    expect([...keysOf({ recentMissions: 1 })].some(hasTimeOfDayWord)).toBe(false);
+  });
+
   it.each(FIXTURES)("%s: display strings have no straight double quote, pasted sentences no curly one", (name) => {
     const { display, pasted } = engineStrings(fixtureSnapshot(name));
     for (const text of display) expect(text, text).not.toContain('"');
@@ -360,7 +411,7 @@ describe("T-EDGE (snapshot level)", () => {
     put("2026-10-11-too-big", JSON.stringify({ ...missionAt(MID, "2026-10-11-too-big"), request: "x".repeat(9 * 1024 * 1024) }));
     const s = snap(home, MID);
     expect(s.counts.unreadableMissions).toBe(4);
-    expect(s.missions.every((m) => !m.readable && m.scope === "tonight" && m.state === "unknown" && m.sentence === "Its file cannot be read.")).toBe(true);
+    expect(s.missions.every((m) => !m.readable && m.scope === "recent" && m.state === "unknown" && m.sentence === "Its file cannot be read.")).toBe(true);
     expect(s.lamp.sentence).toBe("4 mission files cannot be read.");
   });
 
@@ -562,7 +613,7 @@ describe("T-EDGE (snapshot level)", () => {
     expect(s.run.lastActivityAt).toBeLessThanOrEqual(early);
   });
 
-  it("E50 and E51: the partial night's final review caveat and the red baseline's timeline line", () => {
+  it("E50 and E51: the partial run's final review caveat and the red baseline's timeline line", () => {
     const partial = snap(copyHome("partial-blocked"), FIN).debrief?.missions[0]?.ticks.find((t) => t.id === "final_review");
     expect(partial).toMatchObject({ state: "yes", caveat: "It covered only the 2 features that were built." });
     const baseline = snap(copyHome("baseline-broken"), MID);

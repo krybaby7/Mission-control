@@ -1,7 +1,7 @@
 // Scope, mission and feature views, the open agent run and the now line (docs/dashboard-spec.md, 1.4, 4, 6.1, 12).
 // Pure: it gets the data read by read.ts, the run facts and the clock. It never touches the disk.
 import type { Feature, Mission, MissionEvent } from "../types.js";
-import { MAX_FEATURES_SHOWN, RUN_GONE_GRACE_MS, STALE_BUSY_AFTER_MS, TONIGHT_WINDOW_MS, WAIT_OVER_GRACE_MS } from "./constants.js";
+import { MAX_FEATURES_SHOWN, RECENT_WINDOW_MS, RUN_GONE_GRACE_MS, STALE_BUSY_AFTER_MS, WAIT_OVER_GRACE_MS } from "./constants.js";
 import type { DispatchPicks, HomeData, MissionData } from "./read.js";
 import type { DashboardSettings } from "./snapshot.js";
 import {
@@ -55,7 +55,7 @@ export interface MissionFacts {
   view: MissionView;
   /** The mission is busy as saved: running, waiting, or done or partial before the stage is complete (spec 4.2). */
   savedBusy: boolean;
-  /** A leftover of an earlier, killed night that the live run has not reached yet (spec 4.2). */
+  /** A leftover of an earlier run that was killed, which the live run has not reached yet (spec 4.2). */
   staleBusy: boolean;
   /** Saved as waiting, and no agent has started since its latest wait began (spec 4.2). */
   asleep: boolean;
@@ -113,18 +113,18 @@ function lastOfType(events: MissionEvent[], type: string): MissionEvent | null {
 
 export type ScopeId = Scope | "hidden";
 
-/** Tonight, before, or hidden, for every mission of the home. `live` is whether a run is on. */
+/** Recent, earlier, or hidden, for every mission of the home. `live` is whether a run is on. */
 export function scopeMissions(d: HomeData, live: boolean, now: number): Map<MissionData, ScopeId> {
-  const tonightStart = now - TONIGHT_WINDOW_MS;
+  const recentStart = now - RECENT_WINDOW_MS;
   const out = new Map<MissionData, ScopeId>();
   for (const entry of d.missions) {
     const m = entry.mission;
     if (!entry.readable || m === null) {
-      out.set(entry, "tonight"); // unknown data is never green, and its age is not reliable
-    } else if (ms(m.updatedAt) >= tonightStart || (live && hasWorkLeft(m))) {
-      out.set(entry, "tonight");
+      out.set(entry, "recent"); // unknown data is never green, and its age is not reliable
+    } else if (ms(m.updatedAt) >= recentStart || (live && hasWorkLeft(m))) {
+      out.set(entry, "recent");
     } else {
-      out.set(entry, unresolved(m) ? "before" : "hidden");
+      out.set(entry, unresolved(m) ? "earlier" : "hidden");
     }
   }
   return out;
@@ -353,8 +353,8 @@ function unreadableFacts(data: MissionData): MissionFacts {
     readable: false,
     kind: "change",
     kindWord: kindWord("change"),
-    scope: "tonight",
-    openFromBefore: false,
+    scope: "recent",
+    openFromEarlier: false,
     state: "unknown",
     word: MISSION_WORDS.unknown,
     sentence: SENTENCE_UNREADABLE,
@@ -429,7 +429,7 @@ function factsFor(data: MissionData, scope: Scope, cx: Context): MissionFacts {
     kind: m.kind === "greenfield" ? "new_app" : "change",
     kindWord: kindWord(m.kind === "greenfield" ? "new_app" : "change"),
     scope,
-    openFromBefore: scope === "before",
+    openFromEarlier: scope === "earlier",
     state,
     word: MISSION_WORDS[state],
     sentence: missionSentence({ state, stage: m.stage, pausedWhy, staleBusy, waitText: waitingNow?.text ?? null, n, k, u: unbuilt, d: done, stuck, leftOut }),
@@ -461,7 +461,7 @@ function byCreation(a: MissionFacts, b: MissionFacts): number {
 }
 
 /**
- * One MissionFacts per mission that is shown: tonight's first, then the ones open from before (hidden ones are left out).
+ * One MissionFacts per mission that is shown: the recent ones first, then the earlier ones still open (hidden ones are left out).
  * The events and dispatch.json values of the shown missions must have been read (readDetails).
  */
 export function buildMissions(d: HomeData, run: RunFacts, now: number, f: Formatter, s: DashboardSettings, featureCap = MAX_FEATURES_SHOWN): MissionFacts[] {
@@ -473,7 +473,7 @@ export function buildMissions(d: HomeData, run: RunFacts, now: number, f: Format
     if (scope === undefined || scope === "hidden") continue;
     facts.push(factsFor(entry, scope, cx));
   }
-  const ordered = [...facts.filter((x) => x.view.scope === "tonight").sort(byCreation), ...facts.filter((x) => x.view.scope === "before").sort(byCreation)];
+  const ordered = [...facts.filter((x) => x.view.scope === "recent").sort(byCreation), ...facts.filter((x) => x.view.scope === "earlier").sort(byCreation)];
   const names = makeLeaderNames(ordered.map((x) => ({ id: x.view.id, title: x.view.title, features: x.view.features })));
   for (const x of ordered) {
     const mission = { id: x.view.id, title: x.view.title };
@@ -495,12 +495,12 @@ export function missionActivityAt(x: MissionFacts): number {
  * that is working with the newest activity. A leftover under a live run is never it (spec 6.1).
  */
 export function workedMission(m: MissionFacts[]): MissionFacts | null {
-  const tonight = m.filter((x) => x.view.scope === "tonight" && x.view.readable);
-  const withRun = tonight.filter((x) => x.openRun !== null).sort((a, b) => (b.openRun?.at ?? 0) - (a.openRun?.at ?? 0));
+  const recent = m.filter((x) => x.view.scope === "recent" && x.view.readable);
+  const withRun = recent.filter((x) => x.openRun !== null).sort((a, b) => (b.openRun?.at ?? 0) - (a.openRun?.at ?? 0));
   if (withRun[0] !== undefined) return withRun[0];
-  const waiting = tonight.find((x) => x.view.state === "waiting");
+  const waiting = recent.find((x) => x.view.state === "waiting");
   if (waiting !== undefined) return waiting;
-  const working = tonight.filter((x) => x.view.state === "working" && !x.staleBusy).sort((a, b) => missionActivityAt(b) - missionActivityAt(a));
+  const working = recent.filter((x) => x.view.state === "working" && !x.staleBusy).sort((a, b) => missionActivityAt(b) - missionActivityAt(a));
   return working[0] ?? null;
 }
 

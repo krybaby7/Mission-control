@@ -17,7 +17,7 @@ import {
   resumeWhen,
   windowLabel,
   windowSummary,
-} from "./vocabulary-night.js";
+} from "./vocabulary-details.js";
 import type { Formatter } from "./vocabulary.js";
 
 /** The windows the engine paces against (src/quota.ts): it stops new work on a provider at their cap. */
@@ -59,7 +59,7 @@ export function buildAllowance(
   f: Formatter,
 ): Allowance {
   const ids = providerIds(q, s);
-  // One rule for every time here: the clock time on the day of the snapshot, else the weekday and the time.
+  // One rule for every time here: the clock time on the day of the snapshot, else the weekday and the time (the date too from 6 days away).
   const when = (ms: number): string => f.when(ms, now);
 
   const providers = ids.map((id): ProviderAllowance => {
@@ -68,7 +68,7 @@ export function buildAllowance(
     const last = blocks.reduce<Block | null>((best, b) => (best === null || b.end > best.end || (b.end === best.end && b.fromLimit && !best.fromLimit) ? b : best), null);
     const limitedUntil = last === null ? null : last.end;
     const resume = last === null ? 0 : last.end + WAIT_MARGIN_MS;
-    const limitedText = last === null ? null : limitedLine(last.kind, resumeWhen(f.sameDay(resume, now), f.weekday(resume), f.time(resume)));
+    const limitedText = last === null ? null : limitedLine(last.kind, resumeWhen(f.sameDay(resume, now), when(resume)));
 
     const highest = windows.reduce((m, w) => Math.max(m, w.usedFraction), 0);
     let state: PillStateId = "plenty";

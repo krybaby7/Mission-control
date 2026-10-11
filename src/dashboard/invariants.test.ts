@@ -27,7 +27,7 @@ function random(seed: number): { next: () => number; pick: <T>(list: readonly T[
 const STATUSES = ["queued", "running", "waiting", "done", "partial", "stopped", "failed", "hibernating"] as const;
 const STAGES = ["onboard", "spec", "gate_a", "init", "features", "gate_c", "finalize", "complete", "dreaming"] as const;
 const FEATURE_STATUSES = ["pending", "testing", "building", "reviewing", "done", "blocked", "skipped", "daydreaming"] as const;
-const AGES = [0, 10 * SECOND, 59 * SECOND, 61 * SECOND, 5 * MINUTE, 3 * HOUR, 17 * HOUR + 59 * MINUTE, 19 * HOUR, 40 * HOUR, 200 * HOUR];
+const AGES = [0, 10 * SECOND, 59 * SECOND, 61 * SECOND, 5 * MINUTE, 3 * HOUR, 19 * HOUR, 23 * HOUR + 59 * MINUTE, 25 * HOUR, 40 * HOUR, 200 * HOUR];
 const STOP_REASONS = ["stop requested", "the disk is almost full (0.4 GB free)", "the AI command lines keep failing (x)", "no provider is free before the deadline (next chance y)", "who knows"];
 const DECISIONS = [
   "Which colour should the buttons be?",
@@ -144,31 +144,31 @@ function home(seed: number): HomeParts {
 
 /** What must hold for any home. */
 function check(s: Snapshot, label: string): void {
-  const tonight = s.missions.filter((m) => m.scope === "tonight");
+  const recent = s.missions.filter((m) => m.scope === "recent");
   const codes = s.lamp.reasons.map((r) => r.code);
   const problem = s.lamp.reasons.some((r) => r.severity === "now" || r.severity === "look");
   const hasWait = (m: Snapshot["missions"][number]): boolean => m.state === "waiting" && m.waiting !== null && (m.waiting.cause === "unknown" || m.waiting.cause === "login");
   // A calm lamp needs a calm cause.
   if (s.lamp.state === "on_track") {
-    for (const m of tonight) {
-      // The one exception: a mission left over from a killed night, which the live run has not reached yet.
+    for (const m of recent) {
+      // The one exception: a mission left over from an earlier run that was killed, which the live run has not reached yet.
       const leftover = m.state === "paused" && m.pausedWhy === "unexpected" && s.run.active;
       if (!leftover) expect(["working", "waiting", "done", "not_started"], `${label}: ${m.id} is ${m.state} under a green lamp`).toContain(m.state);
       expect(hasWait(m), `${label}: ${m.id} waits for an unknown reason or a login under a green lamp`).toBe(false);
       expect(m.readable, `${label}: ${m.id} is unreadable under a green lamp`).toBe(true);
       for (const f of m.features) expect(["stuck", "left_out", "unknown"], `${label}: ${m.id}/${f.id}`).not.toContain(f.state);
     }
-    expect(s.counts.olderNeedYou, label).toBe(0);
+    expect(s.counts.earlierNeedYou, label).toBe(0);
     expect(s.counts.unreadableMissions, label).toBe(0);
   }
   // Everything that needs a person produces a reason, and the lamp says what it says.
-  for (const m of tonight) {
+  for (const m of recent) {
     if (["needs_you", "unknown"].includes(m.state) || (m.state === "paused" && m.pausedWhy !== "unexpected")) {
       expect(problem, `${label}: ${m.id} is ${m.state} and the lamp has no reason`).toBe(true);
     }
     if (m.state === "partly_done") expect(problem, `${label}: ${m.id} is partly done and the lamp has no reason`).toBe(true);
   }
-  if (s.lamp.state === "idle" || s.lamp.state === "on_track") expect(codes.some((c) => c === "working" || c === "all_done" || c === "nothing_tonight"), label).toBe(true);
+  if (s.lamp.state === "idle" || s.lamp.state === "on_track") expect(codes.some((c) => c === "working" || c === "all_done" || c === "nothing_running"), label).toBe(true);
   // A stale or absent run is never described as running.
   if (!s.run.active) {
     expect(s.now, label).toBeNull();

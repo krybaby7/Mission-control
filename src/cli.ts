@@ -150,10 +150,10 @@ function buildProgram(io: CliIO, setExit: (code: number) => void): Command {
 
   program
     .command("dashboard")
-    .description("show tonight's progress on a web page (read-only)")
+    .description("show the team's progress on a web page (read-only)")
     .option("--host <address>", "the address to listen on (default: this computer only; inside the container, every address)")
     .option("--port <number>", `the port to listen on (default: ${DEFAULT_PORT})`)
-    .option("--until <HH:MM>", "show how long is left until this time; give the same time you gave mc run")
+    .option("--until <HH:MM>", "a stop time to show: how long is left until this time (give the same time you gave mc run)")
     .action((opts: DashboardOptions) => dashboardCommand(io, opts));
 
   return program;

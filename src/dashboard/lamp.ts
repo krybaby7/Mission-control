@@ -1,4 +1,4 @@
-// The night lamp (docs/dashboard-spec.md, 5): one decision table, worst state wins. Every threshold is a named constant
+// The lamp (docs/dashboard-spec.md, 5): one decision table, worst state wins. Every threshold is a named constant
 // in constants.ts and every word is in vocabulary.ts. Unknown input is never green.
 import { LONG_WAIT_MS, QUIET_ACTIVITY_MS } from "./constants.js";
 import { type MissionFacts, workedMission } from "./missions.js";
@@ -22,8 +22,8 @@ const minutes = (ms: number): number => Math.floor(Math.max(0, ms) / 60_000);
 
 export function buildLamp(i: LampInput): Lamp {
   const live = i.run.active;
-  const tonight = i.missions.filter((x) => x.view.scope === "tonight");
-  const readable = tonight.filter((x) => x.view.readable);
+  const recent = i.missions.filter((x) => x.view.scope === "recent");
+  const readable = recent.filter((x) => x.view.readable);
   const reasons: LampReason[] = [];
   const add = (code: LampReasonCode, severity: LampSeverity, text: string, missionId: string | null = null, featureId: string | null = null): void => {
     reasons.push({ code, severity, text, missionId, featureId });
@@ -74,8 +74,8 @@ export function buildLamp(i: LampInput): Lamp {
     const explained = x.view.features.some((f) => f.state === "stuck" || f.state === "left_out") || i.cards.some((c) => c.kind === "decision" && c.missionId === x.view.id);
     if (!explained) add("mission_partial", "look", CLAUSE.partial(x.view.title), x.view.id);
   }
-  // L15: a failed mission from before.
-  if (i.counts.olderNeedYou > 0) add("older_failed", "look", CLAUSE.olderFailed(i.counts.olderNeedYou));
+  // L15: an earlier mission that failed.
+  if (i.counts.earlierNeedYou > 0) add("earlier_failed", "look", CLAUSE.earlierFailed(i.counts.earlierNeedYou));
   // L16 and L17: waits of unknown cause, and long waits.
   const waitLeft = (x: MissionFacts): number => Math.max(0, (x.wait?.until ?? 0) - i.now);
   const unknownWaits = waits.filter((x) => x.wait?.cause === "unknown");
@@ -99,15 +99,15 @@ export function buildLamp(i: LampInput): Lamp {
   }
   const queued = readable.filter((x) => x.view.state === "not_started");
   if (queued.length > 0) add("queued", "info", CLAUSE.queued(queued.length), only(queued));
-  if (i.counts.olderWaitingForYou > 0) add("older_items", "info", CLAUSE.olderItems(i.counts.olderWaitingForYou));
+  if (i.counts.earlierWaitingForYou > 0) add("earlier_items", "info", CLAUSE.earlierItems(i.counts.earlierWaitingForYou));
 
   // L24 to L26: what makes a calm lamp green or grey.
   const trouble = reasons.some((r) => r.severity === "now" || r.severity === "look");
-  const allDone = tonight.length > 0 && tonight.some((x) => x.view.state === "done") && tonight.every((x) => x.view.state === "done" || x.view.state === "not_started");
+  const allDone = recent.length > 0 && recent.some((x) => x.view.state === "done") && recent.every((x) => x.view.state === "done" || x.view.state === "not_started");
   if (!trouble) {
     if (live) add("working", "ok", CLAUSE.working);
     else if (allDone) add("all_done", "ok", CLAUSE.allDone);
-    else add("nothing_tonight", "ok", CLAUSE.nothingTonight);
+    else add("nothing_running", "ok", CLAUSE.nothingRunning);
   }
 
   const state: LampStateId = reasons.some((r) => r.severity === "now")
@@ -118,7 +118,7 @@ export function buildLamp(i: LampInput): Lamp {
         ? "on_track"
         : "idle";
 
-  return { state, word: LAMP_WORDS[state], sentence: sentenceFor(state, reasons, i, { live, queued: queued.length, doneMissions: tonight.filter((x) => x.view.state === "done").length }), reasons };
+  return { state, word: LAMP_WORDS[state], sentence: sentenceFor(state, reasons, i, { live, queued: queued.length, doneMissions: recent.filter((x) => x.view.state === "done").length }), reasons };
 }
 
 function sentenceFor(state: LampStateId, reasons: LampReason[], i: LampInput, x: { live: boolean; queued: number; doneMissions: number }): string {
@@ -137,9 +137,9 @@ function sentenceFor(state: LampStateId, reasons: LampReason[], i: LampInput, x:
   const wait = reasons.find((r) => r.code === "short_wait");
   const waitFacts = i.missions.find((m) => m.view.id === wait?.missionId)?.wait ?? null;
   const shortWait = waitFacts !== null && (waitFacts.cause === "limits" || waitFacts.cause === "trouble") ? { cause: waitFacts.cause, untilText: waitFacts.untilText } : null;
-  const calm = { done: i.counts.featuresDone, total: i.counts.featuresTotal, shortWait, olderWaiting: code("older_items") ? i.counts.olderWaitingForYou : 0, queued: code("queued") ? x.queued : 0 };
+  const calm = { done: i.counts.featuresDone, total: i.counts.featuresTotal, shortWait, earlierWaiting: code("earlier_items") ? i.counts.earlierWaitingForYou : 0, queued: code("queued") ? x.queued : 0 };
   if (code("working")) return workingSentence(calm);
   if (code("all_done")) return allDoneSentence({ ...calm, missions: x.doneMissions });
-  const otherOlder = Math.max(0, i.counts.openFromBefore - i.counts.olderNeedYou - i.counts.olderWaitingForYou);
-  return nothingSentence({ queued: calm.queued, olderWaiting: calm.olderWaiting, otherOlder });
+  const otherEarlier = Math.max(0, i.counts.openFromEarlier - i.counts.earlierNeedYou - i.counts.earlierWaitingForYou);
+  return nothingSentence({ queued: calm.queued, earlierWaiting: calm.earlierWaiting, otherEarlier });
 }

@@ -14,7 +14,7 @@ import type { Snapshot } from "./types.js";
 const pageState = vi.hoisted(() => ({ load: (): string => "" }));
 vi.mock("./page.js", () => ({ loadPage: () => pageState.load(), PAGE_FILE: "dashboard/index.html" }));
 
-const PAGE = "<!doctype html><html><head><title>Mission Control</title></head><body><p>Tonight</p></body></html>";
+const PAGE = "<!doctype html><html><head><title>Mission Control</title></head><body><p>Now</p></body></html>";
 
 let root: string;
 let out: string;
@@ -235,11 +235,12 @@ describe("T-CLI: mc dashboard", () => {
 
   it("is described in mc --help and has its own help", async () => {
     expect(await mc("--help")).toBe(0);
-    expect(out).toMatch(/^\s+dashboard \[options\]\s+show tonight's progress on a web page \(read-only\)$/m);
+    expect(out).toMatch(/^\s+dashboard \[options\]\s+show the team's progress on a web page \(read-only\)$/m);
     expect(await mc("dashboard", "--help")).toBe(0);
-    expect(out).toContain("show tonight's progress on a web page (read-only)");
+    expect(out).toContain("show the team's progress on a web page (read-only)");
     for (const option of ["--host <address>", "--port <number>", "--until <HH:MM>"]) expect(out).toContain(option);
     const flat = out.replace(/\s+/g, " ");
+    expect(flat).toContain("a stop time to show");
     expect(flat).toContain("give the same time you gave mc run");
     expect(flat).toContain("default: 8787");
   });

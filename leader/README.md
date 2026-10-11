@@ -1,6 +1,6 @@
 # The leader
 
-The leader is a Claude Code session that the CEO talks to in plain words. It is the CEO's hands: it checks on the night, reads logs and reports, stops the run, queues a new app or a change, and starts the night. It does this only through Mission Control's own commands (status, logs, report, stop, new, feature, run). It never writes code and never touches an app by hand.
+The leader is a Claude Code session that the CEO talks to in plain words. It is the CEO's hands: it checks on the work, reads logs and reports, stops the run, queues a new app or a change, and starts the team working through the queued work. It does this only through Mission Control's own commands (status, logs, report, stop, new, feature, run). It never writes code and never touches an app by hand.
 
 The dashboard (`mc dashboard`) is the CEO's eyes. It only shows things. The leader is how the CEO acts on what they see.
 
@@ -50,22 +50,22 @@ What it needs:
 
 - A claude.ai login (Pro, Max, Team or Enterprise). API keys do not work. On Team or Enterprise, an Owner must first turn on the Remote Control toggle in the Claude Code admin settings. Log in once with `claude` and `/login`.
 - The first time, Claude Code asks "Enable Remote Control? (y/n)" (in a running session it is a dialog called "Enable Remote Control"). Claude Code also asks once whether you trust the folder (server mode words it "Trust <folder>? [y/N]"). Answer yes to both.
-- Keep the Ubuntu window open and the PC awake, as for a night run. If the window is closed, the session goes offline.
+- Keep the Ubuntu window open and the PC awake, as for any run. If the window is closed, the session goes offline.
 
-Not tried here. Whether the session appears, what the app lets the CEO do in it, and what happens to a night run started from it when the connection drops are all unverified. `claude remote-control --help` only works when you are signed in with an eligible account.
+Not tried here. Whether the session appears, what the app lets the CEO do in it, and what happens to a run started from it when the connection drops are all unverified. `claude remote-control --help` only works when you are signed in with an eligible account.
 
 ## The dashboard and the leader together
 
-1. In a second Ubuntu window, start the dashboard with `mc dashboard` (add `--until 07:00` with the same time you give the night run, to see a countdown). The leader cannot start it: it keeps running until you press Ctrl+C.
-2. On the dashboard, "Tell the leader" gives a ready sentence. Copy it and paste it into the chat with the leader.
-3. "Stop tonight's run" on the dashboard is also only a sentence to paste. The leader asks before it stops anything.
+1. In a second Ubuntu window, start the dashboard with `mc dashboard`. If you give a run a stop time, add the same time to show it: `mc dashboard --until 07:00`. The dashboard does not know the run's stop time by itself, so without `--until` it shows none. The leader cannot start the dashboard: it keeps running until you press Ctrl+C.
+2. On the dashboard, "Tell the leader about this" (on a card or a feature) and "Tell the leader anything" (on the bar) give a ready sentence. Copy it and paste it into the chat with the leader.
+3. "Stop the current run" on the dashboard is also only a sentence to paste. The leader asks before it stops anything.
 
 ## What the leader will ask you
 
 - It asks you before `stop`, `run`, `new` and `feature` (a prompt in the Ubuntu window, and in the app when you use Remote Control). That is on purpose: reports and logs are written by AIs, and a human tap is the guard against a command that came from such a text. Read what it is about to run, then answer **Yes** once. Never choose "Yes, and don't ask again": Claude Code would save that command as always allowed in the file `.claude/settings.local.json` at the top of the repository, for everyone who starts the leader, and the guard would be gone. If you want fewer prompts anyway, the owner can move entries from `ask` to `allow` in `.claude/settings.json`; the page [docs/leader.md](../docs/leader.md) explains the trade.
 - It may also ask permission for anything outside the seven commands. Say no unless you know why.
-- Before `run`, it tells you what is queued and when the run will stop. Before `stop`, it always asks.
-- A run started by the leader is a background task of the chat session. If the session ends, the run may stop (progress is kept and the next run continues; not tried here). For a night that must not depend on a chat, start it yourself or use the scheduled task from the setup guide.
+- Before `run`, it tells you what is queued, and when the run will stop if you gave a stop time. It does not ask for one. Without a stop time the run goes on until the queued work is done or you ask for a stop. Before `stop`, it always asks.
+- A run started by the leader is a background task of the chat session. If the session ends, the run may stop (progress is kept and the next run continues; not tried here). For a run that must not depend on a chat, start it yourself or use the scheduled task from the setup guide.
 
 ## What the leader cannot do
 

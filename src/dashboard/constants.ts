@@ -31,8 +31,16 @@ export const WAIT_OVER_GRACE_MS = 120_000;
 export const STALE_BUSY_AFTER_MS = 120_000;
 /** The engine's `WAIT_MARGIN_MS` (src/executor.ts:29, not exported, so copied; a test compares the number). */
 export const WAIT_MARGIN_MS = 45_000;
-/** The engine's longest night, `MAX_NIGHT_MS` (src/run.ts:55). Tonight is always this long. */
-export const TONIGHT_WINDOW_MS = 64_800_000;
+/**
+ * A mission is recent when it was saved within this long (24 hours), or when a live run still has work for it. A day is
+ * longer than the 18 hours the engine allows for a stop time (src/run.ts), so the work of one run is never cut in two.
+ */
+export const RECENT_WINDOW_MS = 86_400_000;
+/**
+ * A wait, reset or change time 6 days or more from the snapshot is worded with its date ("Mon 19 Oct 10:03"). A weekday
+ * alone ("Mon 10:03") repeats every week, and a limit can reset up to 8 days ahead (src/quota.ts).
+ */
+export const DATE_FORM_AFTER_MS = 518_400_000;
 
 // ───────────── Allowance ─────────────
 

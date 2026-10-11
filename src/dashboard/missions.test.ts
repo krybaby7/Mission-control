@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { copyHome, makeEvent, touch, withLock } from "../../test/dashboard-helpers.js";
 import { buildHome, featureWith, FIN, HOUR, iso, MID, MINUTE, missionAt, runEvents, SECOND, snap } from "../../test/dashboard-kit.js";
-import { MAX_MISSION_FOLDERS, STALE_BUSY_AFTER_MS, TONIGHT_WINDOW_MS, WAIT_OVER_GRACE_MS } from "./constants.js";
+import { MAX_MISSION_FOLDERS, RECENT_WINDOW_MS, STALE_BUSY_AFTER_MS, WAIT_OVER_GRACE_MS } from "./constants.js";
 import { isSavedBusy, readLabel } from "./missions.js";
 import { builtInSettings } from "./snapshot.js";
 import type { FeatureStateId, MissionStateId, Snapshot } from "./types.js";
@@ -283,7 +283,7 @@ describe("T-STATE: the mission table (spec 4.2)", () => {
     const UNTIL = Date.parse("2026-10-11T12:59:10.596Z");
 
     // The run started before the mission's first event, as a real one does: otherwise the mission would look like
-    // a leftover of an earlier night after a few minutes.
+    // a leftover of an earlier run after a few minutes.
     function waitingAt(now: number) {
       const home = copyHome("limit-waiting");
       withLock(home, { at: "2026-10-11T09:58:00.000Z", ageMs: 15_000, now });
@@ -399,14 +399,14 @@ describe("T-STATE: the mission table (spec 4.2)", () => {
 
     it("is paused once the run has been live for STALE_BUSY_AFTER_MS and has not touched it", () => {
       const s = stale(LOCK_AT + STALE_BUSY_AFTER_MS);
-      const killed = s.missions.find((m) => m.id === "2026-10-10-killed-night");
+      const killed = s.missions.find((m) => m.id === "2026-10-10-killed-run");
       expect(killed).toMatchObject({ state: "paused", pausedWhy: "unexpected", sentence: "Paused: its earlier run stopped unexpectedly. It continues when its turn comes." });
       expect(killed?.features.find((f) => f.id === "two")).toMatchObject({ state: "paused", reason: { text: "Paused. It continues on the next run.", author: "engine" } });
     });
 
     it("is working one millisecond before that", () => {
       const s = stale(LOCK_AT + STALE_BUSY_AFTER_MS - 1);
-      expect(s.missions.find((m) => m.id === "2026-10-10-killed-night")?.state).toBe("working");
+      expect(s.missions.find((m) => m.id === "2026-10-10-killed-run")?.state).toBe("working");
     });
 
     it("is not the worked mission: the mission that owns the open run is, and the last activity follows it", () => {
@@ -420,11 +420,11 @@ describe("T-STATE: the mission table (spec 4.2)", () => {
       expect(s.lamp.reasons.map((r) => r.code)).toEqual(["queued", "working"]);
     });
 
-    it("an open start of the killed night is not this run's", () => {
+    it("an open start of the killed run is not this run's", () => {
       const s = stale(LOCK_AT + 8 * MINUTE);
-      const killed = s.missions.find((m) => m.id === "2026-10-10-killed-night");
+      const killed = s.missions.find((m) => m.id === "2026-10-10-killed-run");
       expect(killed?.state).toBe("paused");
-      expect(s.now?.missionId).not.toBe("2026-10-10-killed-night");
+      expect(s.now?.missionId).not.toBe("2026-10-10-killed-run");
     });
 
     it("becomes run_gone when the run ends without reaching it", () => {
@@ -435,14 +435,14 @@ describe("T-STATE: the mission table (spec 4.2)", () => {
     });
   });
 
-  it("restart-midnight keeps the earlier work in tonight (E48)", () => {
+  it("restart-midnight keeps the work done before the restart recent (E48)", () => {
     const home = copyHome("restart-midnight");
     const now = Date.parse("2026-10-12T03:20:00.000Z");
     withLock(home, { at: "2026-10-12T03:10:00.000Z", ageMs: 15_000, now });
     const s = snap(home, now);
     expect(s.missions.map((m) => [m.id, m.scope, m.state])).toEqual([
-      ["2026-10-11-fitness-log", "tonight", "done"],
-      ["2026-10-11-recipe-finder", "tonight", "working"],
+      ["2026-10-11-fitness-log", "recent", "done"],
+      ["2026-10-11-recipe-finder", "recent", "working"],
     ]);
     expect(s.debrief?.missions.map((d) => d.missionId)).toEqual(["2026-10-11-fitness-log"]);
     expect(s.timeline.items.some((i) => i.missionId === "2026-10-11-fitness-log")).toBe(true);
@@ -616,32 +616,32 @@ describe("T-STATE: the progress line (spec 4.4)", () => {
   });
 });
 
-describe("T-SCOPE: tonight and before (spec 12)", () => {
+describe("T-SCOPE: recent and earlier work (spec 12)", () => {
   const NOW = Date.parse("2026-10-11T10:00:00.000Z");
   const idsBy = (s: Snapshot, scope: string) => s.missions.filter((m) => m.scope === scope).map((m) => m.id);
 
-  it("no run: tonight is the last 18 hours; older unresolved ones are before; old finished ones are hidden", () => {
+  it("no run: recent is the last 24 hours; older unresolved ones are earlier; old finished ones are hidden", () => {
     const s = snap(copyHome("scope-mix"), NOW);
-    expect(idsBy(s, "tonight")).toEqual(["2026-10-11-tonight-work"]);
-    expect(idsBy(s, "before")).toEqual(["2026-10-06-queued-long-ago", "2026-10-10-older-partial", "2026-10-10-login-lapsed"]);
-    expect(s.missions.map((m) => m.openFromBefore)).toEqual([false, true, true, true]);
-    expect(s.counts).toMatchObject({ tonightMissions: 1, openFromBefore: 3, olderNeedYou: 1, olderWaitingForYou: 1, olderMissionsHidden: 1 });
+    expect(idsBy(s, "recent")).toEqual(["2026-10-11-recent-work"]);
+    expect(idsBy(s, "earlier")).toEqual(["2026-10-06-queued-long-ago", "2026-10-10-earlier-partial", "2026-10-10-login-lapsed"]);
+    expect(s.missions.map((m) => m.openFromEarlier)).toEqual([false, true, true, true]);
+    expect(s.counts).toMatchObject({ recentMissions: 1, openFromEarlier: 3, earlierNeedYou: 1, earlierWaitingForYou: 1, olderMissionsHidden: 1 });
   });
 
-  it("the three kinds of 'before' are told apart (a failed one, a finished one with leftovers, any other)", () => {
+  it("the three kinds of earlier work are told apart (a failed one, a finished one with leftovers, any other)", () => {
     const s = snap(copyHome("scope-mix"), NOW);
     const byId = Object.fromEntries(s.missions.map((m) => [m.id, m]));
     expect(byId["2026-10-10-login-lapsed"]?.state).toBe("needs_you");
-    expect(byId["2026-10-10-older-partial"]?.state).toBe("partly_done");
+    expect(byId["2026-10-10-earlier-partial"]?.state).toBe("partly_done");
     expect(byId["2026-10-06-queued-long-ago"]?.state).toBe("not_started");
   });
 
-  it("with a run on, work that is left becomes tonight's, a finished old mission stays before", () => {
+  it("with a run on, work that is left becomes recent, a finished old mission stays earlier", () => {
     const home = copyHome("scope-mix");
     withLock(home, { at: "2026-10-11T09:55:00.000Z", ageMs: 15_000, now: NOW });
     const s = snap(home, NOW);
-    expect(idsBy(s, "tonight")).toEqual(["2026-10-06-queued-long-ago", "2026-10-10-login-lapsed", "2026-10-11-tonight-work"]);
-    expect(idsBy(s, "before")).toEqual(["2026-10-10-older-partial"]);
+    expect(idsBy(s, "recent")).toEqual(["2026-10-06-queued-long-ago", "2026-10-10-login-lapsed", "2026-10-11-recent-work"]);
+    expect(idsBy(s, "earlier")).toEqual(["2026-10-10-earlier-partial"]);
   });
 
   it("orders each group oldest first, then by id", () => {
@@ -652,13 +652,23 @@ describe("T-SCOPE: tonight and before (spec 12)", () => {
     expect(snap(home, NOW).missions.map((m) => m.id)).toEqual(["2026-10-11-c", "2026-10-11-a", "2026-10-11-b"]);
   });
 
-  it("the window is 18 hours to the millisecond", () => {
+  it("the window is 24 hours to the millisecond: 23 h 59 min and 24 h are recent, one millisecond more is earlier", () => {
     const at = (age: number) => {
       const home = buildHome({ missions: [{ mission: missionAt(NOW, "2026-10-11-a", { status: "partial", stage: "complete", age, features: [featureWith("x", "blocked")] }) }] }, NOW);
       return snap(home, NOW).missions[0]?.scope;
     };
-    expect(at(TONIGHT_WINDOW_MS)).toBe("tonight");
-    expect(at(TONIGHT_WINDOW_MS + 1)).toBe("before");
+    expect(RECENT_WINDOW_MS).toBe(24 * HOUR);
+    expect(at(23 * HOUR + 59 * MINUTE)).toBe("recent");
+    expect(at(RECENT_WINDOW_MS)).toBe("recent");
+    expect(at(RECENT_WINDOW_MS + 1)).toBe("earlier");
+    expect(at(25 * HOUR)).toBe("earlier");
+  });
+
+  it("a mission last saved 19 hours ago is still recent (the old 18 hour window no longer applies)", () => {
+    const m = missionAt(NOW, "2026-10-10-failed", { status: "failed", stage: "features", age: 19 * HOUR, failure: { reason: "Something broke.", retryable: false } });
+    const s = snap(buildHome({ missions: [{ mission: m }] }, NOW), NOW);
+    expect(s.missions[0]).toMatchObject({ scope: "recent", openFromEarlier: false, state: "needs_you" });
+    expect(s.lamp.state).toBe("needs_you_now");
   });
 
   it("a finished mission with nothing left is hidden once it is old, and counted", () => {
@@ -674,18 +684,18 @@ describe("T-SCOPE: tonight and before (spec 12)", () => {
     ["a blocked feature", { features: [featureWith("x", "blocked")] }],
     ["a skipped feature", { features: [featureWith("x", "skipped")] }],
     ["a broken baseline", { baselineBroken: true }],
-  ])("a finished old mission with %s is before, not hidden", (_name, over) => {
+  ])("a finished old mission with %s is earlier work, not hidden", (_name, over) => {
     const home = buildHome({ missions: [{ mission: missionAt(NOW, "2026-10-11-a", { status: "partial", stage: "complete", age: 30 * HOUR, ...over }) }] }, NOW);
     const s = snap(home, NOW);
-    expect(s.missions[0]).toMatchObject({ scope: "before", openFromBefore: true });
-    expect(s.counts).toMatchObject({ olderWaitingForYou: 1, olderNeedYou: 0 });
+    expect(s.missions[0]).toMatchObject({ scope: "earlier", openFromEarlier: true });
+    expect(s.counts).toMatchObject({ earlierWaitingForYou: 1, earlierNeedYou: 0 });
   });
 
-  it("an unreadable mission is always tonight, whatever the age of its file", () => {
+  it("an unreadable mission is always recent, whatever the age of its file", () => {
     const home = copyHome("unreadable-mission");
     touch(join(home, "missions", "2026-10-11-broken", "mission.json"), NOW - 400 * HOUR);
     const s = snap(home, NOW);
-    expect(s.missions.find((m) => m.id === "2026-10-11-broken")).toMatchObject({ readable: false, scope: "tonight", state: "unknown", word: "Needs a look", sentence: "Its file cannot be read.", title: "2026-10-11-broken" });
+    expect(s.missions.find((m) => m.id === "2026-10-11-broken")).toMatchObject({ readable: false, scope: "recent", state: "unknown", word: "Needs a look", sentence: "Its file cannot be read.", title: "2026-10-11-broken" });
     expect(s.counts.unreadableMissions).toBe(1);
   });
 
@@ -724,16 +734,16 @@ describe("T-SCOPE: tonight and before (spec 12)", () => {
 describe("scope, states and views: rules that need their own test (m5)", () => {
   const live = (now: number, minutesAgo = 10) => ({ at: iso(now - minutesAgo * MINUTE) });
 
-  it("S13: a failed mission that needs its owner, last saved 20 hours ago, stays 'from before' under a live run (amber, not red)", () => {
-    const m = missionAt(MID, "2026-10-10-old", { status: "failed", stage: "features", age: 20 * HOUR, failure: { reason: "Something broke.", retryable: false } });
+  it("S13: a failed mission that needs its owner, last saved 25 hours ago, stays earlier under a live run (amber, not red)", () => {
+    const m = missionAt(MID, "2026-10-10-old", { status: "failed", stage: "features", age: 25 * HOUR, failure: { reason: "Something broke.", retryable: false } });
     const s = snap(buildHome({ missions: [{ mission: m, events: [] }], lock: live(MID) }, MID), MID);
-    expect(s.missions[0]).toMatchObject({ scope: "before", state: "needs_you" });
-    expect(s.lamp.reasons.map((r) => r.code)).toEqual(["older_failed"]);
+    expect(s.missions[0]).toMatchObject({ scope: "earlier", state: "needs_you" });
+    expect(s.lamp.reasons.map((r) => r.code)).toEqual(["earlier_failed"]);
     expect(s.lamp.state).toBe("needs_look");
-    // The same mission, if a plain run would retry it (an expired login), is part of tonight and red.
-    const retry = missionAt(MID, "2026-10-10-old", { status: "failed", stage: "features", age: 20 * HOUR, failure: { reason: "No model could run: claude needs a new login.", retryable: true } });
+    // The same mission, if a plain run would retry it (an expired login), is part of the recent work and red.
+    const retry = missionAt(MID, "2026-10-10-old", { status: "failed", stage: "features", age: 25 * HOUR, failure: { reason: "No model could run: claude needs a new login.", retryable: true } });
     const t = snap(buildHome({ missions: [{ mission: retry, events: [] }], lock: live(MID) }, MID), MID);
-    expect(t.missions[0]).toMatchObject({ scope: "tonight", state: "needs_you" });
+    expect(t.missions[0]).toMatchObject({ scope: "recent", state: "needs_you" });
     expect(t.lamp.state).toBe("needs_you_now");
   });
 
@@ -772,9 +782,9 @@ describe("scope, states and views: rules that need their own test (m5)", () => {
     const events = [makeEvent(m.id, start - HOUR, "mission.start", {}), makeEvent(m.id, start + MINUTE, "feature.status", { feature: "a", to: "building" })];
     const s = snap(buildHome({ missions: [{ mission: m, events }], lock: { at: iso(start) } }, MID), MID);
     expect(s.missions[0]).toMatchObject({ state: "working" });
-    // With only events from before the run, the same mission is a leftover of an earlier night.
-    const before = snap(buildHome({ missions: [{ mission: m, events: events.slice(0, 1) }], lock: { at: iso(start) } }, MID), MID);
-    expect(before.missions[0]).toMatchObject({ state: "paused", pausedWhy: "unexpected" });
+    // With only events from before the run, the same mission is a leftover of an earlier run.
+    const leftover = snap(buildHome({ missions: [{ mission: m, events: events.slice(0, 1) }], lock: { at: iso(start) } }, MID), MID);
+    expect(leftover.missions[0]).toMatchObject({ state: "paused", pausedWhy: "unexpected" });
   });
 
   it("N14: folders beyond MAX_MISSION_FOLDERS are counted as older missions that are hidden", () => {

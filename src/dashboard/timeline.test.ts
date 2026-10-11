@@ -2,9 +2,9 @@
 // author of each line. The unit tests build the facts by hand; the last group builds real snapshots from the fixtures.
 import { describe, expect, it } from "vitest";
 import { copyHome, emptyHome, makeEvent, makeFeature, makeMission, withLock, writeMission } from "../../test/dashboard-helpers.js";
-import { fakeFacts, type FakeFactsOptions } from "../../test/dashboard-night-helpers.js";
+import { fakeFacts, type FakeFactsOptions } from "../../test/dashboard-facts-helpers.js";
 import type { MissionEvent } from "../types.js";
-import { TIMELINE_MAX_ITEMS, TONIGHT_WINDOW_MS } from "./constants.js";
+import { RECENT_WINDOW_MS, TIMELINE_MAX_ITEMS } from "./constants.js";
 import { buildSnapshot } from "./snapshot.js";
 import { buildTimeline } from "./timeline.js";
 import type { Timeline, TimelineItem, Tone } from "./types.js";
@@ -243,12 +243,12 @@ describe("T-TL-01 to T-TL-26: one sentence per event type", () => {
     );
   });
 
-  it("T-TL-17 spec: a second plan in the same night is a revision", () => {
+  it("T-TL-17 spec: a second plan in the same run is a revision", () => {
     expect(lines([ev("spec", { features: ["alpha", "beta"] }), ev("spec", { features: ["alpha"] })])).toEqual(["The plan is ready: 2 features.", "The plan was revised: 1 feature."]);
   });
 
   it("T-TL-17 spec: only a plan inside the window counts as the first one", () => {
-    const old = makeEvent(MISSION_ID, NOW - TONIGHT_WINDOW_MS - 60_000, "spec", { features: ["alpha"] });
+    const old = makeEvent(MISSION_ID, NOW - RECENT_WINDOW_MS - 60_000, "spec", { features: ["alpha"] });
     expect(lines([old, ev("spec", { features: ["alpha", "beta"] })])).toEqual(["The plan is ready: 2 features."]);
   });
 
@@ -281,10 +281,14 @@ describe("T-TL-01 to T-TL-26: one sentence per event type", () => {
 });
 
 describe("T-TL-SHORT: keeping the timeline short (spec 7.2)", () => {
-  it("the window: an event 18 hours old is kept, one older is dropped", () => {
-    const edge = makeEvent(MISSION_ID, NOW - TONIGHT_WINDOW_MS, "mission.retry");
-    const older = makeEvent(MISSION_ID, NOW - TONIGHT_WINDOW_MS - 1, "mission.resume");
+  it("the window: an event 24 hours old is kept, one older is dropped", () => {
+    const edge = makeEvent(MISSION_ID, NOW - RECENT_WINDOW_MS, "mission.retry");
+    const older = makeEvent(MISSION_ID, NOW - RECENT_WINDOW_MS - 1, "mission.resume");
     expect(lines([older, edge])).toEqual([`Trying ${T} again.`]);
+    // 19 hours is inside the 24 hour window (the old 18 hour window would have dropped it); 23 h 59 min is too.
+    const nineteen = makeEvent(MISSION_ID, NOW - 19 * 3_600_000, "mission.retry");
+    const almostDay = makeEvent(MISSION_ID, NOW - (24 * 3_600_000 - 60_000), "mission.resume");
+    expect(lines([nineteen, almostDay])).toEqual([`Picked ${T} up again where it left off.`, `Trying ${T} again.`]);
   });
 
   it("an event that is not a time is skipped", () => {
@@ -375,7 +379,7 @@ describe("T-TL-SHORT: keeping the timeline short (spec 7.2)", () => {
     expect(timeline.items[0]?.at).toBe(Date.parse((events[10] as MissionEvent).at));
   });
 
-  it("nothing is cut when the night fits", () => {
+  it("nothing is cut when the timeline fits", () => {
     expect(timelineOf([ev("mission.retry")]).earlierNotShown).toBe(0);
   });
 
@@ -385,9 +389,9 @@ describe("T-TL-SHORT: keeping the timeline short (spec 7.2)", () => {
     expect(item?.day).toBe("Sun 11 Oct");
   });
 
-  it("missions from before, unreadable missions and missions without events add nothing", () => {
+  it("earlier missions, unreadable missions and missions without events add nothing", () => {
     const events = [ev("mission.start")];
-    expect(timelineOf(events, { scope: "before" }).items).toEqual([]);
+    expect(timelineOf(events, { scope: "earlier" }).items).toEqual([]);
     expect(timelineOf(events, { readable: false }).items).toEqual([]);
     expect(timelineOf([], {}).items).toEqual([]);
     expect(timelineOf([], { events: null }).items).toEqual([]);
@@ -428,7 +432,7 @@ describe("the timeline of real snapshots (authentic fixtures)", () => {
     return buildSnapshot({ home: copyHome(name), now, timeZone: "UTC" }).timeline;
   }
 
-  it("a clean night of four features is 10 lines", () => {
+  it("a clean run of four features is 10 lines", () => {
     const { items } = timelineFrom("done", CAPTURE_PLUS_5);
     expect(items.map((i) => i.text)).toEqual([
       "Started working on “Habit tracker”.",
@@ -445,7 +449,7 @@ describe("the timeline of real snapshots (authentic fixtures)", () => {
     expect(items.every((i) => i.count === 1)).toBe(true);
   });
 
-  it("the partial night shows the reinforcements, the stuck feature and the left-out one", () => {
+  it("the partial run shows the reinforcements, the stuck feature and the left-out one", () => {
     const { items } = timelineFrom("partial-blocked", CAPTURE_PLUS_5);
     expect(items).toHaveLength(12);
     const texts = items.map((i) => i.text);
@@ -469,13 +473,13 @@ describe("the timeline of real snapshots (authentic fixtures)", () => {
     expect(items.at(-1)?.text).toBe(last);
   });
 
-  it("the night that waited for a limit tells the wait inside the finished timeline", () => {
+  it("the run that waited for a limit tells the wait inside the finished timeline", () => {
     const { items } = timelineFrom("limit-then-done", CAPTURE_PLUS_5);
     expect(items).toHaveLength(9);
     expect(items.map((i) => i.text)).toContain("Waiting for allowance until 12:59. It resumes by itself.");
   });
 
-  it("the failed night is 6 lines and says the mission needs help", () => {
+  it("the failed run is 6 lines and says the mission needs help", () => {
     const { items } = timelineFrom("failed-auth", CAPTURE_PLUS_5);
     expect(items).toHaveLength(6);
     const failed = items.at(-1);

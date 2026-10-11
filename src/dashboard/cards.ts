@@ -101,7 +101,7 @@ function engineSays(text: string): Said {
 
 function missionLevel(
   x: MissionFacts,
-  o: { kind: CardKind; severity: "now" | "look"; fromBefore: boolean; title: string; happened: Said; ifNothing: string; whatToDo: Said | null; tellLeader: string },
+  o: { kind: CardKind; severity: "now" | "look"; fromEarlier: boolean; title: string; happened: Said; ifNothing: string; whatToDo: Said | null; tellLeader: string },
 ): NeedsYouCard {
   return {
     id: `${o.kind}:${x.view.id}:0`,
@@ -109,7 +109,7 @@ function missionLevel(
     severity: o.severity,
     missionId: x.view.id,
     missionTitle: x.view.title,
-    fromBefore: o.fromBefore,
+    fromEarlier: o.fromEarlier,
     featureId: null,
     title: o.title,
     happened: o.happened,
@@ -145,7 +145,7 @@ function decisionCards(x: MissionFacts, names: LeaderNames, rank: number): Draft
         severity: "look",
         missionId: x.view.id,
         missionTitle: x.view.title,
-        fromBefore: false,
+        fromEarlier: false,
         featureId: null,
         title: decisionTitle(concerns === null ? "question" : "concerns", position, shown.length),
         happened: concerns === null ? { text: entry, author: "ai" } : { text: concernsHappened(concerns), author: "engine" },
@@ -170,7 +170,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
       card: missionLevel(x, {
         kind: "mission_failed",
         severity: "now",
-        fromBefore: false,
+        fromEarlier: false,
         title: CARD_TEXT.failedTitle(view.title, false),
         happened: failureReason(x),
         ifNothing: x.data.mission?.failure?.retryable === true ? CARD_TEXT.failedIfRetryable : CARD_TEXT.failedIfNot,
@@ -185,7 +185,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
       card: missionLevel(x, {
         kind: "run_stopped",
         severity: "now",
-        fromBefore: false,
+        fromEarlier: false,
         title: CARD_TEXT.stoppedTitle(view.title),
         happened: { text: CARD_TEXT.stoppedHappened, author: "engine" },
         ifNothing: CARD_TEXT.stoppedIfNothing,
@@ -200,7 +200,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
       card: missionLevel(x, {
         kind: "paused_disk",
         severity: "look",
-        fromBefore: false,
+        fromEarlier: false,
         title: CARD_TEXT.pausedTitle(view.title),
         happened: { text: CARD_TEXT.diskHappened, author: "engine" },
         ifNothing: CARD_TEXT.diskIfNothing,
@@ -215,7 +215,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
       card: missionLevel(x, {
         kind: "paused_ai_failing",
         severity: "look",
-        fromBefore: false,
+        fromEarlier: false,
         title: CARD_TEXT.pausedTitle(view.title),
         happened: { text: CARD_TEXT.aiFailingHappened, author: "engine" },
         ifNothing: CARD_TEXT.aiFailingIfNothing,
@@ -234,7 +234,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
         severity: "look",
         missionId: view.id,
         missionTitle: view.title,
-        fromBefore: false,
+        fromEarlier: false,
         featureId: f.id,
         title: CARD_TEXT.stuckTitle(f.title),
         happened: f.reason ?? { text: CARD_TEXT.failedFallbackReason, author: "engine" },
@@ -252,7 +252,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
       card: missionLevel(x, {
         kind: "checks_failing",
         severity: "look",
-        fromBefore: false,
+        fromEarlier: false,
         title: CARD_TEXT.checksTitle(view.title),
         happened: { text: CARD_TEXT.checksHappened, author: "engine" },
         ifNothing: CARD_TEXT.checksIfNothing,
@@ -267,7 +267,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
       card: missionLevel(x, {
         kind: "login_needed",
         severity: "look",
-        fromBefore: false,
+        fromEarlier: false,
         title: CARD_TEXT.loginTitle,
         happened: { text: loginHappened(x.wait.loginAis, x.wait.untilText), author: "engine" },
         ifNothing: CARD_TEXT.loginIfNothing,
@@ -280,8 +280,8 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
 }
 
 /**
- * The cards for tonight's missions (red ones first), plus one amber mission_failed card for each failed mission from
- * before. Order: severity now first, then the missions in the order given, then the order of CARD_KINDS, then the
+ * The cards for recent missions (red ones first), plus one amber mission_failed card for each earlier mission that
+ * failed. Order: severity now first, then the missions in the order given, then the order of CARD_KINDS, then the
  * features or entries in file order.
  */
 export function buildCards(m: MissionFacts[], _f?: Formatter): NeedsYouCard[] {
@@ -289,14 +289,14 @@ export function buildCards(m: MissionFacts[], _f?: Formatter): NeedsYouCard[] {
   const drafts: Draft[] = [];
   m.forEach((x, rank) => {
     if (!x.view.readable) return;
-    if (x.view.scope === "tonight") drafts.push(...cardsOf(x, names, rank));
+    if (x.view.scope === "recent") drafts.push(...cardsOf(x, names, rank));
     else if (x.view.state === "needs_you") {
       drafts.push({
         order: [rank, CARD_KINDS.indexOf("mission_failed"), 0],
         card: missionLevel(x, {
           kind: "mission_failed",
           severity: "look",
-          fromBefore: true,
+          fromEarlier: true,
           title: CARD_TEXT.failedTitle(x.view.title, true),
           happened: failureReason(x),
           ifNothing: x.data.mission?.failure?.retryable === true ? CARD_TEXT.failedIfRetryable : CARD_TEXT.failedIfNot,

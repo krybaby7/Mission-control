@@ -1,8 +1,8 @@
-// T-DEB: the morning debrief (docs/dashboard-spec.md, section 11): verdicts, the four ticks in every state, the lists,
+// T-DEB: the debrief, shown as Results (docs/dashboard-spec.md, section 11): verdicts, the four ticks in every state, the lists,
 // the agent time and the notes. The unit tests build the facts by hand; the last group builds snapshots from fixtures.
 import { describe, expect, it } from "vitest";
 import { copyHome, makeEvent, makeFeature, makeMission, withLock, writeMission, emptyHome } from "../../test/dashboard-helpers.js";
-import { fakeCard, fakeFacts, type FakeFactsOptions, fixtureFacts } from "../../test/dashboard-night-helpers.js";
+import { fakeCard, fakeFacts, type FakeFactsOptions, fixtureFacts } from "../../test/dashboard-facts-helpers.js";
 import type { Attempt, Feature, Mission } from "../types.js";
 import { buildDebrief } from "./debrief.js";
 import type { DispatchPicks, UsageRecord } from "./read.js";
@@ -64,7 +64,7 @@ describe("T-DEB when there is a debrief", () => {
       ["waiting", finished({ status: "waiting", stage: "features" }), { state: "waiting" }],
       ["paused after an unexpected stop", finished({ status: "running" }), { state: "paused", pausedWhy: "unexpected" }],
       ["unknown", finished({ status: "weird" as Mission["status"] }), { state: "unknown" }],
-      ["from before", finished(), { scope: "before" }],
+      ["from earlier work", finished(), { scope: "earlier" }],
       ["unreadable", finished(), { readable: false, state: "unknown" }],
     ];
     for (const [name, mission, o] of cases) expect(debriefOf(mission, o), name).toBeNull();
@@ -141,7 +141,7 @@ describe("T-DEB verdicts", () => {
     expect(d.verdict).toEqual({ id: "paused", word: "Paused", sentence: "Paused. It continues on the next run." });
   });
 
-  it("the night's verdict is the worst one, and the sentence counts the missions", () => {
+  it("the overall verdict is the worst one, and the sentence counts the missions", () => {
     const missions = [
       { mission: finished({ id: "2026-10-11-a", title: "A" }), o: {} },
       { mission: finished({ id: "2026-10-11-b", title: "B", status: "partial" }), o: {} },
@@ -158,9 +158,9 @@ describe("T-DEB verdicts", () => {
       fakeFacts(finished({ id: "2026-10-11-d", title: "D", status: "failed", stage: "features" })),
       fakeFacts(finished({ id: "2026-10-11-e", title: "E", status: "failed", stage: "features" })),
     ];
-    const night = buildDebrief(all, [], null, f);
-    expect(night?.verdict.id).toBe("needs_you");
-    expect(night?.verdict.sentence).toBe("5 missions: 1 done, 1 partly done, 1 paused, 2 need your help.");
+    const overall = buildDebrief(all, [], null, f);
+    expect(overall?.verdict.id).toBe("needs_you");
+    expect(overall?.verdict.sentence).toBe("5 missions: 1 done, 1 partly done, 1 paused, 2 need your help.");
   });
 
   // V17: spec 11 orders the verdict needs_you, partly_done, paused, done. A paused mission next to a partly done one must
@@ -187,9 +187,9 @@ describe("T-DEB verdicts", () => {
       fakeFacts(finished({ id: "2026-10-11-b", title: "B", status: "running", stage: "features" }), { state: "working" }),
       fakeFacts(finished({ id: "2026-10-11-c", title: "C" }), { dispatch: FV_OK }),
     ];
-    const night = buildDebrief(facts, [], null, f);
-    expect(night?.missions.map((d) => d.title)).toEqual(["A", "C"]);
-    expect(night?.verdict.sentence).toBe("2 missions: 2 done.");
+    const overall = buildDebrief(facts, [], null, f);
+    expect(overall?.missions.map((d) => d.title)).toEqual(["A", "C"]);
+    expect(overall?.verdict.sentence).toBe("2 missions: 2 done.");
   });
 });
 
@@ -505,7 +505,7 @@ describe("T-DEB in a snapshot", () => {
     expect(buildSnapshot({ home, now: Date.parse("2026-10-11T09:58:30.000Z"), timeZone: "UTC" }).debrief).toBeNull();
   });
 
-  it("the happy night builds a debrief with four ticks that are yes, and the agent time from usage.jsonl", () => {
+  it("a clean run builds a debrief with four ticks that are yes, and the agent time from usage.jsonl", () => {
     const { debrief } = buildSnapshot({ home: copyHome("done"), now: CLOCK, timeZone: "UTC" });
     const d = debrief?.missions[0];
     expect(debrief?.verdict.id).toBe("done");
@@ -514,13 +514,13 @@ describe("T-DEB in a snapshot", () => {
     expect(d?.agentRuns).toBeGreaterThan(0);
   });
 
-  it("the partial night: the stuck feature is one open item, never a question", () => {
+  it("the partial run: the stuck feature is one open item, never a question", () => {
     const d = buildSnapshot({ home: copyHome("partial-blocked"), now: CLOCK, timeZone: "UTC" }).debrief?.missions[0];
     expect(d?.ticks[2]).toMatchObject({ state: "no", why: "1 item is waiting for you." });
     expect(d?.verdict.sentence).toBe("2 of 4 features are built and checked. 1 feature is stuck.");
   });
 
-  it("the failed night needs you and cannot have a final review", () => {
+  it("the failed run needs you and cannot have a final review", () => {
     const debrief = buildSnapshot({ home: copyHome("failed-auth"), now: CLOCK, timeZone: "UTC" }).debrief;
     expect(debrief?.verdict).toMatchObject({ id: "needs_you", sentence: "It needs your help." });
     expect(debrief?.missions[0]?.ticks[1]).toMatchObject({ state: "no", why: "The final check did not run." });

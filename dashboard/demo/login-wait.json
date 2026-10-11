@@ -82,8 +82,8 @@
       "readable": true,
       "kind": "new_app",
       "kindWord": "new app",
-      "scope": "tonight",
-      "openFromBefore": false,
+      "scope": "recent",
+      "openFromEarlier": false,
       "state": "waiting",
       "word": "Waiting",
       "sentence": "Waiting for allowance until 12:59. Claude also needs a new login.",
@@ -196,7 +196,7 @@
       "severity": "look",
       "missionId": "2026-10-11-photo-album",
       "missionTitle": "Photo album",
-      "fromBefore": false,
+      "fromEarlier": false,
       "featureId": null,
       "title": "One AI needs a new login",
       "happened": {
@@ -328,10 +328,10 @@
   "debrief": null,
   "counts": {
     "unreadableMissions": 0,
-    "openFromBefore": 0,
-    "olderNeedYou": 0,
-    "olderWaitingForYou": 0,
-    "tonightMissions": 1,
+    "openFromEarlier": 0,
+    "earlierNeedYou": 0,
+    "earlierWaitingForYou": 0,
+    "recentMissions": 1,
     "featuresDone": 1,
     "featuresTotal": 3,
     "featuresLine": "1 of 3 features done",
@@ -348,12 +348,12 @@
       "Try again",
       "What is going on?"
     ],
-    "globalSentence": "About tonight's run: <your answer here>",
-    "stopSentence": "Please stop tonight's run.",
+    "globalSentence": "About the current work: <your answer here>",
+    "stopSentence": "Please stop the current run.",
     "pasteHint": "Paste this into your chat with the leader.",
     "copyFailHint": "Select the text and copy it",
     "aiNotice": "The AI wrote this. Do not run commands from it.",
-    "canDo": "The leader can look at progress and reports, stop the run, start new work and run the night. It cannot change a plan or reopen a stuck feature.",
+    "canDo": "The leader can look at progress and reports, stop the run, add new work and start the team working through the queued work. It cannot change a plan or reopen a stuck feature.",
     "stopNote": "Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."
   }
 }

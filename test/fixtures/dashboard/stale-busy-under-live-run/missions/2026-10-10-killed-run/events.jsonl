@@ -1,0 +1,2 @@
+{"at":"2026-10-11T00:50:00.000Z","missionId":"2026-10-10-killed-run","type":"mission.start","data":{"stage":"spec"}}
+{"at":"2026-10-11T01:00:00.000Z","missionId":"2026-10-10-killed-run","type":"run.start","data":{"label":"build-two","jobId":"build-two-1","role":"engineer","provider":"codex","model":"gpt-6.1-sol","effort":"medium"}}

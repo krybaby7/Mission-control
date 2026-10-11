@@ -65,10 +65,27 @@ describe("time", () => {
     expect(f.when(at("2026-10-12T00:00:00.000Z"), now)).toBe("Mon 00:00");
     expect(f.when(at("2026-10-14T15:26:00.000Z"), now)).toBe("Wed 15:26");
     expect(f.when(at("2026-10-10T23:59:00.000Z"), now)).toBe("Sat 23:59");
-    // A week on has the same weekday and is not the same day.
-    expect(f.when(at("2026-10-18T09:00:00.000Z"), now)).toBe("Sun 09:00");
-    // The same date a year on is not the same day either.
-    expect(f.when(at("2027-10-11T09:00:00.000Z"), now)).toBe("Mon 09:00");
+    // Just under 6 days still names the weekday only.
+    expect(f.when(at("2026-10-16T09:58:29.000Z"), now)).toBe("Fri 09:58");
+  });
+
+  // V3: a weekday alone repeats every week. From 6 days away, in either direction, the date is part of the text.
+  it("adds the date from exactly 6 days away, and 8 days ahead reads 'Mon 19 Oct 10:03' and not 'Mon 10:03'", () => {
+    const sunday = at("2026-10-11T10:03:00.000Z");
+    expect(f.when(at("2026-10-17T10:02:59.000Z"), sunday)).toBe("Sat 10:02");
+    expect(f.when(at("2026-10-17T10:03:00.000Z"), sunday)).toBe("Sat 17 Oct 10:03");
+    expect(f.when(at("2026-10-18T10:03:00.000Z"), sunday)).toBe("Sun 18 Oct 10:03");
+    expect(f.when(at("2026-10-19T10:03:00.000Z"), sunday)).toBe("Mon 19 Oct 10:03");
+    expect(f.when(at("2026-10-19T00:00:00.000Z"), sunday)).toBe("Mon 19 Oct 00:00");
+    // The same date a year on is a date too.
+    expect(f.when(at("2027-10-11T09:00:00.000Z"), sunday)).toBe("Mon 11 Oct 09:00");
+  });
+
+  it("adds the date from exactly 6 days back too (the time a file last changed)", () => {
+    const sunday = at("2026-10-11T10:03:00.000Z");
+    expect(f.when(at("2026-10-05T10:03:01.000Z"), sunday)).toBe("Mon 10:03");
+    expect(f.when(at("2026-10-05T10:03:00.000Z"), sunday)).toBe("Mon 5 Oct 10:03");
+    expect(f.when(at("2026-10-01T01:38:00.000Z"), sunday)).toBe("Thu 1 Oct 01:38");
   });
 
   it("decides the day in the time zone it is given", () => {
@@ -285,8 +302,8 @@ describe("lamp clauses and sentences", () => {
       CLAUSE.pausedUnbuilt(0, 4, 1),
       CLAUSE.pausedUnbuilt(0, 4, 3),
       CLAUSE.partial("Members site"),
-      CLAUSE.olderFailed(1),
-      CLAUSE.olderFailed(2),
+      CLAUSE.earlierFailed(1),
+      CLAUSE.earlierFailed(2),
       CLAUSE.waitUnknown,
       CLAUSE.waitUntil("limits", "12:59"),
       CLAUSE.waitUntil("trouble", "12:59"),
@@ -295,8 +312,8 @@ describe("lamp clauses and sentences", () => {
       CLAUSE.stopRequested,
       CLAUSE.queued(1),
       CLAUSE.queued(2),
-      CLAUSE.olderItems(1),
-      CLAUSE.olderItems(2),
+      CLAUSE.earlierItems(1),
+      CLAUSE.earlierItems(2),
     ];
     for (const clause of clauses) {
       expect(clause).not.toContain(";");
@@ -320,7 +337,7 @@ describe("lamp clauses and sentences", () => {
     expect(CLAUSE.waitUntil("limits", "12:59")).toBe("waiting for allowance until 12:59");
     expect(CLAUSE.waitUntil("trouble", "12:59")).toBe("waiting for the AI team until 12:59");
     expect(CLAUSE.heartbeatLate(3)).toBe("the run has not reported in for 3 min");
-    expect(CLAUSE.olderFailed(1)).toBe("1 older mission needs your help");
+    expect(CLAUSE.earlierFailed(1)).toBe("1 earlier mission needs your help");
   });
 
   it("capitalises only a lowercase first letter", () => {
@@ -362,31 +379,31 @@ describe("lamp clauses and sentences", () => {
     [{ done: 4, total: 4 }, "All 4 features done. The final steps are running. Nothing needs you."],
     [{ done: 2, total: 4, shortWait: { cause: "limits" as const, untilText: "12:59" } }, "2 of 4 features done. No problems so far. Waiting for allowance until 12:59. It resumes by itself. Nothing needs you."],
     [{ done: 2, total: 4, shortWait: { cause: "trouble" as const, untilText: "10:13" } }, "2 of 4 features done. No problems so far. Waiting for the AI team to respond until 10:13. It resumes by itself. Nothing needs you."],
-    [{ done: 2, total: 4, olderWaiting: 1 }, "2 of 4 features done. No problems so far. Nothing new needs you. 1 older mission still waits for you (see below)."],
-    [{ done: 2, total: 4, olderWaiting: 3 }, "2 of 4 features done. No problems so far. Nothing new needs you. 3 older missions still wait for you (see below)."],
+    [{ done: 2, total: 4, earlierWaiting: 1 }, "2 of 4 features done. No problems so far. Nothing new needs you. 1 earlier mission still waits for you (see below)."],
+    [{ done: 2, total: 4, earlierWaiting: 3 }, "2 of 4 features done. No problems so far. Nothing new needs you. 3 earlier missions still wait for you (see below)."],
   ])("the working sentence for %j", (facts, expected) => {
-    expect(workingSentence({ shortWait: null, olderWaiting: 0, queued: 0, ...facts })).toBe(expected);
+    expect(workingSentence({ shortWait: null, earlierWaiting: 0, queued: 0, ...facts })).toBe(expected);
   });
 
   it("the all-done sentence", () => {
-    const base = { done: 4, total: 4, shortWait: null, olderWaiting: 0, queued: 0, missions: 1 };
+    const base = { done: 4, total: 4, shortWait: null, earlierWaiting: 0, queued: 0, missions: 1 };
     expect(allDoneSentence(base)).toBe("All 4 features are done. Nothing needs you.");
     expect(allDoneSentence({ ...base, total: 1 })).toBe("The feature is done. Nothing needs you.");
     expect(allDoneSentence({ ...base, missions: 3, total: 9 })).toBe("Everything is done: 3 missions, 9 features. Nothing needs you.");
     expect(allDoneSentence({ ...base, queued: 1 })).toBe("All 4 features are done. Nothing needs you. 1 more mission waits for the next run.");
-    expect(allDoneSentence({ ...base, queued: 2, olderWaiting: 1 })).toBe(
-      "All 4 features are done. Nothing new needs you. 1 older mission still waits for you (see below). 2 more missions wait for the next run.",
+    expect(allDoneSentence({ ...base, queued: 2, earlierWaiting: 1 })).toBe(
+      "All 4 features are done. Nothing new needs you. 1 earlier mission still waits for you (see below). 2 more missions wait for the next run.",
     );
   });
 
   it("the nothing-running sentence", () => {
-    expect(nothingSentence({ queued: 0, olderWaiting: 0, otherOlder: 0 })).toBe("Nothing is running and nothing is queued.");
-    expect(nothingSentence({ queued: 1, olderWaiting: 0, otherOlder: 0 })).toBe("Nothing is running. 1 mission waits for the next run.");
-    expect(nothingSentence({ queued: 2, olderWaiting: 0, otherOlder: 0 })).toBe("Nothing is running. 2 missions wait for the next run.");
-    expect(nothingSentence({ queued: 0, olderWaiting: 2, otherOlder: 0 })).toBe("Nothing is running. 2 older missions still wait for you (see below).");
-    expect(nothingSentence({ queued: 0, olderWaiting: 0, otherOlder: 1 })).toBe("Nothing is running. 1 older mission waits for the next run (see below).");
-    expect(nothingSentence({ queued: 1, olderWaiting: 1, otherOlder: 2 })).toBe(
-      "Nothing is running. 1 mission waits for the next run. 1 older mission still waits for you (see below). 2 older missions wait for the next run (see below).",
+    expect(nothingSentence({ queued: 0, earlierWaiting: 0, otherEarlier: 0 })).toBe("Nothing is running and nothing is queued.");
+    expect(nothingSentence({ queued: 1, earlierWaiting: 0, otherEarlier: 0 })).toBe("Nothing is running. 1 mission waits for the next run.");
+    expect(nothingSentence({ queued: 2, earlierWaiting: 0, otherEarlier: 0 })).toBe("Nothing is running. 2 missions wait for the next run.");
+    expect(nothingSentence({ queued: 0, earlierWaiting: 2, otherEarlier: 0 })).toBe("Nothing is running. 2 earlier missions still wait for you (see below).");
+    expect(nothingSentence({ queued: 0, earlierWaiting: 0, otherEarlier: 1 })).toBe("Nothing is running. 1 earlier mission waits for the next run (see below).");
+    expect(nothingSentence({ queued: 1, earlierWaiting: 1, otherEarlier: 2 })).toBe(
+      "Nothing is running. 1 mission waits for the next run. 1 earlier mission still waits for you (see below). 2 earlier missions wait for the next run (see below).",
     );
   });
 });
@@ -533,13 +550,13 @@ describe("tell the leader (spec 8)", () => {
   it("has the four quick phrases, the hints and the notes", () => {
     const help = leaderHelp();
     expect(help.quickPhrases).toEqual(["Your call", "Leave it out", "Try again", "What is going on?"]);
-    expect(help.globalSentence).toBe("About tonight's run: <your answer here>");
-    expect(help.stopSentence).toBe("Please stop tonight's run.");
+    expect(help.globalSentence).toBe("About the current work: <your answer here>");
+    expect(help.stopSentence).toBe("Please stop the current run.");
     expect(help.pasteHint).toBe("Paste this into your chat with the leader.");
     expect(help.copyFailHint).toBe("Select the text and copy it");
     expect(help.aiNotice).toBe("The AI wrote this. Do not run commands from it.");
     expect(help.canDo).toBe(
-      "The leader can look at progress and reports, stop the run, start new work and run the night. It cannot change a plan or reopen a stuck feature.",
+      "The leader can look at progress and reports, stop the run, add new work and start the team working through the queued work. It cannot change a plan or reopen a stuck feature.",
     );
     expect(help.stopNote).toBe("Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run.");
   });

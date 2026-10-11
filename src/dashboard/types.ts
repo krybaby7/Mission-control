@@ -46,20 +46,20 @@ export interface Snapshot {
   /** What is happening right now; null when no run is live, or nothing can be said. */
   now: NowLine | null;
   /**
-   * Tonight's missions first (oldest first, as `mc status`), then the older unresolved ones ("open from before").
+   * Recent missions first (oldest first, as `mc status`), then the earlier unresolved ones ("earlier work still open").
    * Older finished missions are left out (counts.olderMissionsHidden). At most MAX_MISSIONS_SHOWN are listed
    * (counts.missionsNotShown says how many more there were), and the whole snapshot stays under MAX_SNAPSHOT_BYTES.
    */
   missions: MissionView[];
   /**
-   * Cards for tonight's missions, red ones first, plus one amber mission_failed card for each failed mission from
-   * before (fromBefore: true). Other older items get no card (see MissionView.openFromBefore). At most MAX_CARDS_SHOWN
+   * Cards for recent missions, red ones first, plus one amber mission_failed card for each earlier failed mission
+   * (fromEarlier: true). Other earlier items get no card (see MissionView.openFromEarlier). At most MAX_CARDS_SHOWN
    * are listed (counts.cardsNotShown says how many more there were).
    */
   needsYou: NeedsYouCard[];
   allowance: Allowance;
   timeline: Timeline;
-  /** The morning debrief; null while no mission of tonight has finished or paused. */
+  /** The results (what you got, what is not finished, four ticks); null while no recent mission has finished or paused. */
   debrief: Debrief | null;
   counts: Counts;
   leader: LeaderHelp;
@@ -90,7 +90,7 @@ export interface Freshness {
   notResponding: Lamp;
 }
 
-// ───────────────────────────── The night lamp ─────────────────────────────
+// ───────────────────────────── The lamp ─────────────────────────────
 
 export const LAMP_STATES = ["on_track", "needs_look", "needs_you_now", "idle", "not_responding"] as const;
 export type LampStateId = (typeof LAMP_STATES)[number];
@@ -117,15 +117,15 @@ export const LAMP_REASON_CODES = [
   "unknown_state",
   "stop_requested",
   "home_unreadable",
-  "older_failed",
+  "earlier_failed",
   // no colour change (info)
   "short_wait",
   "queued",
-  "older_items",
+  "earlier_items",
   // the reason a green or grey lamp is green or grey
   "working",
   "all_done",
-  "nothing_tonight",
+  "nothing_running",
   // only in Freshness.notUpdating and Freshness.notResponding (the page applies them, never the server's lamp)
   "page_stale",
   "no_news",
@@ -137,7 +137,7 @@ export const LAMP_SEVERITIES = ["now", "look", "info", "ok"] as const;
 export type LampSeverity = (typeof LAMP_SEVERITIES)[number];
 
 export interface LampReason {
-  /** The rule that fired (docs/dashboard-spec.md, "Night lamp rules"). Derived: lamp rule table. */
+  /** The rule that fired (docs/dashboard-spec.md, "Lamp rules"). Derived: lamp rule table. */
   code: LampReasonCode;
   severity: LampSeverity;
   /**
@@ -260,7 +260,7 @@ export const PAUSED_WHY = ["deadline", "stop_requested", "disk", "ai_failing", "
 /** Why a paused mission paused. Derived: the last `mission.stopped` event's data.reason through the stop table; "unexpected" for a mission saved as running or waiting with no live run. */
 export type PausedWhy = (typeof PAUSED_WHY)[number];
 
-export const SCOPES = ["tonight", "before"] as const;
+export const SCOPES = ["recent", "earlier"] as const;
 export type Scope = (typeof SCOPES)[number];
 
 export const PROGRESS_STEPS = ["plan", "plan_check", "build", "final_check", "landed"] as const;
@@ -285,13 +285,13 @@ export interface MissionView {
   kind: "new_app" | "change";
   /** "new app" | "change". Vocabulary. */
   kindWord: string;
-  /** tonight, or before ("open from before"). Derived: the scoping rule (docs/dashboard-spec.md). */
+  /** recent, or earlier ("earlier work still open"). Derived: the scoping rule (docs/dashboard-spec.md, 12). */
   scope: Scope;
   /**
-   * scope === "before". Shown in the quiet row. It changes the lamp only for a failed mission (amber, older_failed);
-   * unreadable missions are always tonight.
+   * scope === "earlier". Shown in the quiet row. It changes the lamp only for a failed mission (amber, earlier_failed);
+   * unreadable missions are always recent.
    */
-  openFromBefore: boolean;
+  openFromEarlier: boolean;
   /**
    * Derived: mission.json `status` and `stage` (+ live run, + events) through the mission table (spec 4.2). A mission
    * saved as busy (running, waiting, or done or partial before the stage is complete) with no live run is paused.
@@ -336,8 +336,9 @@ export interface WaitInfo {
    */
   until: number;
   /**
-   * "12:59" when that is the same local day as generatedAt, else the weekday and the time ("Wed 15:26"): the one rule of
-   * every wait and reset time text. Server-local. "" when there is no event.
+   * "12:59" when that is the same local day as generatedAt, else the weekday and the time ("Wed 15:26"), and the date too
+   * from 6 days away ("Mon 19 Oct 10:03"; a weekday alone repeats every week): the one rule of every wait and reset time
+   * text. Server-local. "" when there is no event.
    */
   untilText: string;
   /**
@@ -410,12 +411,12 @@ export interface NeedsYouCard {
   /** Derived: "<kind>:<missionId>:<featureId or index>". Stable between polls. */
   id: string;
   kind: CardKind;
-  /** now = red (a failed mission tonight, a run that died), look = amber (everything else, and a failed mission from before). */
+  /** now = red (a recent failed mission, a run that died), look = amber (everything else, and an earlier failed mission). */
   severity: "now" | "look";
   missionId: string;
   missionTitle: string;
-  /** The mission's scope is "before": only a failed mission from before gets a card (kind mission_failed, severity look). */
-  fromBefore: boolean;
+  /** The mission's scope is "earlier": only an earlier failed mission gets a card (kind mission_failed, severity look). */
+  fromEarlier: boolean;
   featureId: string | null;
   /** The headline, e.g. "“Weekly progress chart” is stuck". Engine. */
   title: string;
@@ -428,7 +429,7 @@ export interface NeedsYouCard {
   /**
    * The next step for a person, in one or two plain sentences, when the engine knows it: "Log in again to Claude on the
    * PC, then tell the leader." (an expired login), "Free some space on the PC, then tell the leader to carry on."
-   * (a full disk), "Tell the leader to start the night again." (a run that died). Always engine-written (author
+   * (a full disk), "Tell the leader to start the team working again." (a run that died). Always engine-written (author
    * "engine"), and null for the kinds where the step is the owner's own call (a question, a stuck feature) or where
    * nothing is needed. The first sentence stands alone and holds no name, so the page can show it as a short line.
    */
@@ -455,7 +456,7 @@ export interface Allowance {
   waiting: WaitInfo | null;
   /** mtime of quota.json, epoch ms; null without the file. NOT a reading time: an unchanged reading is not rewritten (src/quota.ts:187). */
   fileChangedAt: number | null;
-  /** "Usage figures last changed at 01:38", or "... at Wed 01:38" when that is not the day of the snapshot. Engine. null without the file. */
+  /** "Usage figures last changed at 01:38", or "... at Wed 01:38" when that is not the day of the snapshot, or "... at Mon 5 Oct 01:38" from 6 days away. Engine. null without the file. */
   fileChangedText: string | null;
 }
 
@@ -477,9 +478,10 @@ export interface ProviderAllowance {
    */
   limitedUntil: number | null;
   /**
-   * "Waiting for the 5-hour limit to reset. Work resumes at 12:59." Built from the kind of the block that ends last
-   * (limits.<id>.kind, or session / weekly for a paced window) and limitedUntil plus the engine's 45 s margin, the same
-   * minute the wait banner shows. The raw text is never sent.
+   * "Waiting for the 5-hour limit to reset. Work resumes at 12:59." (another day: "Work resumes Thu 09:00."; from 6 days
+   * away: "Work resumes Mon 19 Oct 10:03."). Built from the kind of the block that ends last (limits.<id>.kind, or
+   * session / weekly for a paced window) and limitedUntil plus the engine's 45 s margin, the same minute the wait
+   * banner shows. The raw text is never sent.
    */
   limitedText: string | null;
 }
@@ -499,7 +501,7 @@ export interface AllowanceWindow {
   overage: boolean;
   /** quota.json utilization[].resetsAt, epoch ms. Readings without one are not saved by the engine (src/quota.ts:406). */
   resetsAt: number;
-  /** "resets 03:20" on the day of the snapshot, else "resets Thu 09:00". Server-local. Engine. */
+  /** "resets 03:20" on the day of the snapshot, else "resets Thu 09:00", or "resets Mon 19 Oct 10:03" from 6 days away. Server-local. Engine. */
   resetsText: string;
   /** The cap where the engine stops starting new work: config pacing.maxFiveHourUtilization / maxWeeklyUtilization; null for other windows. */
   pauseAt: number | null;
@@ -538,7 +540,7 @@ export interface TimelineItem {
   count: number;
 }
 
-// ───────────────────────────── Morning debrief ─────────────────────────────
+// ───────────────────────────── Results ─────────────────────────────
 
 export const VERDICT_IDS = ["done", "partly_done", "needs_you", "paused"] as const;
 export type VerdictId = (typeof VERDICT_IDS)[number];
@@ -618,31 +620,31 @@ export interface Debrief {
 export interface Counts {
   /** Mission folders whose mission.json could not be read or is not a mission. Counted in the lamp. */
   unreadableMissions: number;
-  /** Missions with scope before (the quiet row "Open from before (N)"). */
-  openFromBefore: number;
-  /** Missions with scope before and state needs_you (a failed mission from before). Colours the lamp amber (older_failed). */
-  olderNeedYou: number;
-  /** Missions with scope before and stage complete that still hold a decision, a stuck or left-out feature, or a failed baseline. Info only (older_items). */
-  olderWaitingForYou: number;
-  /** Missions with scope tonight (readable ones). */
-  tonightMissions: number;
-  /** Over tonight's missions (mission.json features[].status === "done", and features.length). */
+  /** Missions with scope earlier (the quiet row "Earlier work still open (N)"). */
+  openFromEarlier: number;
+  /** Missions with scope earlier and state needs_you (an earlier failed mission). Colours the lamp amber (earlier_failed). */
+  earlierNeedYou: number;
+  /** Missions with scope earlier and stage complete that still hold a decision, a stuck or left-out feature, or a failed baseline. Info only (earlier_items). */
+  earlierWaitingForYou: number;
+  /** Missions with scope recent (readable ones). */
+  recentMissions: number;
+  /** Over recent missions (mission.json features[].status === "done", and features.length). */
   featuresDone: number;
   featuresTotal: number;
-  /** "1 of 4 features done" over tonight's missions; "No features planned yet" when the total is 0. Derived. Engine. */
+  /** "1 of 4 features done" over recent missions; "No features planned yet" when the total is 0. Derived. Engine. */
   featuresLine: string;
-  /** Tonight's cards of kind decision (the question cards). A decision the engine wrote about a stuck or failed item is part of that item's card, not a question. */
+  /** Recent cards of kind decision (the question cards). A decision the engine wrote about a stuck or failed item is part of that item's card, not a question. */
   questions: number;
-  /** Tonight's features with state stuck. */
+  /** Features of recent missions with state stuck. */
   stuckFeatures: number;
   /** Older finished missions left out of `missions`. */
   olderMissionsHidden: number;
   /**
    * Missions that are in the lamp and the counts above but were cut from `missions` because there were more than
-   * MAX_MISSIONS_SHOWN (the ones with a card or an unknown state are kept first). 0 on any normal night.
+   * MAX_MISSIONS_SHOWN (the ones with a card or an unknown state are kept first). 0 on any normal day.
    */
   missionsNotShown: number;
-  /** Cards cut from `needsYou` for the same reason (more than MAX_CARDS_SHOWN, red ones kept first). 0 on any normal night. */
+  /** Cards cut from `needsYou` for the same reason (more than MAX_CARDS_SHOWN, red ones kept first). 0 on any normal day. */
   cardsNotShown: number;
 }
 
@@ -650,9 +652,9 @@ export interface Counts {
 export interface LeaderHelp {
   /** ["Your call", "Leave it out", "Try again", "What is going on?"] */
   quickPhrases: string[];
-  /** `About tonight's run: <your answer here>` */
+  /** `About the current work: <your answer here>` */
   globalSentence: string;
-  /** "Please stop tonight's run." (a sentence to paste, not a button that acts) */
+  /** "Please stop the current run." (a sentence to paste, not a button that acts) */
   stopSentence: string;
   /** "Paste this into your chat with the leader." */
   pasteHint: string;
@@ -662,7 +664,7 @@ export interface LeaderHelp {
   aiNotice: string;
   /**
    * What the leader can and cannot do, shown in the sheet: "The leader can look at progress and reports, stop
-   * the run, start new work and run the night. It cannot change a plan or reopen a stuck feature." The leader only has the mc commands status, logs, report, stop, new, feature and run.
+   * the run, add new work and start the team working through the queued work. It cannot change a plan or reopen a stuck feature." The leader only has the mc commands status, logs, report, stop, new, feature and run.
    */
   canDo: string;
   /**

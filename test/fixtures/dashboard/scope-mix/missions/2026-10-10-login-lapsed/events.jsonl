@@ -1,1 +1,1 @@
-{"at":"2026-10-11T09:58:00.000Z","missionId":"2026-10-10-login-lapsed","type":"mission.failed","data":{"stage":"features","reason":"No model could run: claude needs a new login."}}
+{"at":"2026-10-10T08:00:00.000Z","missionId":"2026-10-10-login-lapsed","type":"mission.failed","data":{"stage":"features","reason":"No model could run: claude needs a new login."}}

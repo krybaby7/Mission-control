@@ -9,7 +9,7 @@ const TAIL = ". “Review notes” and “Technical details” list what the rev
 const PREFIX = "Have someone check the app before you rely on it: ";
 const NO_REVIEW = "the final review of the whole app did not finish, so nobody reviewed it as a whole";
 
-/** One tonight mission, finished or not, with the given decisions and features. */
+/** One recent mission, finished or not, with the given decisions and features. */
 function cardsOf(over: Parameters<typeof missionAt>[2], o: { live?: boolean; events?: ReturnType<typeof runEvents>; now?: number } = {}): { s: Snapshot; cards: NeedsYouCard[] } {
   const now = o.now ?? MID;
   const home = buildHome({ missions: [{ mission: missionAt(now, "2026-10-11-a", { title: "Members site", status: "partial", stage: "complete", ...over }), events: o.events ?? [] }], lock: o.live ? { at: iso(now - 10 * MINUTE) } : undefined }, now);
@@ -27,7 +27,7 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
         severity: "now",
         missionId: "2026-10-11-recipe-box",
         missionTitle: "Recipe box",
-        fromBefore: false,
+        fromEarlier: false,
         featureId: null,
         title: "“Recipe box” needs your help",
         happened: { text: "A login has expired. Claude and Codex have to be logged in again on the PC.", author: "engine" },
@@ -48,11 +48,11 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
     });
     expect(reasonOf("No model could run: mock needs a new login.", true)?.whatToDo?.text).toBe("Log in again on the PC to the AI that needs it, then tell the leader.");
     expect(reasonOf("The app scaffold never passed its checks (3 attempts).", false)).toMatchObject({
-      whatToDo: { text: "Ask the leader what went wrong. If it can be fixed, start the night again with the leader.", author: "engine" },
+      whatToDo: { text: "Ask the leader what went wrong. If it can be fixed, start the team working again with the leader.", author: "engine" },
       ifNothing: "Nothing happens. It stays stopped until someone restarts it.",
     });
     // An unknown reason is the AI's text, but the next step is still the engine's.
-    expect(reasonOf("The moon was in the wrong phase.", false)?.whatToDo).toEqual({ text: "Ask the leader what went wrong. If it can be fixed, start the night again with the leader.", author: "engine" });
+    expect(reasonOf("The moon was in the wrong phase.", false)?.whatToDo).toEqual({ text: "Ask the leader what went wrong. If it can be fixed, start the team working again with the leader.", author: "engine" });
   });
 
   it("whatToDo is engine-written text with no name in it and a first sentence that stands alone, for every kind that has one", () => {
@@ -106,14 +106,14 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
     expect(none.cards[0]?.ifNothing).toBe("Nothing happens. It stays stopped until someone restarts it.");
   });
 
-  it("mission_failed from before is amber and says 'still'", () => {
+  it("mission_failed of an earlier mission is amber and says 'still'", () => {
     const s = snap(copyHome("scope-mix"), Date.parse("2026-10-11T10:00:00.000Z"));
     expect(s.needsYou).toHaveLength(1);
     expect(s.needsYou[0]).toMatchObject({
       id: "mission_failed:2026-10-10-login-lapsed:0",
       kind: "mission_failed",
       severity: "look",
-      fromBefore: true,
+      fromEarlier: true,
       title: "“Login lapsed” still needs your help",
       ifNothing: "It stays stopped until someone logs in again on the PC. After that the next run carries on by itself.",
       whatToDo: { text: "Log in again to Claude on the PC, then tell the leader.", author: "engine" },
@@ -130,13 +130,13 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
       severity: "now",
       missionId: "2026-10-11-seed-shop",
       missionTitle: "Seed shop",
-      fromBefore: false,
+      fromEarlier: false,
       featureId: null,
       title: "“Seed shop” stopped unexpectedly",
       happened: { text: "The run stopped without finishing. The work so far is kept.", author: "engine" },
       summary: null,
       ifNothing: "The next run carries on from the last saved step.",
-      whatToDo: { text: "Tell the leader to start the night again.", author: "engine" },
+      whatToDo: { text: "Tell the leader to start the team working again.", author: "engine" },
       tellLeader: 'About "Seed shop", which stopped unexpectedly: <your answer here>',
     });
   });
@@ -180,7 +180,7 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
         severity: "look",
         missionId: "2026-10-11-members-site",
         missionTitle: "Members site",
-        fromBefore: false,
+        fromEarlier: false,
         featureId: "signup",
         title: "“Sign-up page” is stuck",
         happened: { text: "I need to know which payment provider you want (Stripe or PayPal) before sign-up can be finished; I cannot choose for you.", author: "ai" },
@@ -295,7 +295,7 @@ describe("T-CARD: decisions (spec 9.3 and 9.4)", () => {
         severity: "look",
         missionId: "2026-10-11-a",
         missionTitle: "Members site",
-        fromBefore: false,
+        fromEarlier: false,
         featureId: null,
         title: "A question for you",
         happened: { text: "Should reminders also be sent by email?", author: "ai" },
@@ -427,10 +427,10 @@ describe("T-CARD: order, links and stability", () => {
     expect(new Set(s.needsYou.map((c) => c.id)).size).toBe(s.needsYou.length);
   });
 
-  it("makes no card for a mission that is only open from before, unless it failed", () => {
+  it("makes no card for earlier work that is only still open, unless it failed", () => {
     const old = missionAt(MID, "2026-10-09-old", { status: "partial", stage: "complete", age: 40 * HOUR, features: [featureWith("x", "blocked", { blockedReason: "it needs a decision from you" })], decisionsNeeded: ["Old question?"], baselineBroken: true });
     const s = snap(buildHome({ missions: [{ mission: old }] }, MID), MID);
-    expect(s.missions[0]?.scope).toBe("before");
+    expect(s.missions[0]?.scope).toBe("earlier");
     expect(s.needsYou).toEqual([]);
   });
 

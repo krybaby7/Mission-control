@@ -19,7 +19,7 @@ describe("the caps are named and sit where the size limit needs them", () => {
   });
 });
 
-describe("a normal night is never cut", () => {
+describe("a normal home is never cut", () => {
   it.each(fixtureNames())("%s", (name) => {
     const s = fixtureSnapshot(name);
     expect([s.counts.missionsNotShown, s.counts.cardsNotShown]).toEqual([0, 0]);
@@ -71,7 +71,7 @@ describe("more missions than MAX_MISSIONS_SHOWN", () => {
     const s = many(failed);
     expect(s.missions).toHaveLength(MAX_MISSIONS_SHOWN);
     expect(s.counts.missionsNotShown).toBe(10);
-    expect(s.counts.tonightMissions).toBe(total);
+    expect(s.counts.recentMissions).toBe(total);
     expect(s.counts.cardsNotShown).toBe(0);
     for (const i of failed) expect(s.missions.map((m) => m.id)).toContain(id(i));
     expect(s.needsYou.map((c) => c.kind)).toEqual(["mission_failed", "mission_failed", "mission_failed", "mission_failed"]);
@@ -207,7 +207,7 @@ describe("the whole snapshot stays under MAX_SNAPSHOT_BYTES", () => {
     expect(bytes(s)).toBeLessThanOrEqual(MAX_SNAPSHOT_BYTES);
     assertSnapshotShape(s);
     // Everything is still counted: the lamp and the counts looked at the whole home.
-    expect(s.counts.tonightMissions).toBe(MAX_MISSIONS_SHOWN + 5);
+    expect(s.counts.recentMissions).toBe(MAX_MISSIONS_SHOWN + 5);
     expect(s.counts.missionsNotShown).toBeGreaterThanOrEqual(5);
     expect(s.counts.stuckFeatures).toBeGreaterThan(0);
     expect(s.lamp.state).toBe("needs_look");

@@ -155,23 +155,23 @@ function finishRun(run: RunInfo, facts: MissionFacts[], data: HomeData, opts: Sn
 // ───────────────────────────── Counts (spec 6.3, 12) ─────────────────────────────
 
 function countsOf(facts: MissionFacts[], cards: ReturnType<typeof buildCards>, data: HomeData, hidden: number, cut: { missions: number; cards: number }): Counts {
-  const tonight = facts.filter((x) => x.view.scope === "tonight" && x.view.readable);
-  const before = facts.filter((x) => x.view.scope === "before");
-  const done = tonight.reduce((sum, x) => sum + x.view.featuresDone, 0);
-  const total = tonight.reduce((sum, x) => sum + x.view.featuresTotal, 0);
-  const olderNeedYou = before.filter((x) => x.view.state === "needs_you").length;
-  const olderWaitingForYou = before.filter((x) => x.view.state !== "needs_you" && x.data.mission?.stage === "complete").length;
+  const recent = facts.filter((x) => x.view.scope === "recent" && x.view.readable);
+  const earlier = facts.filter((x) => x.view.scope === "earlier");
+  const done = recent.reduce((sum, x) => sum + x.view.featuresDone, 0);
+  const total = recent.reduce((sum, x) => sum + x.view.featuresTotal, 0);
+  const earlierNeedYou = earlier.filter((x) => x.view.state === "needs_you").length;
+  const earlierWaitingForYou = earlier.filter((x) => x.view.state !== "needs_you" && x.data.mission?.stage === "complete").length;
   return {
     unreadableMissions: facts.filter((x) => !x.view.readable).length,
-    openFromBefore: before.length,
-    olderNeedYou,
-    olderWaitingForYou,
-    tonightMissions: tonight.length,
+    openFromEarlier: earlier.length,
+    earlierNeedYou,
+    earlierWaitingForYou,
+    recentMissions: recent.length,
     featuresDone: done,
     featuresTotal: total,
     featuresLine: featuresLine(done, total),
-    questions: cards.filter((c) => c.kind === "decision" && !c.fromBefore).length,
-    stuckFeatures: tonight.reduce((sum, x) => sum + x.view.features.filter((feature) => feature.state === "stuck").length, 0),
+    questions: cards.filter((c) => c.kind === "decision" && !c.fromEarlier).length,
+    stuckFeatures: recent.reduce((sum, x) => sum + x.view.features.filter((feature) => feature.state === "stuck").length, 0),
     olderMissionsHidden: hidden + (data.skippedFolders ?? 0),
     missionsNotShown: cut.missions,
     cardsNotShown: cut.cards,
@@ -258,7 +258,7 @@ function build(opts: SnapshotOptions, now: number, f: Formatter, keep: Keep): Sn
   const cards = allCards.filter((c) => shownIds.has(c.missionId)).slice(0, keep.cards);
   attachCardIds(shown, cards);
   const counts = countsOf(facts, allCards, data, hidden, { missions: facts.length - shown.length, cards: allCards.length - cards.length });
-  const banner = facts.find((x) => x.view.scope === "tonight" && x.view.state === "waiting" && x.wait !== null);
+  const banner = facts.find((x) => x.view.scope === "recent" && x.view.state === "waiting" && x.wait !== null);
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -279,7 +279,7 @@ function build(opts: SnapshotOptions, now: number, f: Formatter, keep: Keep): Sn
 }
 
 /**
- * Each try keeps less than the one before. A normal night fits the first try; only a home with very many features,
+ * Each try keeps less than the one before. A normal home fits the first try; only a home with very many features,
  * questions and missions needs a later one, and then the cuts are counted (featuresTotal, earlierNotShown,
  * counts.missionsNotShown, counts.cardsNotShown) and what needs a look is kept first (pickFeatures, pickShown, the
  * red cards). The last try holds one mission and one card, which is always small.
@@ -320,10 +320,10 @@ function degraded(now: number, f: Formatter): Snapshot {
   };
   const counts: Counts = {
     unreadableMissions: 0,
-    openFromBefore: 0,
-    olderNeedYou: 0,
-    olderWaitingForYou: 0,
-    tonightMissions: 0,
+    openFromEarlier: 0,
+    earlierNeedYou: 0,
+    earlierWaitingForYou: 0,
+    recentMissions: 0,
     featuresDone: 0,
     featuresTotal: 0,
     featuresLine: featuresLine(0, 0),

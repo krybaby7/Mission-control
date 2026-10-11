@@ -58,7 +58,7 @@ describe("T-ALLOW rows and the missing file", () => {
     expect(a.fileChangedText).toBe("Usage figures last changed at 01:38");
   });
 
-  // M3: quota.json can be days old, and "last changed at 01:38" would read as this morning.
+  // M3: quota.json can be days old, and "last changed at 01:38" would read as earlier today.
   it("the time of the file follows the one time rule: a file changed on another day names the weekday", () => {
     expect(build(empty, { mtime: at("2026-10-11T00:00:00.000Z") }).fileChangedText).toBe("Usage figures last changed at 00:00");
     expect(build(empty, { mtime: at("2026-10-10T23:59:59.000Z") }).fileChangedText).toBe("Usage figures last changed at Sat 23:59");

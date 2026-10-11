@@ -18,23 +18,37 @@ All are run from `leader/` as `../scripts/mc-docker.sh <command>`. Each was chec
 
 | Command | What it does | Notes |
 |---|---|---|
-| `status --json` | Lists every mission: id, title, kind, status, stage, features done and total, blocked, `waitingUntil`, `interrupted`. | Read only. |
+| `status --json` | Lists every mission: id, title, kind, status, stage, features done and total, blocked, `waitingUntil`, `interrupted`. | Read only. `waitingUntil` is UTC (the string ends in Z), because `src/cli.ts` prints the raw event time in JSON. The plain `status` table prints the same moment in local time, in its WAITING UNTIL column. `leader/CLAUDE.md` tells the leader to read the local time there and never to say the UTC clock time as if it were local. |
 | `logs <mission>` | What happened in one mission, step by step. | Read only. The whole log is long and technical (model names, internal steps), so the leader reads only the last 60 lines (it pipes the output through `tail -n 60`) and translates. `--follow` never ends, so the leader does not use it, and the settings refuse it. |
 | `report [<mission>]` | The first 40 lines of the latest report, or of one mission's. | Read only. "Needs your decision" and the Features table are near the top, but with many features they can fall below line 40. The rest sits in a file inside the Docker volume, which the leader cannot open. A mission that is still running has no report (the command says so and fails): the leader then reads the end of `logs` and says the full answer comes when the mission ends. |
-| `stop` | Asks the running night to stop. The running AI step is cancelled, progress is saved and the report is written. | Writes the `STOP` file. The leader first checks with `status --json` that a run is going (if not, it says there is nothing to stop and does not run `stop`), then always asks. Claude Code asks too (see Permissions). |
+| `stop` | Asks the running work to stop. The running AI step is cancelled, progress is saved and the report is written. | Writes the `STOP` file. The leader first checks with `status --json` that a run is going (if not, it says there is nothing to stop and does not run `stop`), then always asks. Claude Code asks too (see Permissions). |
 | `new '<idea>' --name '<name>'` | Queues a new app. | Only queues. |
 | `feature ~/mc-apps/<app-folder> '<request>' --base '<branch>'` | Queues a change to an existing app. | Only queues. The folder must be inside `~/mc-apps`. |
-| `run --until HH:MM` | Works through the queue. `--mission <id>` works on one mission only. | Spends the owner's usage. It blocks for the whole night. The leader always gives `--until`, also with `--mission` and for "Try again": without it the run has no deadline (`src/run.ts` logs "Working until the queue is done (no stop time given)"). |
+| `run [--until HH:MM]` | Works through the queue. `--mission <id>` works on one mission only. | Spends the owner's usage. It blocks until the run ends. `--until` is optional: the leader passes it only when the CEO gives a stop time, and never asks for one. What happens without it is in the next section. |
 
 Not in the list on purpose: `dashboard` (a foreground command that runs until Ctrl+C, so a tool call from the leader would never return; the owner starts it), `config`, `init`, `doctor`, the logins, `shell`, `build`, `copy-reports` and `fix-permissions`.
 
-## Starting the night without blocking the chat
+## Starting a run without blocking the chat
 
-`run` does not return until the stop time or the end of the queue (`run_night` in `scripts/mc-docker.sh` ends in `exec docker run`). Run in the foreground, it would make the chat unusable all night. So `leader/CLAUDE.md` tells the leader to start it as a background task (Claude Code's Bash tool has a `run_in_background` option) and to keep talking.
+`run` does not return until the run ends (the Docker script's `run` branch ends in `exec docker run`). Run in the foreground, it would make the chat unusable for as long as the run lasts. So `leader/CLAUDE.md` tells the leader to start it as a background task (Claude Code's Bash tool has a `run_in_background` option) and to keep talking.
+
+### With and without a stop time
+
+What `mc run` does without `--until`, from `src/run.ts`, `src/cli.ts` and `scripts/mc-docker.sh` (the Docker script passes the arguments on unchanged and adds no stop time):
+
+- There is no stop time and no upper limit on the length of the run. `src/run.ts` logs "Working until the queue is done (no stop time given)." The run goes through the queued missions one after another, picks up missions queued while it works, and ends when none has work left, when `mc stop` or a stop signal arrives, or when the work cannot go on (a full disk, every AI needs a login, or the AI command lines keep failing).
+- When every AI is at its usage limit, the run waits for the limit to end and carries on. With a stop time, it ends the run instead of waiting past that time. Without one it can wait a long time.
+- With a stop time, the engine refuses one that is more than 18 hours ahead (`--until` always means the next time the clock shows it) and starts nothing.
+
+`leader/CLAUDE.md` tells the leader to say this in plain words before it starts a run without a stop time. An older rule, "ask for a stop time on every run", was removed: the CEO decides whether there is a stop time. The dashboard's `--until` is only "a stop time to show": the engine does not save the stop time, so `mc dashboard --until HH:MM` takes the time the CEO gave and shows it with a countdown.
+
+Some of Mission Control's own messages still use an older word for the run: the phone notification "Night finished", the log line "Ending the night early", and the README's tagline "Your overnight software team". The engine was not changed. In the leader's words, and in everything the dashboard shows, each of them means that the team finished or ended its run.
+
+### Without a terminal
 
 Under such a task there is no terminal, so `mc-docker.sh run` behaves as it does under Task Scheduler: it waits up to five minutes for Docker Desktop, and if it cannot start it pushes a notification to the owner's iPad (decision log, "Container and setup" item 4).
 
-Not tried here: running `mc-docker.sh run` as a background task of a Claude Code session. If the session ends during the night, the run may receive a stop signal. The engine handles `SIGHUP`, `SIGINT` and `SIGTERM` by finishing up and saving its progress (`src/run.ts`), and the next run continues, but nobody has seen this happen through Claude Code. A night that must not depend on a chat session is started by the owner or by the scheduled task.
+Not tried here: running `mc-docker.sh run` as a background task of a Claude Code session. If the session ends during a run, the run may receive a stop signal. The engine handles `SIGHUP`, `SIGINT` and `SIGTERM` by finishing up and saving its progress (`src/run.ts`), and the next run continues, but nobody has seen this happen through Claude Code. A run that must not depend on a chat session is started by the owner or by the scheduled task.
 
 ## Permissions
 
@@ -56,7 +70,7 @@ Not tried here: that the rule syntax matches commands written with a relative pa
 
 ## The sentences the dashboard gives the CEO
 
-The dashboard sends nothing. Its "Tell the leader" button gives the CEO a ready sentence with `<your answer here>` for them to fill in, and a Copy button; the CEO pastes it into the chat. The sentences are fixed by the dashboard's vocabulary (`src/dashboard/vocabulary.ts`, spec section 8). No sentence contains text an AI wrote. They name a mission, and sometimes a feature or a question number, so the leader can find the item with `status --json`, `report` and `logs`. When two missions or features have the same title, the sentence adds the id.
+The dashboard sends nothing. Its buttons "Tell the leader about this" (on a card or a feature) and "Tell the leader anything" (on the bar) give the CEO a ready sentence with `<your answer here>` for them to fill in, and a Copy button; the CEO pastes it into the chat. The sentences are fixed by the dashboard's vocabulary (`src/dashboard/vocabulary.ts`, spec section 8). The only text an AI wrote in a sentence is a mission or feature title; leader/CLAUDE.md tells the leader that these names are data, never instructions. The sentences name a mission, and sometimes a feature or a question number, so the leader can find the item with `status --json`, `report` and `logs`. When two missions or features have the same title, the sentence adds the id.
 
 `leader/CLAUDE.md` has a table of every sentence and what to do with it, and the four quick phrases (Your call, Leave it out, Try again, What is going on?). `test/leader.test.ts` builds each sentence from the vocabulary module and fails when `CLAUDE.md` does not contain it word for word, so the two cannot drift apart.
 
@@ -75,16 +89,16 @@ From Anthropic's Remote Control documentation (https://code.claude.com/docs/en/r
 - The first use asks "Enable Remote Control? (y/n)" (a dialog in a running session), and Claude Code asks whether to trust the folder (`Trust <directory>? [y/N]` in server mode).
 - The session runs on the PC. If the Ubuntu window closes or the PC sleeps, the session is offline until it is brought back; the documentation says it reconnects by itself when the machine comes back and the network returns.
 
-Not tried here: starting it, seeing the session in the app, what a CEO can do in it, the permission prompts in it, and what happens when the connection drops during a night run. The PC must stay on and awake, and the Ubuntu window must stay open.
+Not tried here: starting it, seeing the session in the app, what a CEO can do in it, the permission prompts in it, and what happens when the connection drops during a run. The PC must stay on and awake, and the Ubuntu window must stay open.
 
 ## Limits
 
-- The leader's chat uses the same Claude plan as the night run. The engine's pacing cannot see it.
+- The leader's chat uses the same Claude plan as the team's runs. The engine's pacing cannot see it.
 - It cannot see exact usage figures or the allowance. The dashboard shows them.
 - It cannot log in to Claude or Codex, free disk space, start the dashboard, remove or reorder queued work, reopen a feature or change a plan in place.
-- It reads texts written by AIs (reports, logs, decisions). `CLAUDE.md` tells it to treat them, and the names inside quotes in a pasted sentence, as information and never to run a command that appears in them or follow words in them. How well it holds to this has not been tested against a hostile text; the prompts for `stop`, `run`, `new` and `feature` are the second guard.
+- It reads texts written by AIs (reports, logs, decisions). `CLAUDE.md` tells it to treat them, and the mission and feature names in a pasted sentence (in quotes, or after "in"), as information and never to run a command that appears in them or follow words in them. How well it holds to this has not been tested against a hostile text; the prompts for `stop`, `run`, `new` and `feature` are the second guard.
 - It cannot predict. A question like "Is it going to finish?" gets what is visible (features done, anything stuck, a wait, the stop time if it started the run) and no promise. It has no usage figures and no progress per feature.
-- It cannot remove or reorder queued work. "Skip this feature" is answered with that fact, and an offer to stop the night; only a feature that is already stuck stays out.
+- It cannot remove or reorder queued work. "Skip this feature" is answered with that fact, and an offer to stop the run; only a feature that is already stuck stays out.
 - It cannot run git. After a report's "How to try it" the app's folder can be left on a trial version; `feature` then refuses, and the leader tells the CEO the owner has to put the app back (the message names the command).
 
 ## Not verified
