@@ -60,12 +60,15 @@ your idea ─► Architect (frontier) writes a spec: small, testable features
 | `mc init` | Create your settings file (`~/.mission-control/config.yaml`) |
 | `mc config get/set <key> [value]` | Read or change one setting, e.g. `mc config set notify.ntfyUrl https://ntfy.sh/your-topic` |
 | `mc doctor [--live]` | Check the setup. `--live` makes one tiny real call per AI |
-| `mc new "<idea>" [--name "<title>"]` | Queue a new app |
-| `mc feature <app-folder> "<request>"` | Queue a change to an existing app |
+| `mc new "<idea>" [--name "<title>"] [--checkpoint plan\|feature\|final]` | Queue a new app. With `--checkpoint` it stops for your look at that point (see below) |
+| `mc feature <app-folder> "<request>" [--checkpoint plan\|feature\|final]` | Queue a change to an existing app |
 | `mc run [--until HH:MM] [--profile mixed\|claude\|codex] [--role engineer=claude:frontier]` | Work through the queue |
 | `mc status` / `mc report [id]` / `mc logs <id>` | Progress, the report, a step-by-step log |
+| `mc approve <id> [--note "<text>"]` / `mc send-back <id> --note "<what to change>"` | Answer a mission that stopped for your check (see below) |
 | `mc stop` | Stop after the current step; nothing is lost |
 | `mc dashboard [--port N] [--until HH:MM]` | Show the current progress on a web page. It only reads. Through the Docker script it runs in a container of its own (see below) |
+
+**Checks you ask for.** Queue work with `--checkpoint plan` (before anything is built), `--checkpoint feature` (before each feature is added) or `--checkpoint final` (before the app is finished), and that one mission stops there on purpose, tells your phone, and shows at the top of its report what to look at. Other missions carry on. Read it with `mc report <id>`, then `mc approve <id>` or `mc send-back <id> --note "what to change"`. A send-back is reworked and shown to you again, up to two times; a third one ends the work there and says so. An answer can only be recorded while no run is going, and the mission continues on the next run (`mc run --mission <id>`). Without `--checkpoint` nothing changes: a mission runs straight through.
 
 **Profiles:**
 
@@ -88,14 +91,14 @@ Two parts, for someone who is not technical (a CEO, say) and looks at an iPad or
 
   It runs in a container of its own that sees the Mission Control folder read-only. There is no password, by design: anyone who can open the page can see it. By default only the PC itself can; `--lan` publishes it on every network interface (see [docs/setup-windows.md](docs/setup-windows.md)). Press Ctrl+C to stop it.
 
-- **The leader is the hands.** A Claude Code session started in the [`leader/`](leader/) folder. The CEO talks to it in plain words ("How is it going?", "Add a dark mode to the habit tracker", "Please stop the current run."). It acts only through `mc`: status, logs, report, stop, new, feature and run. On the dashboard, every card and feature has a **Tell the leader about this** button, and the bar has **Tell the leader anything**; each gives a ready sentence to paste into the chat. The page itself sends nothing.
+- **The leader is the hands.** A Claude Code session started in the [`leader/`](leader/) folder. The CEO talks to it in plain words ("How is it going?", "Add a dark mode to the habit tracker", "Please stop the current run."). It acts only through `mc`: status, logs, report, stop, new, feature, run, approve and send-back. On the dashboard, every card and feature has a **Tell the leader about this** button, and the bar has **Tell the leader anything**; each gives a ready sentence to paste into the chat. The page itself sends nothing.
 
   ```bash
   cd leader && claude                          # in the Ubuntu window
   cd leader && claude --remote-control "Leader"  # one session you can type to on the PC and open in the Claude app (Code tab) or at claude.ai/code
   ```
 
-  (`claude remote-control` is a different mode: its own session that you open from the app, and you cannot type to it in that window. Remote Control needs a claude.ai login, not an API key.) Claude Code asks you to approve the leader's `stop`, `run`, `new` and `feature` commands; answer Yes once.
+  (`claude remote-control` is a different mode: its own session that you open from the app, and you cannot type to it in that window. Remote Control needs a claude.ai login, not an API key.) Claude Code asks you to approve the leader's `stop`, `run`, `new`, `feature`, `approve` and `send-back` commands; answer Yes once. The leader also asks you in the chat before it answers a check for you, and never does so on its own.
 
   The leader cannot reopen a feature or change a plan in place. A stuck feature or a question is answered with a follow-up request, which starts on the next run.
 

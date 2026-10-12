@@ -10,7 +10,8 @@
     "The AI answers, titles and prose in authentic fixtures are scripted and not representative of real agent text.",
     "Durations are milliseconds because the scripted AIs answer at once.",
     "No capture has a usage reading, a feature that failed and then passed, a fix- or onboard run, a repair round, a mid-run mc.lock or a mid-run dispatch.json.",
-    "The events of limit-then-done and the reader mission of multi-mission jump from 09:58 to 12:59 because the capture used a fake clock for the wait."
+    "The events of limit-then-done and the reader mission of multi-mission jump from 09:58 to 12:59 because the capture used a fake clock for the wait.",
+    "The four checkpoint-* fixtures were written by hand from the design in docs/checkpoints-spec.md, before the engine that writes them existed. They hold the engine's wording of the lines only as a guess. The test that runs the real engine to a checkpoint and builds a snapshot from its home replaces that trust."
   ],
   "fixtures": {
     "done": {"synthetic":false,"source":"raw/a-happy-done + _home-final habit-tracker dispatch.json (reduced)","pins":"all-done green, four ticks yes, steps 1 of 5, the timeline of a clean run"},
@@ -56,6 +57,10 @@
     "finalize-cut-off": {"synthetic":true,"source":"hand-made by agent 1A in the shape of the authentic files: a mission saved done at stage finalize with the report writer still open and no lock","pins":"done before complete is busy: amber, then red"},
     "stale-busy-under-live-run": {"synthetic":true,"source":"hand-made by agent 1A in the shape of the authentic files: a mission being worked, an earlier mission whose run was killed and that the live run has not reached, and a queued one; the test lock starts 2026-10-11T09:50:00Z","pins":"a leftover under a live run is paused, never the worked mission"},
     "restart-midnight": {"synthetic":true,"source":"hand-made by agent 1A in the shape of the authentic files: two missions of one working day with a restart at 03:10; the second lock starts 2026-10-12T03:10:00Z","pins":"earlier work stays recent after a restart"},
+    "checkpoint-plan": {"synthetic":true,"source":"hand-made in the shape of the checkpoint design (docs/checkpoints-spec.md, section 4): a new app stopped before its foundation is built, status stopped, stage init, a pending plan checkpoint, the events of a plan up to checkpoint.parked","pins":"state paused with pausedWhy checkpoint, the checkpoint card with the plan's lines, the amber checkpoint_waiting lamp reason, the parked timeline line"},
+    "checkpoint-feature": {"synthetic":true,"source":"hand-made in the shape of the checkpoint design (docs/checkpoints-spec.md, section 4): a change stopped after the review of one feature and before it is added, a pending feature checkpoint, the feature still in review","pins":"a feature checkpoint card that names the feature, the feature tile read as paused for the check, the parked line that names the feature"},
+    "checkpoint-final": {"synthetic":true,"source":"hand-made in the shape of the checkpoint design (docs/checkpoints-spec.md, section 4): a new app with every feature done, stopped at stage finalize before it is finished, a pending final checkpoint and a green final check in dispatch.json","pins":"a final checkpoint card, no Results entry for a mission that waits for a check, the finished-app wording"},
+    "checkpoint-answered": {"synthetic":true,"source":"hand-made in the shape of the checkpoint design (docs/checkpoints-spec.md, section 4): the plan checkpoint was approved (state answered, the checkpoint.answered event written) and no run has continued the mission yet","pins":"state paused with pausedWhy checkpoint and the sentence You answered, no card, no lamp reason, the approved timeline line"},
     "dispatch-with-secret": {"synthetic":true,"source":"hand-made by agent 1A in the shape of the authentic files: the done mission with a full dispatch.json whose gitSettings hold a fake push token","pins":"the token and the paths of dispatch.json never reach the snapshot","note":"ghp_FAKE0123456789SENTINEL is a made-up token"}
   }
 }

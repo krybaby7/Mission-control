@@ -224,6 +224,7 @@ describe("T-VOC the feature reason table (9.2)", () => {
     ["Mission Control stopped unexpectedly 3 times while working on it (a restart)", "Mission Control kept stopping while it worked on this (for example a restart or a failure)."],
     ["the mission reached its safety cap of 80 agent runs before this feature was finished", "The mission used up its safety limit of AI runs before this was finished."],
     ["it needs a decision from you", "The AI team needs a decision from you."],
+    ["you asked for changes twice and it still was not right", "You asked for changes twice and it still was not right, so it was set aside."],
     ['waiting on "Sign-up page", which was blocked', "It needed “Sign-up page”, which is stuck."],
     ['waiting on "Sign-up page", which was skipped', "It needed “Sign-up page”, which was left out."],
   ])("%s is engine-written", (reason, shown) => {
@@ -256,6 +257,10 @@ describe("T-VOC the failure reason table (9.3)", () => {
     ["The project's own checks already fail, and there is no command that runs single test files.", "The project's own checks already fail, and they could not be used to check new work."],
     ['Mission Control stopped unexpectedly 3 times in a row, at the step "build-x".', "Mission Control kept stopping at one step (for example a restart or a failure)."],
     ["Internal error in stage features: boom", "Something went wrong inside Mission Control. The work so far is kept."],
+    [
+      "You asked for changes to the plan twice and sent it back a third time, so Mission Control stopped before building anything.",
+      "You asked for changes to the plan twice and sent it back a third time, so Mission Control stopped before building anything.",
+    ],
   ])("%s is engine-written", (reason, shown) => {
     expect(explainFailureReason(reason)).toEqual({ text: shown, author: "engine" });
   });

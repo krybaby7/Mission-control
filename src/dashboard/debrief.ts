@@ -30,7 +30,7 @@ const WORST_FIRST: VerdictId[] = ["needs_you", "partly_done", "paused", "done"];
 /** The cards that make up a mission's "open items" (spec 9.4): the one number the tick and the verdict share. */
 const OPEN_CARD_KINDS = new Set<string>(["decision", "feature_stuck", "mission_failed"]);
 
-/** A mission is in the debrief when it finished, stopped for a reason a person can read, or needs help. A dead run has a red card instead. */
+/** A mission is in the debrief when it finished, stopped for a reason a person can read, or needs help. A dead run has a red card instead, and so has a mission that waits for the owner's check. */
 function verdictOf(m: MissionFacts): VerdictId | null {
   if (!m.data.readable || m.data.mission === null || m.view.scope !== "recent") return null;
   switch (m.view.state) {
@@ -41,7 +41,8 @@ function verdictOf(m: MissionFacts): VerdictId | null {
     case "needs_you":
       return "needs_you";
     case "paused":
-      return m.view.pausedWhy === "unexpected" ? null : "paused";
+      // A mission that waits for the owner's check has its card; "continues on the next run" would not be true of it yet.
+      return m.view.pausedWhy === "unexpected" || m.checkpoint?.state === "pending" ? null : "paused";
     default:
       return null;
   }

@@ -104,6 +104,7 @@ export function fakeFacts(mission: Mission, o: FakeFactsOptions = {}): MissionFa
     unbuilt: o.unbuilt ?? mission.features.filter((f) => ["pending", "testing", "building", "reviewing"].includes(f.status)).length,
     baselineBroken: o.baselineBroken ?? mission.baselineBroken,
     runGone: null,
+    checkpoint: null,
   };
 }
 

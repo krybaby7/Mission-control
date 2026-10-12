@@ -270,6 +270,41 @@ Mission Control works until 7:00 in the morning (your local time), then writes a
 
 Only one run can happen at a time. If you start one by hand while the scheduled one is working, you'll see "a Mission Control run is already active". If Docker Desktop is still starting at 23:00 (say, after Windows restarted for an update), the scheduled run waits up to 5 minutes for it. If the scheduled run can't start at all (Docker Desktop isn't running, for example), your iPad gets a notification "Mission Control: the night run didn't start" that says why. This works once a run has started at least once since you set up notifications in Step 6: each run that starts keeps a copy of the notification address in Ubuntu for this. The scheduled run's messages go to `~/mc-night.log`; read the end with `tail -n 50 ~/mc-night.log`.
 
+## Checking things yourself (optional)
+
+Some work is only right when you look at it yourself: how a page looks, whether the plan is what you meant. You can ask the team to stop at a place, show you what to look at, and carry on only after you answer. This part has not been tried on a real PC yet.
+
+1. When you queue work, say where you want to look. There are three places, and you can ask for more than one:
+
+   ```
+   mc new "A habit tracker" --name "Habit tracker" --checkpoint plan --checkpoint final
+   ```
+
+   - `plan`: before anything is built. Nothing is spent on building until you have seen the plan.
+   - `feature`: before each feature is added to the app (one stop for every feature).
+   - `final`: before the finished app is finished.
+
+   **You should see** a line like `It will stop for your check: the plan, the finished app.` The same flag works with `mc feature`. Work queued without `--checkpoint` runs straight through, as before.
+
+2. Start the run as usual. A mission that reaches a place you asked for stops there, on purpose. The other missions carry on, and the run ends when nothing else is left. You get a notification on your iPad ("please check the plan"), the end of the run says `... is waiting for your check`, and `mc status` shows `needs your check` for it.
+
+3. Look at it. `mc report <mission>` starts with **Waiting for your check**: what the team made and what to look at. For a feature or the finished app it ends with the steps to open the work, the same steps as **How to try it** in a finished report (including putting the app's folder back afterwards). Nothing moves while it waits: the work is kept, and nothing is added to your app until you approve.
+
+4. Answer it, in the Ubuntu window or by telling the leader:
+
+   ```
+   mc approve <mission>
+   mc send-back <mission> --note "make the buttons bigger"
+   ```
+
+   **You should see** `Recorded: you approved the plan for “Habit tracker”.` and that it continues on the next run. Continue it with `mc run --mission <mission>`. A send-back needs a note that says what to change: the team changes it with your note and asks you again. You can send the same check back twice; a third send-back ends the work there (the plan: nothing will be built; a feature: it is set aside and the rest carries on; the finished app: the finished result is kept as it is), and the report says what to do next. You can still approve at any time.
+
+5. An answer can only be recorded while no run is going. If one is, you see `A run is going right now, so the answer can't be recorded safely.` Wait until it ends (`mc status` shows), then try again. A mission that waits for you never holds a run up.
+
+6. On the dashboard, a mission that waits has an amber card, **“<name>”: please check the plan** (or the feature, or the finished app), with an eye icon, the lines the team wrote about what to look at, and two buttons, **Tell the leader: approve** and **Tell the leader: send it back**. They only give you a sentence to paste into the chat with the leader. The dashboard never approves anything. The leader asks you one more question before it runs `approve` or `send-back`, and Claude Code asks you on top of that.
+
+What this protects, and what it doesn't. A check is a place where you look, not a lock. The AI team runs as the same Ubuntu user as Mission Control, so a determined one could write an approval itself. That could only skip your look: every test and review still runs, and nothing that fails is added. Mission Control has a record of each answer, ignores an answer with no record, and sends a notice to your iPad each time an answer is recorded, so one you didn't give shows up there.
+
 ## Step 10: In the morning
 
 1. Your iPad shows a ntfy notification that the night finished, with a short summary.
@@ -338,7 +373,7 @@ If the page doesn't open on the iPad, the leader (next section) can tell you how
 
 ## Optional: start the leader
 
-The leader is a Claude Code session that you talk to in plain words: "How is it going?", "Add a dark mode to the habit tracker", "Please stop the current run." It acts only through the same `mc` commands you use (status, logs, report, stop, new, feature and run), and Claude Code asks you before the leader stops the run, starts the team working, or queues a new app or a change (answer Yes once; never "Yes, and don't ask again", which would switch that question off for good). It can't reopen a feature that got stuck or change a plan; for those it queues a follow-up request that starts on the next run. This part has not been tried on a real PC yet.
+The leader is a Claude Code session that you talk to in plain words: "How is it going?", "Add a dark mode to the habit tracker", "Please stop the current run." It acts only through the same `mc` commands you use (status, logs, report, stop, new, feature, run, approve and send-back), and Claude Code asks you before the leader stops the run, starts the team working, queues a new app or a change, or answers a check you asked for (answer Yes once; never "Yes, and don't ask again", which would switch that question off for good). Before it answers a check, the leader also asks you in the chat; see [Checking things yourself](#checking-things-yourself-optional). It can't reopen a feature that got stuck or change a plan; for those it queues a follow-up request that starts on the next run. This part has not been tried on a real PC yet.
 
 1. Claude Code must be installed in Ubuntu itself, and logged in there. The copy inside Mission Control's container can't be used. Follow Anthropic's installation instructions for Claude Code on Linux. The leader's chat uses the same Claude plan as the team's runs.
 
@@ -431,6 +466,9 @@ Your logins, missions and apps are kept. If the project is private, `git pull` a
 | The Codex code is refused | Codes expire after 15 minutes: run `mc login-codex` again for a fresh one. If it's still refused, look for a device code option in ChatGPT > Settings > Security and turn it on. |
 | "You've hit your limit", or `mc status` shows a mission waiting | Nothing to do. Mission Control notices limits, switches to the other AI when allowed, or waits until the limit resets and carries on. If it happens every night, queue less work. |
 | "Waiting for the AIs to respond", or "paused, the AI isn't working" | The internet connection or an AI service had a problem, or an AI command line keeps failing. Nothing was lost and nothing counted against the work. Check that the PC is online, then run `mc doctor --live`. The next `mc run` carries on where it paused. |
+| `mc status` shows a mission `needs your check`, or the end of a run says `is waiting for your check` | You asked the team to stop there (`--checkpoint`). Look at it with `mc report <mission>`, then `mc approve <mission>` or `mc send-back <mission> --note "what to change"`. See [Checking things yourself](#checking-things-yourself-optional). |
+| `A run is going right now, so the answer can't be recorded safely` | `mc approve` and `mc send-back` only work while no run is going. Wait until the run ends (`mc status`), then try again. |
+| `is not waiting for your check, so there is nothing to answer`, or `You already answered this check` | The check was answered already, or the mission isn't stopped for one. `mc status` shows what it is doing. After an answer, continue it with `mc run --mission <mission>`. |
 | You want to stop a run | In another Ubuntu window: `mc stop`. It stops after the current step and keeps its progress; the next `mc run` continues. If it hasn't stopped after a few minutes: `docker stop mission-control-run`. |
 | `a Mission Control run is already active` | One is already working, maybe the scheduled one. Check with `mc status`, or stop it with `mc stop`. If `docker ps` doesn't list `mission-control-run`, the last run was cut off: wait 5 minutes and try again. |
 | `mc status` shows a mission `interrupted` | The last run ended without finishing (it was stopped with `docker stop`, or the PC or Docker Desktop restarted). Nothing is lost: the next `mc run` continues it. |

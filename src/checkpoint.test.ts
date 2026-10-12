@@ -1,0 +1,412 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  answerIsRecorded,
+  answerNotice,
+  applyAnswer,
+  checkpointId,
+  cleanNote,
+  endState,
+  isCheckpointShape,
+  isDerivedFeature,
+  isWaitingForCheck,
+  MAX_LOG_ENTRIES,
+  MAX_NOTE_CHARS,
+  nextCheckpointState,
+  parkedNotice,
+  scopeOf,
+  sendBacks,
+  subjectOf,
+  trimLog,
+  waitingWhat,
+} from "./checkpoint.js";
+import { buildReportFacts, renderReport } from "./report.js";
+import { MissionStore } from "./state.js";
+import type { CheckpointAnswer, CheckpointKind, CheckpointRecord, Feature, Mission, PendingCheckpoint } from "./types.js";
+
+let root: string;
+let store: MissionStore;
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), "mc-checkpoint-"));
+  store = new MissionStore(join(root, "home"));
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  rmSync(root, { recursive: true, force: true });
+});
+
+const NOW = Date.parse("2026-10-12T14:05:00.000Z");
+
+function pending(kind: CheckpointKind = "plan", round = 1, featureId?: string): PendingCheckpoint {
+  const scope = scopeOf(kind, featureId);
+  return {
+    id: checkpointId(scope, round),
+    scope,
+    kind,
+    ...(featureId !== undefined && { featureId }),
+    round,
+    state: "pending",
+    parkedAt: "2026-10-12T13:00:00.000Z",
+    look: { headline: "Check it", lines: ["a line"] },
+  };
+}
+
+function answered(cp: PendingCheckpoint, decision: CheckpointAnswer["decision"] = "approve", note?: string): PendingCheckpoint {
+  return { ...cp, state: "answered", answer: { decision, ...(note !== undefined && { note }), at: "2026-10-12T14:00:00.000Z" } };
+}
+
+function record(scope: string, decision: CheckpointRecord["decision"], round = 1): CheckpointRecord {
+  const kind: CheckpointKind = scope === "plan" ? "plan" : scope === "final" ? "final" : "feature";
+  return { id: checkpointId(scope, round), scope, kind, round, decision, at: "2026-10-12T13:30:00.000Z" };
+}
+
+/** A queued mission on disk that the owner's checks apply to. */
+function mission(fields: Partial<Mission> = {}): Mission {
+  const m = store.createMission({ kind: "greenfield", title: "Shout", request: "Build shout", repoPath: "", baseBranch: "main", profile: "mixed", checkpoints: ["plan", "feature", "final"], nowMs: NOW });
+  Object.assign(m, { status: "stopped", stage: "features" }, fields);
+  store.save(m, NOW);
+  return m;
+}
+
+describe("names and small helpers", () => {
+  it("builds scopes and ids", () => {
+    expect(scopeOf("plan")).toBe("plan");
+    expect(scopeOf("final")).toBe("final");
+    expect(scopeOf("feature", "add-shout")).toBe("feature:add-shout");
+    expect(checkpointId("feature:add-shout", 2)).toBe("feature:add-shout#2");
+  });
+
+  it("knows the features the engine adds by itself", () => {
+    expect(isDerivedFeature("gate-c-fix-1")).toBe(true);
+    expect(isDerivedFeature("owner-change-2")).toBe(true);
+    expect(isDerivedFeature("add-shout")).toBe(false);
+  });
+
+  it("keeps a note on one line without control characters", () => {
+    expect(cleanNote("  make it\n\tbigger\u001b[2J \u0007 please  ")).toBe("make it bigger[2J please");
+  });
+
+  it("trims the log from the oldest feature entries, keeping plan and final answers", () => {
+    const log = [record("plan", "approve"), ...Array.from({ length: MAX_LOG_ENTRIES + 4 }, (_, i) => record(`feature:f${i}`, "approve")), record("final", "approve")];
+    const trimmed = trimLog(log);
+    expect(trimmed).toHaveLength(MAX_LOG_ENTRIES);
+    expect(trimmed[0]?.scope).toBe("plan");
+    expect(trimmed.at(-1)?.scope).toBe("final");
+    expect(trimmed.some((r) => r.scope === "feature:f0")).toBe(false);
+    expect(trimmed.some((r) => r.scope === `feature:f${MAX_LOG_ENTRIES + 3}`)).toBe(true);
+    expect(trimLog(log.slice(0, 5))).toHaveLength(5);
+  });
+
+  it("counts send-backs and recognises a damaged record", () => {
+    const m = { checkpointLog: [record("plan", "send_back"), record("plan", "send_back", 2), record("final", "send_back"), record("plan", "approve", 3)] };
+    expect(sendBacks(m, "plan")).toBe(2);
+    expect(sendBacks({}, "plan")).toBe(0);
+    expect(isCheckpointShape(pending())).toBe(true);
+    for (const bad of [undefined, null, [], "x", { ...pending(), kind: "other" }, { ...pending(), round: 0 }, { ...pending(), state: "waiting" }, { ...pending(), look: undefined }, { ...pending(), answer: { decision: "yes", at: "x" } }]) {
+      expect(isCheckpointShape(bad)).toBe(false);
+    }
+  });
+
+  it("waits only while pending and not complete", () => {
+    expect(isWaitingForCheck({ stage: "features", checkpoint: pending() })).toBe(true);
+    expect(isWaitingForCheck({ stage: "features", checkpoint: answered(pending()) })).toBe(false);
+    expect(isWaitingForCheck({ stage: "features" })).toBe(false);
+    expect(isWaitingForCheck({ stage: "complete", checkpoint: pending() })).toBe(false);
+    expect(isWaitingForCheck({ stage: "features", checkpoint: { ...pending(), round: -1 } })).toBe(false);
+  });
+});
+
+describe("nextCheckpointState: what the dispatcher does at a gate", () => {
+  const all: CheckpointKind[] = ["plan", "feature", "final"];
+  const log = (...r: CheckpointRecord[]) => ({ checkpoints: all, checkpointLog: r });
+
+  it.each<[string, Parameters<typeof nextCheckpointState>, unknown]>([
+    ["no checkpoints chosen: carry on", [{}, "plan", undefined, false], { step: "go" }],
+    ["this kind not chosen: carry on", [{ checkpoints: ["final"] }, "plan", undefined, false], { step: "go" }],
+    ["a feature the engine added itself: carry on", [{ checkpoints: all }, "feature", "gate-c-fix-1", false], { step: "go" }],
+    ["a feature gate with no feature: carry on", [{ checkpoints: all }, "feature", undefined, false], { step: "go" }],
+    ["already approved: carry on", [log(record("plan", "approve")), "plan", undefined, false], { step: "go" }],
+    ["nothing waiting: ask, round 1", [{ checkpoints: all }, "plan", undefined, false], { step: "ask", round: 1 }],
+    ["asked twice before: round 3", [log(record("plan", "send_back"), record("plan", "send_back", 2)), "plan", undefined, false], { step: "ask", round: 3 }],
+    ["another feature's approval does not count", [log(record("feature:a", "approve")), "feature", "b", false], { step: "ask", round: 1 }],
+    ["a check for another scope is in the way: drop it, ask", [{ checkpoints: all, checkpoint: pending("final") }, "plan", undefined, false], { step: "ask", round: 1, drop: "stale" }],
+    ["a damaged check is in the way: drop it, ask", [{ checkpoints: all, checkpoint: { id: "plan#1" } as PendingCheckpoint }, "plan", undefined, false], { step: "ask", round: 1, drop: "shape" }],
+    ["still waiting: park again", [{ checkpoints: all, checkpoint: pending() }, "plan", undefined, false], { step: "stay" }],
+    ["answered with no record: forged", [{ checkpoints: all, checkpoint: answered(pending()) }, "plan", undefined, false], { step: "forged" }],
+    ["answered without an answer: forged", [{ checkpoints: all, checkpoint: { ...pending(), state: "answered" } }, "plan", undefined, true], { step: "forged" }],
+    ["approved with a record: pass", [{ checkpoints: all, checkpoint: answered(pending()) }, "plan", undefined, true], { step: "pass" }],
+    ["sent back for the first time: rework, change 1", [{ checkpoints: all, checkpoint: answered(pending(), "send_back", "x") }, "plan", undefined, true], { step: "rework", change: 1 }],
+    [
+      "sent back the second time: rework, change 2",
+      [{ checkpoints: all, checkpointLog: [record("plan", "send_back")], checkpoint: answered(pending("plan", 2), "send_back", "x") }, "plan", undefined, true],
+      { step: "rework", change: 2 },
+    ],
+    [
+      "sent back the third time: the limit",
+      [{ checkpoints: all, checkpointLog: [record("plan", "send_back"), record("plan", "send_back", 2)], checkpoint: answered(pending("plan", 3), "send_back", "x") }, "plan", undefined, true],
+      { step: "limit" },
+    ],
+    [
+      "a feature's send-backs are counted per feature",
+      [{ checkpoints: all, checkpointLog: [record("feature:b", "send_back"), record("feature:b", "send_back", 2)], checkpoint: answered(pending("feature", 1, "a"), "send_back", "x") }, "feature", "a", true],
+      { step: "rework", change: 1 },
+    ],
+  ])("%s", (_name, args, expected) => {
+    expect(nextCheckpointState(...args)).toEqual(expected);
+  });
+});
+
+describe("applyAnswer", () => {
+  it("records an approval: event first, then the mission, with nothing but what the owner said", () => {
+    const m = mission({ checkpoint: pending("feature", 2, "add-shout") });
+    const order: string[] = [];
+    const appendEvent = store.appendEvent.bind(store);
+    const save = store.save.bind(store);
+    vi.spyOn(store, "appendEvent").mockImplementation((...args) => (order.push("event"), appendEvent(...args)));
+    vi.spyOn(store, "save").mockImplementation((...args) => (order.push("save"), save(...args)));
+
+    const result = applyAnswer(store, m.id, { decision: "approve", note: " looks  fine\n" }, NOW);
+
+    expect(order).toEqual(["event", "save"]);
+    expect(result).toMatchObject({ ok: true, change: 1, limit: false });
+    const cp = store.load(m.id).checkpoint;
+    expect(cp).toMatchObject({ id: "feature:add-shout#2", state: "answered", answer: { decision: "approve", note: "looks fine", at: "2026-10-12T14:05:00.000Z" } });
+    expect(Object.keys(cp?.answer ?? {}).sort()).toEqual(["at", "decision", "note"]);
+    const events = store.readEvents(m.id).filter((e) => e.type === "checkpoint.answered");
+    expect(events).toHaveLength(1);
+    expect(events[0]?.data).toEqual({ id: "feature:add-shout#2", kind: "feature", feature: "add-shout", decision: "approve", round: 2, at: "2026-10-12T14:05:00.000Z" });
+    expect(JSON.stringify(events)).not.toContain("looks fine"); // the note stays out of the event log
+  });
+
+  it("an approval without a note has no note key", () => {
+    const m = mission({ checkpoint: pending() });
+    applyAnswer(store, m.id, { decision: "approve" }, NOW);
+    expect(store.load(m.id).checkpoint?.answer).toEqual({ decision: "approve", at: "2026-10-12T14:05:00.000Z" });
+  });
+
+  it("tells a send-back which change it is and when it is one too many", () => {
+    const first = mission({ checkpoint: pending() });
+    expect(applyAnswer(store, first.id, { decision: "send_back", note: "x" }, NOW)).toMatchObject({ ok: true, change: 1, limit: false });
+    const second = mission({ checkpointLog: [record("plan", "send_back")], checkpoint: pending("plan", 2) });
+    expect(applyAnswer(store, second.id, { decision: "send_back", note: "x" }, NOW)).toMatchObject({ ok: true, change: 2, limit: false });
+    const third = mission({ checkpointLog: [record("plan", "send_back"), record("plan", "send_back", 2)], checkpoint: pending("plan", 3) });
+    expect(applyAnswer(store, third.id, { decision: "send_back", note: "x" }, NOW)).toMatchObject({ ok: true, change: 3, limit: true });
+  });
+
+  it.each<[string, Partial<Mission>, { decision: "approve" | "send_back"; note?: string }, unknown]>([
+    ["nothing is waiting", {}, { decision: "approve" }, { ok: false, reason: "not_waiting" }],
+    ["the mission is complete", { stage: "complete", checkpoint: pending() }, { decision: "approve" }, { ok: false, reason: "not_waiting" }],
+    ["the record is damaged", { checkpoint: { id: "plan#1" } as PendingCheckpoint }, { decision: "approve" }, { ok: false, reason: "damaged" }],
+    ["it was answered already", { checkpoint: answered(pending(), "send_back", "x") }, { decision: "approve" }, { ok: false, reason: "already_answered", decision: "send_back", at: "2026-10-12T14:00:00.000Z" }],
+    ["an answered record has no answer", { checkpoint: { ...pending(), state: "answered" } }, { decision: "approve" }, { ok: false, reason: "damaged" }],
+    ["a send-back has no note", { checkpoint: pending() }, { decision: "send_back" }, { ok: false, reason: "no_note" }],
+    ["a send-back note is only spaces", { checkpoint: pending() }, { decision: "send_back", note: " \n " }, { ok: false, reason: "no_note" }],
+    ["the note is too long", { checkpoint: pending() }, { decision: "approve", note: "x".repeat(MAX_NOTE_CHARS + 1) }, { ok: false, reason: "note_too_long" }],
+  ])("records nothing when %s", (_name, fields, input, expected) => {
+    const m = mission(fields);
+    const before = JSON.stringify(store.load(m.id));
+    expect(applyAnswer(store, m.id, input, NOW)).toEqual(expected);
+    expect(JSON.stringify(store.load(m.id))).toBe(before);
+    expect(store.readEvents(m.id).some((e) => e.type === "checkpoint.answered")).toBe(false);
+  });
+
+  it("accepts a note of exactly the longest length", () => {
+    const m = mission({ checkpoint: pending() });
+    expect(applyAnswer(store, m.id, { decision: "send_back", note: "x".repeat(MAX_NOTE_CHARS) }, NOW).ok).toBe(true);
+  });
+
+  it("is applied once however often it is asked: the second answer says it was answered", () => {
+    const m = mission({ checkpoint: pending() });
+    expect(applyAnswer(store, m.id, { decision: "approve" }, NOW).ok).toBe(true);
+    expect(applyAnswer(store, m.id, { decision: "approve" }, NOW + 1000)).toMatchObject({ ok: false, reason: "already_answered", decision: "approve" });
+    expect(store.readEvents(m.id).filter((e) => e.type === "checkpoint.answered")).toHaveLength(1);
+  });
+
+  it("survives a crash between the event and the save: the check still waits and the answer can be given again", () => {
+    const m = mission({ checkpoint: pending() });
+    const save = store.save.bind(store);
+    vi.spyOn(store, "save").mockImplementationOnce(() => {
+      throw new Error("power cut");
+    });
+    expect(() => applyAnswer(store, m.id, { decision: "approve" }, NOW)).toThrow("power cut");
+    expect(store.load(m.id).checkpoint?.state).toBe("pending");
+    expect(store.readEvents(m.id).filter((e) => e.type === "checkpoint.answered")).toHaveLength(1);
+
+    vi.spyOn(store, "save").mockImplementation(save);
+    expect(applyAnswer(store, m.id, { decision: "approve" }, NOW + 5000).ok).toBe(true);
+    expect(store.load(m.id).checkpoint?.state).toBe("answered");
+    const cp = store.load(m.id).checkpoint;
+    // Both events exist, but only the one that matches the saved answer counts.
+    expect(answerIsRecorded(cp as PendingCheckpoint, store.readEvents(m.id))).toBe(true);
+  });
+});
+
+describe("answerIsRecorded: the cross-check against hand edits", () => {
+  const cp = answered(pending("feature", 1, "a"), "approve");
+  const event = (data: Record<string, unknown>) => [{ at: "x", missionId: "m", type: "checkpoint.answered", data }];
+  const good = { id: "feature:a#1", decision: "approve", at: "2026-10-12T14:00:00.000Z" };
+
+  it("believes an answer whose id, decision and time match an event", () => {
+    expect(answerIsRecorded(cp, event(good))).toBe(true);
+  });
+
+  it.each([
+    ["another checkpoint's id", { ...good, id: "feature:a#2" }],
+    ["another decision", { ...good, decision: "send_back" }],
+    ["another time", { ...good, at: "2026-10-12T14:00:01.000Z" }],
+  ])("does not believe an event with %s", (_name, data) => {
+    expect(answerIsRecorded(cp, event(data))).toBe(false);
+  });
+
+  it("does not believe an event of another type, or no event, or no answer", () => {
+    expect(answerIsRecorded(cp, [{ at: "x", missionId: "m", type: "checkpoint.parked", data: good }])).toBe(false);
+    expect(answerIsRecorded(cp, [])).toBe(false);
+    expect(answerIsRecorded(pending(), event(good))).toBe(false);
+  });
+});
+
+describe("texts", () => {
+  const m = { title: "Shout", id: "2026-10-12-shout", features: [{ id: "add-shout", title: "Add shout" }] } as unknown as Mission;
+
+  it("names what a check is about", () => {
+    expect(subjectOf(m, pending())).toBe("the plan");
+    expect(subjectOf(m, pending("feature", 1, "add-shout"))).toBe("“Add shout”");
+    expect(subjectOf(m, pending("final"))).toBe("the finished app");
+    expect(waitingWhat(m, pending("feature", 1, "add-shout"))).toBe("“Add shout”, before it is added");
+    expect(waitingWhat(m, pending())).toBe("the plan");
+    expect(subjectOf(m, pending("feature", 1, "gone"))).toBe("“gone”");
+  });
+
+  it("writes the phone notice with the commands that answer it", () => {
+    const notice = parkedNotice(m, pending());
+    expect(notice.title).toBe("Shout: please check the plan");
+    expect(notice.message).toBe(
+      'The team stopped because you asked to look at the plan first. Read it with: mc report 2026-10-12-shout. Then run: mc approve 2026-10-12-shout, or: mc send-back 2026-10-12-shout --note "what to change". Nothing else is waiting on this; other work carries on.',
+    );
+    expect(parkedNotice(m, pending("feature", 1, "add-shout")).title).toBe("Shout: please check “Add shout” before it is added");
+    expect(parkedNotice(m, pending("final")).title).toBe("Shout: please check the finished app");
+    expect(parkedNotice(m, pending(), true).message).toMatch(/^An answer was found in this mission's file that was not given with mc approve or mc send-back, so it was ignored\. The team stopped/);
+  });
+
+  it("confirms an answer without repeating the note", () => {
+    const notice = answerNotice(m, answered(pending(), "send_back", "secret words"), { decision: "send_back", note: "secret words", at: "2026-10-12T14:05:00.000Z" });
+    expect(notice.title).toBe("Shout: your answer was recorded");
+    expect(notice.message).toMatch(/^You sent the plan for “Shout” back at \d\d:\d\d\. It continues on the next run\.$/);
+    expect(notice.message).not.toContain("secret");
+  });
+
+  it("strips control characters out of AI-written titles", () => {
+    const dirty = { ...m, title: "Sho\u001b]52;;x\u0007ut" } as Mission;
+    expect(parkedNotice(dirty, pending()).title).toBe("Shout: please check the plan".replace("Shout", "Sho]52;;xut"));
+  });
+
+  it("says how each kind ends when it is sent back once too often", () => {
+    expect(endState("plan")).toBe("nothing will be built");
+    expect(endState("feature")).toBe("this feature is set aside and the rest carries on");
+    expect(endState("final")).toBe("the finished result is kept as it is");
+  });
+});
+
+describe("the report", () => {
+  const render = (m: Mission) => renderReport(m, { usage: [], screenshots: [], generatedAt: "2026-10-12T14:00:00.000Z", inContainer: false });
+  const shout = (status: Feature["status"], id = "add-shout"): Feature => ({
+    id,
+    title: "Add shout",
+    story: "s",
+    acceptance: [],
+    kind: "standard",
+    deps: [],
+    status,
+    rung: 0,
+    attempts: [],
+    frozenTests: [],
+    reviewRounds: 0,
+    openFindings: [],
+  });
+
+  function parkedMission(checkpoint: PendingCheckpoint | undefined, fields: Partial<Mission> = {}): Mission {
+    return mission({ repoPath: join(root, "app"), features: [shout("reviewing")], ...(checkpoint && { checkpoint }), ...fields });
+  }
+
+  it("puts the waiting check first, with what to look at and the two ways to answer", () => {
+    const cp = { ...pending(), look: { headline: "Check the plan for “Shout”", lines: ["The plan has 1 feature: Add shout.", "“Add shout”: Shout the text."] } };
+    const report = render(parkedMission(cp, { stage: "init" }));
+    expect(report.startsWith("## Waiting for your check\n\n")).toBe(true);
+    expect(report).toContain("The team stopped here on purpose, because you asked to look at the plan first. Nothing else is waiting on this mission; other work carries on.");
+    expect(report).toContain("**Check the plan for “Shout”**\n\n- The plan has 1 feature: Add shout.\n- “Add shout”: Shout the text.");
+    expect(report).toMatch(/- \*\*Approve\*\* lets the team carry on from here: `mc approve [^`]+`\./);
+    expect(report).toMatch(/- \*\*Send back\*\* with what to change: `mc send-back [^`]+ --note "what to change"`\. The planner revises the plan with your note, then shows it to you again\. You can do this 2 more times\./);
+    expect(report).toContain("**Waiting for your check** ·"); // the status line under the title
+    expect(report).toContain("I stopped here on purpose, so you can look at it before I go on.");
+    expect(report).not.toContain("To look at it yourself:"); // there is nothing to open yet
+    expect(report.indexOf("# Shout")).toBeGreaterThan(report.indexOf("## Waiting for your check"));
+  });
+
+  it("tells the owner how to open a feature that waits to be added, and how to put the folder back", () => {
+    const cp = { ...pending("feature", 1, "add-shout"), look: { headline: "Check “Add shout” before it is added", lines: ["It works."], branch: "mc/2026-10-12-shout--add-shout", commit: "abc1234567", files: ["src/shout.js", "tests/shout.test.js"] } };
+    const report = render(parkedMission(cp));
+    expect(report).toContain("Files that changed: `src/shout.js` and `tests/shout.test.js`.");
+    expect(report).toContain("To look at it yourself:");
+    expect(report).toContain("2. `git checkout --detach mc/2026-10-12-shout--add-shout`: switch to the version with the new work");
+    expect(report).toContain("press Ctrl+C to stop the app");
+    expect(report).toContain("put the folder back on your own version with `git checkout main`");
+    expect(report).toContain("The engineer changes it with your note, the reviewer looks again, then it is shown to you again.");
+  });
+
+  it("does not send the owner to a main branch that has not moved yet", () => {
+    const final = { ...pending("final"), look: { headline: "Check", lines: ["a"], branch: "mc/2026-10-12-shout" } };
+    const report = render(parkedMission(final, { stage: "finalize", features: [shout("done")] }));
+    const tryIt = report.slice(report.indexOf("## How to try it"));
+    expect(tryIt).toContain("`git checkout --detach mc/2026-10-12-shout`");
+    // Once finished, main follows the work and no checkout is needed (as before).
+    const finished = render(parkedMission(undefined, { stage: "complete", status: "done", features: [shout("done")] }));
+    expect(finished.slice(finished.indexOf("## How to try it"))).not.toContain("git checkout --detach");
+  });
+
+  it("warns that one more send-back ends the work, in the engine's words", () => {
+    const cp = pending("final", 3);
+    const report = render(parkedMission(cp, { checkpointLog: [record("final", "send_back"), record("final", "send_back", 2)] }));
+    expect(report).toContain("Sending it back again stops the work here: the finished result is kept as it is.");
+  });
+
+  it("says an answer is recorded while the mission has not carried on yet", () => {
+    const report = render(parkedMission(answered(pending(), "send_back", "make it bigger")));
+    expect(report.startsWith("## Your answer is recorded\n\nYou sent the plan back at ")).toBe(true);
+    expect(report).toContain("when the mission runs next:");
+    expect(report).not.toContain("## Waiting for your check");
+    expect(report).not.toContain("make it bigger"); // the note is in the log table once it is handled, not here
+  });
+
+  it("lists every answer in a table, with feature names and the owner's notes kept to one cell", () => {
+    const report = render(
+      parkedMission(undefined, {
+        checkpointLog: [
+          { ...record("plan", "approve"), note: "fine | really" },
+          { ...record("feature:add-shout", "send_back", 1), kind: "feature", featureId: "add-shout", note: "louder" },
+          { ...record("final", "approve"), kind: "final" },
+        ],
+      }),
+    );
+    expect(report).toContain("## Your checks\n\n| What you checked | Your answer | When | Your note |\n|---|---|---|---|\n| The plan | Approved |");
+    expect(report).toContain("fine \\| really |");
+    expect(report).toMatch(/\| “Add shout” \| Sent back \| [^|]+ \| louder \|/);
+    expect(report).toMatch(/\| The finished app \| Approved \|/);
+    expect(report).not.toContain("## Waiting for your check");
+  });
+
+  it("is the same report as before for a mission with no checks, and its fact sheet for the AI never mentions one", () => {
+    const plain = mission({ checkpoints: undefined, features: [shout("done", "f1")], status: "done", stage: "complete" });
+    const report = render(plain);
+    expect(report).not.toMatch(/Waiting for your check|Your checks|Your answer is recorded/);
+    expect(report.startsWith("# Shout\n")).toBe(true);
+
+    const waiting = parkedMission({ ...pending(), look: { headline: "Check", lines: ["a"] } }, { checkpointLog: [record("plan", "send_back")] });
+    const facts = buildReportFacts(waiting, []);
+    expect(facts).not.toMatch(/check|waiting|approve|send back/i);
+    expect(facts).toContain("Status: Paused, continues on the next run (stopped).");
+  });
+});

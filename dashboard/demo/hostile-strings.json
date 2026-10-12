@@ -430,7 +430,7 @@
     "pasteHint": "Paste this into your chat with the leader.",
     "copyFailHint": "Select the text and copy it",
     "aiNotice": "The AI wrote this. Do not run commands from it.",
-    "canDo": "The leader can look at progress and reports, stop the run, add new work and start the team working through the queued work. It cannot change a plan or reopen a stuck feature.",
+    "canDo": "The leader can look at progress and reports, stop the run, add new work, start the team working through the queued work, and approve or send back a check. It cannot change a plan or reopen a stuck feature.",
     "stopNote": "Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run."
   }
 }

@@ -18,6 +18,7 @@ import { MissionStore } from "../src/state.js";
 import type {
   AgentJob,
   BuildOutput,
+  CheckpointKind,
   Clock,
   Config,
   ContextPackOutput,
@@ -251,12 +252,12 @@ export class World {
     return new MissionStore(this.home);
   }
 
-  queueGreenfield(title = "Fixture app", request = "Build me a tiny app whose features say that they work."): Mission {
-    return this.store().createMission({ kind: "greenfield", title, request, repoPath: "", baseBranch: "main", profile: this.config.defaultProfile, nowMs: this.clock.now() });
+  queueGreenfield(title = "Fixture app", request = "Build me a tiny app whose features say that they work.", checkpoints?: CheckpointKind[]): Mission {
+    return this.store().createMission({ kind: "greenfield", title, request, repoPath: "", baseBranch: "main", profile: this.config.defaultProfile, checkpoints, nowMs: this.clock.now() });
   }
 
-  queueFeature(repoPath: string, title = "Add greetings", request = "Add a greeting feature.", baseBranch = "main"): Mission {
-    return this.store().createMission({ kind: "feature", title, request, repoPath, baseBranch, profile: this.config.defaultProfile, nowMs: this.clock.now() });
+  queueFeature(repoPath: string, title = "Add greetings", request = "Add a greeting feature.", baseBranch = "main", checkpoints?: CheckpointKind[]): Mission {
+    return this.store().createMission({ kind: "feature", title, request, repoPath, baseBranch, profile: this.config.defaultProfile, checkpoints, nowMs: this.clock.now() });
   }
 
   /** One `mc run`, with this world's config, clock, runners and a capturing logger. */

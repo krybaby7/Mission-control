@@ -59,6 +59,15 @@ export const ID_MAX_CHARS = 80;
 export const REASON_MAX_CHARS = 400;
 export const DECISION_MAX_CHARS = 600;
 export const NOTE_MAX_CHARS = 300;
+/** A checkpoint card lists at most this many lines of the engine's look at the work (the rest is in the report). */
+export const CHECKPOINT_LINES_MAX = 12;
+/**
+ * How many send-backs a check allows before the next one ends the work (the engine's MAX_SEND_BACKS, src/dispatcher.ts, which it
+ * does not export). From this many, the card warns what the next send-back does.
+ */
+export const CHECKPOINT_SEND_BACK_CAP = 2;
+/** The finished checks of a mission that are read (the engine keeps at most 50). */
+export const CHECKPOINT_LOG_MAX = 50;
 
 const MIB = 1024 * 1024;
 export const MAX_MISSION_BYTES = 8 * MIB;

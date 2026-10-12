@@ -83,6 +83,16 @@ export function copyHome(name: string): string {
   return home;
 }
 
+/**
+ * Copies a home somebody else wrote (the real engine's, in test/checkpoint-dashboard.test.ts) into a fresh temp folder, with
+ * the mtimes it had: unlike a fixture, its files are dated by the engine's own clock.
+ */
+export function copyHomeOf(source: string): string {
+  const home = join(freshFolder("mc-dash-"), "home");
+  cpSync(source, home, { recursive: true, preserveTimestamps: true });
+  return home;
+}
+
 /** A fresh temp folder with an empty missions/ folder. */
 export function emptyHome(): string {
   const home = join(freshFolder("mc-dash-"), "home");
@@ -239,8 +249,9 @@ const arr =
     if (!Array.isArray(v)) errs.push(`${path}: expected a list, got ${describe(v)}`);
     else v.forEach((x, i) => item(x, `${path}[${i}]`, errs));
   };
+/** `optional` keys may be absent (never undefined: that would not survive a JSON round trip); when present they are checked. */
 const obj =
-  (fields: Record<string, Check>): Check =>
+  (fields: Record<string, Check>, optional: Record<string, Check> = {}): Check =>
   (v, path, errs) => {
     if (!isRecord(v)) {
       errs.push(`${path}: expected an object, got ${describe(v)}`);
@@ -250,7 +261,8 @@ const obj =
       if (!(key in v)) errs.push(`${path}.${key}: missing`);
       else check(v[key], `${path}.${key}`, errs);
     }
-    for (const key of Object.keys(v)) if (!(key in fields)) errs.push(`${path}.${key}: not part of the contract`);
+    for (const [key, check] of Object.entries(optional)) if (key in v) check(v[key], `${path}.${key}`, errs);
+    for (const key of Object.keys(v)) if (!(key in fields) && !(key in optional)) errs.push(`${path}.${key}: not part of the contract`);
   };
 
 function describe(v: unknown): string {
@@ -315,6 +327,11 @@ const card = obj({
   ifNothing: text,
   whatToDo: nullable(said),
   tellLeader: text,
+},
+{
+  // only on a checkpoint card
+  lines: arr(said),
+  answers: obj({ approve: text, sendBack: text }),
 });
 const allowanceWindow = obj({
   id: text,
@@ -459,6 +476,7 @@ function crossErrors(s: Record<string, unknown>, errs: Errors): void {
   const cardIds = new Set(cards.map((c) => c.id));
   if (cardIds.size !== cards.length) errs.push("needsYou: a card id appears twice");
   for (const c of cards) if (!missionIds.has(c.missionId)) errs.push(`needsYou ${String(c.id)}: mission "${String(c.missionId)}" is not in missions`);
+  for (const c of cards) if (c.kind !== "checkpoint" && ("lines" in c || "answers" in c)) errs.push(`needsYou ${String(c.id)}: only a checkpoint card has lines and answers`);
   for (const m of missions) {
     const features = (Array.isArray(m.features) ? m.features : []).filter(isRecord);
     if (Array.isArray(m.progress) && m.progress.length !== PROGRESS_STEPS.length) errs.push(`missions ${String(m.id)}: progress has ${m.progress.length} steps`);

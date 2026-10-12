@@ -1,6 +1,6 @@
 # The leader
 
-The leader is a Claude Code session that the CEO talks to in plain words. It is the CEO's hands: it checks on the work, reads logs and reports, stops the run, queues a new app or a change, and starts the team working through the queued work. It does this only through Mission Control's own commands (status, logs, report, stop, new, feature, run). It never writes code and never touches an app by hand.
+The leader is a Claude Code session that the CEO talks to in plain words. It is the CEO's hands: it checks on the work, reads logs and reports, stops the run, queues a new app or a change, and starts the team working through the queued work. It does this only through Mission Control's own commands (status, logs, report, stop, new, feature, run, approve, send-back). It never writes code and never touches an app by hand. The last two answer a check: when the CEO asked the team to stop and wait for a look, the leader can approve it or send it back, but only after the CEO says yes in the chat.
 
 The dashboard (`mc dashboard`) is the CEO's eyes. It only shows things. The leader is how the CEO acts on what they see.
 
@@ -10,8 +10,8 @@ Nothing in this folder has been tried on a real PC yet. Everything marked "not t
 
 | File | What it is |
 |---|---|
-| `CLAUDE.md` | The leader's standing instructions: its role, the seven commands, how to turn the CEO's sentences into commands, what it must never do, and how to talk. Claude Code reads it when it starts in this folder. |
-| `.claude/settings.json` | The permissions. `status`, `logs` and `report` run without asking. `stop`, `run`, `new` and `feature` make Claude Code ask you first (see "What the leader will ask you"). File edits, git and `logs --follow` are refused. Claude Code also runs its own read-only commands (such as `ls`, `cat`, `grep`, `echo`) and reads files inside this folder without asking, and asks about anything else. |
+| `CLAUDE.md` | The leader's standing instructions: its role, the nine commands, how to turn the CEO's sentences into commands, what it must never do, and how to talk. Claude Code reads it when it starts in this folder. |
+| `.claude/settings.json` | The permissions. `status`, `logs` and `report` run without asking. `stop`, `run`, `new`, `feature`, `approve` and `send-back` make Claude Code ask you first (see "What the leader will ask you"). File edits, git and `logs --follow` are refused. Claude Code also runs its own read-only commands (such as `ls`, `cat`, `grep`, `echo`) and reads files inside this folder without asking, and asks about anything else. |
 | `README.md` | This file. |
 
 The longer explanation is in [docs/leader.md](../docs/leader.md).
@@ -59,11 +59,19 @@ Not tried here. Whether the session appears, what the app lets the CEO do in it,
 1. In a second Ubuntu window, start the dashboard with `mc dashboard`. If you give a run a stop time, add the same time to show it: `mc dashboard --until 07:00`. The dashboard does not know the run's stop time by itself, so without `--until` it shows none. The leader cannot start the dashboard: it keeps running until you press Ctrl+C.
 2. On the dashboard, "Tell the leader about this" (on a card or a feature) and "Tell the leader anything" (on the bar) give a ready sentence. Copy it and paste it into the chat with the leader.
 3. "Stop the current run" on the dashboard is also only a sentence to paste. The leader asks before it stops anything.
+4. A card that says "please check ..." is a place where you asked the team to stop and wait for your look. It has two more buttons, "Tell the leader: approve" and "Tell the leader: send it back". They too only give a sentence to paste: the dashboard never approves anything. See the next section.
+
+## Checks you asked for
+
+When you queue work you can ask the team to stop for your look: at the plan, before each feature is added, or at the finished app (`mc new "<idea>" --checkpoint plan`, and the same flag on `mc feature`; the leader adds it only when you ask). The team then stops that one mission on purpose, tells you on your phone, and writes at the top of its report what to look at. Other missions carry on.
+
+You answer in the chat with the leader, or at the PC with `mc approve <mission>` or `mc send-back <mission> --note "what to change"`. Before the leader runs either one, it asks you one question and waits for a clear yes, and Claude Code shows a prompt on top of that (see below). An answer can only be recorded while no run is going; the leader says so if one is. After an answer, the mission continues on the next run. A check can be sent back twice; a third send-back ends the work there, and the leader says so before it asks.
 
 ## What the leader will ask you
 
-- It asks you before `stop`, `run`, `new` and `feature` (a prompt in the Ubuntu window, and in the app when you use Remote Control). That is on purpose: reports and logs are written by AIs, and a human tap is the guard against a command that came from such a text. Read what it is about to run, then answer **Yes** once. Never choose "Yes, and don't ask again": Claude Code would save that command as always allowed in the file `.claude/settings.local.json` at the top of the repository, for everyone who starts the leader, and the guard would be gone. If you want fewer prompts anyway, the owner can move entries from `ask` to `allow` in `.claude/settings.json`; the page [docs/leader.md](../docs/leader.md) explains the trade.
-- It may also ask permission for anything outside the seven commands. Say no unless you know why.
+- It asks you before `stop`, `run`, `new`, `feature`, `approve` and `send-back` (a prompt in the Ubuntu window, and in the app when you use Remote Control). That is on purpose: reports and logs are written by AIs, and a human tap is the guard against a command that came from such a text. Read what it is about to run, then answer **Yes** once. Never choose "Yes, and don't ask again": Claude Code would save that command as always allowed in the file `.claude/settings.local.json` at the top of the repository, for everyone who starts the leader, and the guard would be gone. If you want fewer prompts anyway, the owner can move entries from `ask` to `allow` in `.claude/settings.json`; the page [docs/leader.md](../docs/leader.md) explains the trade.
+- It may also ask permission for anything outside the nine commands. Say no unless you know why.
+- Before `approve` it asks "Approve the plan (or feature, or finished app) of <name>? This lets the team carry on and it cannot be undone. Yes or no?". Before `send-back` it repeats your change and asks "Send it back with this? Yes or no?". It never answers a check on its own.
 - Before `run`, it tells you what is queued, and when the run will stop if you gave a stop time. It does not ask for one. Without a stop time the run goes on until the queued work is done or you ask for a stop. It also ends early if no work can go on (a full disk, every AI login expired, or the AI command lines keep failing). Before `stop`, it always asks.
 - A run started by the leader is a background task of the chat session. If the session ends, the run may stop (progress is kept and the next run continues; not tried here). For a run that must not depend on a chat, start it yourself or use the scheduled task from the setup guide.
 

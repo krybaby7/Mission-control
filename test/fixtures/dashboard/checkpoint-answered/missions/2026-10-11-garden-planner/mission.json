@@ -1,0 +1,112 @@
+{
+  "id": "2026-10-11-garden-planner",
+  "kind": "greenfield",
+  "title": "Garden planner",
+  "request": "A garden planner with a watering plan",
+  "repoPath": "/fixture/mc-apps/garden-planner",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-garden-planner",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "stopped",
+  "stage": "init",
+  "createdAt": "2026-10-11T09:58:00.000Z",
+  "updatedAt": "2026-10-11T10:01:00.000Z",
+  "features": [
+    {
+      "id": "beds",
+      "title": "Plant beds",
+      "story": "As a user I can lay out plant beds.",
+      "acceptance": [
+        "run() in src/beds.mjs returns \"beds works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "pending",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "watering",
+      "title": "Watering plan",
+      "story": "As a user I can plan watering.",
+      "acceptance": [
+        "run() in src/watering.mjs returns \"watering works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "beds"
+      ],
+      "status": "pending",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 2,
+  "notes": [],
+  "spec": {
+    "appName": "Garden planner",
+    "summary": "Garden planner.",
+    "features": [
+      {
+        "id": "beds",
+        "title": "Plant beds",
+        "story": "As a user I can lay out plant beds.",
+        "acceptance": [
+          "run() in src/beds.mjs returns \"beds works\""
+        ],
+        "kind": "standard",
+        "deps": []
+      },
+      {
+        "id": "watering",
+        "title": "Watering plan",
+        "story": "As a user I can plan watering.",
+        "acceptance": [
+          "run() in src/watering.mjs returns \"watering works\""
+        ],
+        "kind": "standard",
+        "deps": [
+          "beds"
+        ]
+      }
+    ],
+    "assumptions": [],
+    "uiContract": "Feature <id> lives in src/<id>.mjs and exports run()."
+  },
+  "checkpoints": [
+    "plan"
+  ],
+  "checkpoint": {
+    "id": "plan#1",
+    "scope": "plan",
+    "kind": "plan",
+    "round": 1,
+    "state": "answered",
+    "parkedAt": "2026-10-11T09:58:06.000Z",
+    "notifiedAt": "2026-10-11T09:58:06.200Z",
+    "look": {
+      "headline": "Check the plan for “Garden planner”",
+      "lines": [
+        "The plan has 2 features: Plant beds, Watering plan.",
+        "Plant beds: As a user I can lay out plant beds.",
+        "Watering plan: As a user I can plan watering."
+      ]
+    },
+    "answer": {
+      "decision": "approve",
+      "note": "the plan is fine",
+      "at": "2026-10-11T10:01:00.000Z"
+    }
+  }
+}

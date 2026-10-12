@@ -1,7 +1,8 @@
 // The recent work in plain sentences, from each mission's events.jsonl through the translation table
 // (docs/dashboard-spec.md, section 7). Pure: it gets the missions the other modules built and the clock.
 //
-// Every event type the engine writes is listed in the table. A type that is not listed is hidden and never shown raw
+// Every event type the engine writes is listed in the table (the six checkpoint types included: checkpoint.passed is
+// listed as hidden). A type that is not listed is hidden and never shown raw
 // (the CLI's own fallback prints the event data, which can hold paths, commits and AI text).
 import { cleanId, clean } from "./sanitize.js";
 import { REASON_MAX_CHARS, RECENT_WINDOW_MS, TIMELINE_MAX_ITEMS } from "./constants.js";
@@ -136,6 +137,35 @@ function translate(type: string, data: Record<string, unknown>, at: number, ctx:
     }
     case "feature.added":
       return row(at, "M", "warn", TL.repairFeatureAdded);
+    case "checkpoint.parked": {
+      const kind = text(data.kind);
+      if (kind === null) return null;
+      const feature = featureOf(data, ctx);
+      return row(at, "M", "warn", TL.checkpointParked(kind, t, feature === null ? null : feature.title), feature === null ? null : feature.id);
+    }
+    case "checkpoint.answered": {
+      const kind = text(data.kind);
+      if (kind === null) return null;
+      const feature = featureOf(data, ctx);
+      const { text: line, tone } = TL.checkpointAnswered(data.decision, kind, t, feature === null ? null : feature.title);
+      return row(at, "M", tone, line, feature === null ? null : feature.id);
+    }
+    case "checkpoint.reworked": {
+      const kind = text(data.kind);
+      if (kind === null) return null;
+      const feature = featureOf(data, ctx);
+      const { text: line, tone } = TL.checkpointReworked(data.ok !== false, kind, feature === null ? null : feature.title);
+      return row(at, "M", tone, line, feature === null ? null : feature.id);
+    }
+    case "checkpoint.limit": {
+      const feature = featureOf(data, ctx);
+      return row(at, "M", "bad", TL.checkpointLimit(t), feature === null ? null : feature.id);
+    }
+    case "checkpoint.rejected":
+      return row(at, "M", data.reason === "no_record" ? "bad" : "warn", TL.checkpointRejected(t));
+    case "checkpoint.passed":
+      // hidden: the mission.resume that follows reads as the continuation
+      return null;
     case "run.interrupted":
       return row(at, "M", "warn", TL.runInterrupted);
     case "git.settings.restored":

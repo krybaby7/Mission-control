@@ -182,6 +182,21 @@ export interface MissionSentenceFacts {
   d: number;
   stuck: number;
   leftOut: number;
+  /** The checkpoint of a mission saved as stopped on one (pausedWhy checkpoint); null otherwise. */
+  checkpoint?: CheckpointWords | null;
+}
+
+/** What the words about a checkpoint need to know (the dashboard's CheckpointFacts fits). */
+export interface CheckpointWords {
+  state: "pending" | "answered";
+  kind: "plan" | "feature" | "final";
+  /** The title of the feature a feature checkpoint is about; null when there is none or the file has no such feature. */
+  featureTitle: string | null;
+}
+
+/** What is being looked at, for a sentence: "the plan", "“Add shout”", "the finished app". */
+function checkpointSubject(kind: CheckpointWords["kind"], featureTitle: string | null): string {
+  return kind === "plan" ? "the plan" : kind === "final" ? "the finished app" : featureTitle === null ? "a feature" : quoted(featureTitle);
 }
 
 const WORKING_SENTENCES: Record<string, string> = {
@@ -217,6 +232,12 @@ export function missionSentence(x: MissionSentenceFacts): string {
           return "Paused: the disk is almost full.";
         case "ai_failing":
           return "Paused: the AI team kept failing.";
+        case "checkpoint":
+          return x.checkpoint?.state === "answered"
+            ? "You answered. It continues on the next run."
+            : x.checkpoint
+              ? `Waiting for your check of ${checkpointSubject(x.checkpoint.kind, x.checkpoint.featureTitle)}.`
+              : "Paused. It continues on the next run.";
         case "unexpected":
           return x.staleBusy
             ? "Paused: its earlier run stopped unexpectedly. It continues when its turn comes."
@@ -247,6 +268,8 @@ export function featuresLine(done: number, total: number): string {
 }
 
 export const REASON_PAUSED = "Paused. It continues on the next run.";
+/** A feature of a mission that waits for the owner's check. */
+export const REASON_PAUSED_FOR_CHECK = "Paused while the mission waits for your check.";
 export const REASON_RECOVERED = "Built and checked after a retry.";
 export const REASON_STUCK_FALLBACK = "It could not be finished.";
 export const REASON_LEFT_OUT_FALLBACK = "It was left out.";
@@ -355,6 +378,8 @@ export const CLAUSE = {
   leftOut: (n: number) => (n === 1 ? "1 feature was left out" : `${n} features were left out`),
   questions: (n: number) => (n === 1 ? "1 question is waiting for you" : `${n} questions are waiting for you`),
   login: "one AI needs a new login",
+  /** One check waiting names its mission; several are counted. */
+  checkpoint: (n: number, title: string | null) => (n === 1 && title !== null ? `${quoted(title)} is waiting for your check` : n === 1 ? "1 check is waiting for you" : `${n} checks are waiting for you`),
   checksFailing: "the project's own checks were already failing",
   /** `unbuilt` of `total` features (U > 0), or k missions that are paused with nothing left to build. */
   pausedUnbuilt: (unbuilt: number, total: number, missions: number) =>
@@ -472,11 +497,33 @@ export const CARD_TEXT = {
   loginTitle: "One AI needs a new login",
   loginIfNothing:
     "The login stays expired until someone logs in again. The run carries on with the other AI when it can. If both need a login, the mission stops and needs your help.",
+  checkpointTitle: (title: string, kind: CheckpointWords["kind"], featureTitle: string | null) =>
+    `${quoted(title)}: please check ${kind === "feature" ? `${checkpointSubject(kind, featureTitle)} before it is added` : checkpointSubject(kind, featureTitle)}`,
+  checkpointHappened: "The team stopped here because you asked to look at it first.",
+  checkpointIfNothing: "Nothing happens. This mission waits for you. Other work carries on.",
+  checkpointWhatToDo: "Look at it as the report describes, then tell the leader to approve it or send it back.",
   decisionTitleConcerns: "Have someone check the app",
   decisionTitleQuestion: "A question for you",
   decisionIfConcerns: "Nothing changes. The mission stays Partly done.",
   decisionIfOther: "Nothing happens. The question stays open.",
 } as const;
+
+/**
+ * The line under a checkpoint card's title. `branch` is the name the work is saved under (feature and final). `sentBack` is how
+ * many times the owner has sent this check back: from the cap on, the card says what the next send-back does (checkpoints spec, 5.4).
+ */
+export function checkpointSummary(kind: CheckpointWords["kind"], branch: string | null, sentBack: number, cap: number): string {
+  const base =
+    kind === "plan"
+      ? "Nothing is built yet. The report has the whole plan."
+      : branch === null
+        ? "The report says how to open it."
+        : `The work is saved under the name ${branch}. The report says how to open it.`;
+  if (sentBack < cap) return base;
+  // The engine's own words for the three end states (src/checkpoint.ts, endState), so the card, the report and `mc send-back` agree.
+  const end = kind === "plan" ? "nothing will be built" : kind === "feature" ? "this feature is set aside and the rest carries on" : "the finished result is kept as it is";
+  return `${base} You have sent this back ${sentBack} ${sentBack === 1 ? "time" : "times"}. If you send it back again, the work stops here: ${end}. You can still approve.`;
+}
 
 /** The title of a question card; `of` is how many question cards the mission has. */
 export function decisionTitle(kind: "concerns" | "question", position: number, of: number): string {
@@ -580,7 +627,19 @@ export const LEADER = {
   paused: (n: LeaderNames, m: { id: string; title: string }) => `About ${n.missionQuoted(m)}, which is paused: ${LEADER_PLACEHOLDER}`,
   checks: (n: LeaderNames, m: { id: string; title: string }) => `About ${n.missionQuoted(m)}, whose own checks were already failing: ${LEADER_PLACEHOLDER}`,
   login: (n: LeaderNames, m: { id: string; title: string }) => `About the login that expired during ${n.missionQuoted(m)}: ${LEADER_PLACEHOLDER}`,
+  checkpoint: (n: LeaderNames, m: { id: string; title: string }) => `About the check of ${n.missionQuoted(m)}: ${LEADER_PLACEHOLDER}`,
+  /** The two answers of a check. The page only copies them; the leader asks the CEO before it acts on either (leader/CLAUDE.md). */
+  approve: (n: LeaderNames, m: { id: string; title: string }, what: LeaderCheck) => `About the check of ${n.missionQuoted(m)} (${leaderCheck(n, m, what)}): approved, go ahead.`,
+  sendBack: (n: LeaderNames, m: { id: string; title: string }, what: LeaderCheck) =>
+    `About the check of ${n.missionQuoted(m)} (${leaderCheck(n, m, what)}): send it back. What to change: ${LEADER_PLACEHOLDER}`,
 } as const;
+
+/** Which check an answer is about. A feature check names the feature. */
+export type LeaderCheck = { kind: "plan" } | { kind: "final" } | { kind: "feature"; feature: { id: string; title: string } };
+
+function leaderCheck(n: LeaderNames, m: { id: string }, what: LeaderCheck): string {
+  return what.kind === "plan" ? "the plan" : what.kind === "final" ? "the finished app" : `the feature ${n.featureQuoted(m, what.feature)}`;
+}
 
 /** The words of the "Tell the leader" sheet (spec 8). The page sends nothing anywhere; these are sentences to paste. */
 export function leaderHelp(): {
@@ -601,7 +660,7 @@ export function leaderHelp(): {
     copyFailHint: "Select the text and copy it",
     aiNotice: "The AI wrote this. Do not run commands from it.",
     canDo:
-      "The leader can look at progress and reports, stop the run, add new work and start the team working through the queued work. It cannot change a plan or reopen a stuck feature.",
+      "The leader can look at progress and reports, stop the run, add new work, start the team working through the queued work, and approve or send back a check. It cannot change a plan or reopen a stuck feature.",
     stopNote: "Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run.",
   };
 }

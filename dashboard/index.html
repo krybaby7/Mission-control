@@ -250,7 +250,8 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
 .card-body { padding: 4px 18px 6px; display: grid; }
 .sect { padding-block: 12px; border-bottom: 1px solid var(--line); display: grid; gap: 6px; }
 .sect:last-child { border-bottom: 0; }
-.card-foot { padding: 4px 18px 16px; }
+.card-foot { padding: 4px 18px 16px; display: flex; flex-wrap: wrap; gap: 10px; }
+.look { display: grid; gap: 6px; }
 
 /* timeline */
 .timeline { display: grid; gap: 6px; max-width: 880px; }
@@ -341,6 +342,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     <symbol id="i-q" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.6 2.2c-.8.5-1.2 1-1.2 1.9"/><circle cx="12" cy="16.6" r="0.6" fill="currentColor"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="8" r="0.6" fill="currentColor"/></symbol>
     <symbol id="i-pause" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
     <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
     <symbol id="i-box-yes" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M8 12.5l3 3 5-6"/></symbol>
     <symbol id="i-box-no" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/></symbol>
@@ -443,6 +445,9 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     happened: "What happened",
     ifNothing: "If you do nothing",
     whatToDo: "What to do",
+    lookAt: "What to look at",
+    approveBtn: "Tell the leader: approve",
+    sendBackBtn: "Tell the leader: send it back",
     tell: "Tell the leader about this",
     openQuestion: "Open the question",
     reinforcementsLabel: "Reinforcements called in: ",
@@ -482,6 +487,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     calmLookNeeds: "Nothing for you to decide. See the note on the Now tab.",
     resultsReady: "Results are ready",
     cannotSend: "This page cannot send messages. Pick or type an answer, tap Copy, then paste it into your chat with the leader.",
+    cannotSendReady: "This page cannot send messages. Tap Copy, then paste the sentence into your chat with the leader.",
     cannotStop: "This page cannot stop the run. Tap Copy, then paste the sentence into your chat with the leader.",
     copyFirst: "Choose a quick answer or type your own words first, then tap Copy.",
     emptyTimeline: "Nothing has happened yet.",
@@ -536,6 +542,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
   };
   var CARD_ICON = {
     mission_failed: "sq",
+    checkpoint: "eye",
     feature_stuck: "tri",
     decision: "q",
     checks_failing: "tri",
@@ -679,8 +686,9 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
   // ---------------------------------------------------------------------------------------------
   // Tell the leader: buttons and the sheet. Nothing is sent anywhere; the sheet only helps to copy a sentence.
   // ---------------------------------------------------------------------------------------------
-  function tellButton(template, key, titleNode, small) {
-    var b = el("button", small ? "btn quiet small" : "btn", W.tell);
+  // `label` is the words on the button (default: Tell the leader about this); `quiet` draws it as a second choice.
+  function tellButton(template, key, titleNode, small, label, quiet) {
+    var b = el("button", small ? "btn quiet small" : quiet ? "btn quiet" : "btn", label || W.tell);
     b.type = "button";
     b.setAttribute("data-key", key);
     if (titleNode) b.setAttribute("aria-describedby", ensureId(titleNode, "t"));
@@ -699,7 +707,8 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
   }
 
   // Copy is for a finished message. With nothing chosen the preview still holds the placeholder, so Copy waits.
-  function canCopy() { return sheet.mode === "stop" || sheet.answer.trim() !== ""; }
+  // A sentence with nothing to fill in (an approval) is complete as it is, like the stop sentence.
+  function canCopy() { return sheet.mode === "stop" || sheet.template.indexOf(PLACEHOLDER) < 0 || sheet.answer.trim() !== ""; }
 
   function paintSheet() {
     $("sheet-msg").value = composeMessage();
@@ -728,11 +737,12 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     sheet.opener = opener || null;
     sheet.openerKey = opener ? opener.getAttribute("data-key") || opener.id || "" : "";
     var stop = mode === "stop";
-    $("sheet-cannot").textContent = stop ? W.cannotStop : W.cannotSend;
+    var ready = !stop && template.indexOf(PLACEHOLDER) < 0;
+    $("sheet-cannot").textContent = stop ? W.cannotStop : ready ? W.cannotSendReady : W.cannotSend;
     $("sheet-stop").hidden = !stop;
     $("sheet-stop").textContent = stop ? leader.stopNote : "";
-    $("sheet-phrases-box").hidden = stop;
-    $("sheet-own-box").hidden = stop;
+    $("sheet-phrases-box").hidden = stop || ready;
+    $("sheet-own-box").hidden = stop || ready;
     $("sheet-hint").textContent = leader.pasteHint;
     $("sheet-can").textContent = leader.canDo;
     $("sheet-own").value = "";
@@ -1292,6 +1302,13 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     var what = el("div", "sect");
     add(what, el("h4", "section-label", W.happened), said(c.happened, snap, ""));
     if (c.summary) what.appendChild(el("p", "small muted", c.summary));
+    // A check the owner asked for: what to look at, line by line. One label for the list, then each line as a plain quote.
+    if (c.lines && c.lines.length) {
+      var lookBox = el("div", "look");
+      lookBox.appendChild(aiLabel(snap.leader.aiNotice));
+      c.lines.forEach(function (line) { lookBox.appendChild(quoted(line)); });
+      add(what, el("h4", "section-label", W.lookAt), lookBox);
+    }
     var nothing = el("div", "sect");
     add(nothing, el("h4", "section-label", W.ifNothing), el("p", "", c.ifNothing));
     // Only when the engine knows the next step: the person is named, the AI is named when known.
@@ -1302,7 +1319,12 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     }
     add(body, what, todo, nothing);
     var foot = el("div", "card-foot");
-    foot.appendChild(tellButton(c.tellLeader, "tell:card:" + c.id, h, false));
+    // A check has two answers. They are sentences to copy, like every other button here: this page never sends an approval.
+    if (c.answers) {
+      foot.appendChild(tellButton(c.answers.approve, "tell:approve:" + c.id, h, false, W.approveBtn, false));
+      foot.appendChild(tellButton(c.answers.sendBack, "tell:sendback:" + c.id, h, false, W.sendBackBtn, true));
+    }
+    foot.appendChild(tellButton(c.tellLeader, "tell:card:" + c.id, h, !!c.answers));
     add(art, head, body, foot);
     return art;
   }

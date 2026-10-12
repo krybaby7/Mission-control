@@ -446,6 +446,7 @@ describe("mc status / stop / report / logs", () => {
       blocked: 1,
       waitingUntil: until,
       interrupted: true,
+      checkpoint: null,
     });
     expect(rows[0]?.waitingUntil).toBeNull();
     expect(rows[0]?.interrupted).toBe(false);

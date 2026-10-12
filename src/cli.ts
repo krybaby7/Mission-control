@@ -8,16 +8,18 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError } from "commander";
 import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
+import { type AnswerInput, type AnswerProblem, answerNotice, answerProblem, applyAnswer, CHECKPOINT_KINDS, cleanNote, didWhat, endState, isCheckpointShape, isWaitingForCheck, localClock, MAX_NOTE_CHARS, MAX_SEND_BACKS, waitingWhat } from "./checkpoint.js";
 import { parsePort, runDashboard } from "./dashboard/command.js";
 import { DEFAULT_PORT } from "./dashboard/constants.js";
 import { builtInSettings, settingsFromConfig } from "./dashboard/snapshot.js";
 import { ConfigProblemsError, configPath, configTemplateYaml, defaultConfig, inContainer, loadConfig, parseRoleOverride } from "./config.js";
 import { type DoctorCheck, runDoctor, unkeptFolderProblems } from "./doctor.js";
 import { Git } from "./git.js";
+import { createNotifier, type Notifier } from "./notify.js";
 import { packageRoot } from "./prompts.js";
 import { findMission, missionOutcome, runNight } from "./run.js";
 import { MissionStore } from "./state.js";
-import type { Config, Mission, MissionEvent, MissionStatus, RoleOverride } from "./types.js";
+import type { CheckpointKind, Config, Mission, MissionEvent, MissionStatus, RoleOverride } from "./types.js";
 import { ensureDir, expandHome } from "./util/fs.js";
 import { runProcess } from "./util/process.js";
 import { stripControlChars } from "./util/terminal.js";
@@ -37,6 +39,9 @@ const REPORT_PREVIEW_LINES = 40;
 const TITLE_MAX_CHARS = 60;
 const FOLLOW_POLL_MS = 1_000;
 const EVENT_VALUE_MAX_CHARS = 120;
+
+const CHECKPOINT_HELP =
+  "stop for your check at this point: plan (before building), feature (before each feature is added), final (before finishing). Can be repeated.";
 
 const EXAMPLES = `
 Examples:
@@ -106,6 +111,7 @@ function buildProgram(io: CliIO, setExit: (code: number) => void): Command {
     .option("--name <title>", "a short name for the app")
     .option("--profile <profile>", "which AI does what: claude, codex or mixed (see your settings)")
     .option("--role <setting>", "change one role, e.g. engineer=codex:frontier (can be repeated)", collect, [])
+    .option("--checkpoint <kind>", CHECKPOINT_HELP, collect, [])
     .action((idea: string[], opts: MissionOptions) => newCommand(io, idea.join(" "), opts));
 
   program
@@ -115,6 +121,7 @@ function buildProgram(io: CliIO, setExit: (code: number) => void): Command {
     .option("--name <title>", "a short name for the change")
     .option("--profile <profile>", "which AI does what: claude, codex or mixed (see your settings)")
     .option("--role <setting>", "change one role, e.g. reviewer=claude (can be repeated)", collect, [])
+    .option("--checkpoint <kind>", CHECKPOINT_HELP, collect, [])
     .action((folder: string, request: string[], opts: FeatureOptions) => featureCommand(io, folder, request.join(" "), opts));
 
   program
@@ -125,6 +132,18 @@ function buildProgram(io: CliIO, setExit: (code: number) => void): Command {
     .option("--profile <profile>", "use this profile tonight (each mission keeps its own for later runs)")
     .option("--role <setting>", "change one role tonight, e.g. engineer=frontier (can be repeated; not saved)", collect, [])
     .action((opts: RunOptions) => runCommand(io, opts));
+
+  program
+    .command("approve <mission>")
+    .description("let a mission that stopped for your check carry on (it continues on the next run)")
+    .option("--note <text>", "a note for your own records; it is kept in the report")
+    .action(async (id: string, opts: { note?: string }) => setExit(await answerCommand(io, "approve", id, opts.note)));
+
+  program
+    .command("send-back <mission>")
+    .description("send a mission that stopped for your check back, with what to change; it asks you again")
+    .option("--note <text>", "what to change (required)")
+    .action(async (id: string, opts: { note?: string }) => setExit(await answerCommand(io, "send_back", id, opts.note)));
 
   program
     .command("status")
@@ -163,6 +182,7 @@ interface MissionOptions {
   name?: string;
   profile?: string;
   role: string[];
+  checkpoint: string[];
 }
 
 interface FeatureOptions extends MissionOptions {
@@ -412,6 +432,7 @@ function newCommand(io: CliIO, idea: string, opts: MissionOptions): void {
   const request = idea.trim();
   if (request === "") throw new Error('Describe the app in a few words, for example: mc new "A habit tracker with a weekly chart"');
   const config = loadConfig();
+  const checkpoints = checkpointChoices(opts.checkpoint);
   const mission = openStore(config).createMission({
     kind: "greenfield",
     title: missionTitle(opts.name, request),
@@ -419,9 +440,16 @@ function newCommand(io: CliIO, idea: string, opts: MissionOptions): void {
     repoPath: "", // decided when the app is created
     baseBranch: "main",
     ...missionChoices(config, opts),
+    ...(checkpoints.length > 0 && { checkpoints }),
     nowMs: Date.now(),
   });
-  say(io.stdout, `Queued your new app "${mission.title}".`, `Mission id: ${mission.id}`, `It starts on the next run, for example: mc run --until 07:00`);
+  say(
+    io.stdout,
+    `Queued your new app "${mission.title}".`,
+    `Mission id: ${mission.id}`,
+    ...stopLine(checkpoints),
+    `It starts on the next run, for example: mc run --until 07:00`,
+  );
 }
 
 async function featureCommand(io: CliIO, folder: string, requestText: string, opts: FeatureOptions): Promise<void> {
@@ -429,6 +457,7 @@ async function featureCommand(io: CliIO, folder: string, requestText: string, op
   if (request === "") throw new Error('Describe the change in a few words, for example: mc feature ~/mc-apps/my-app "Add a dark mode"');
   const config = loadConfig();
   const choices = missionChoices(config, opts);
+  const checkpoints = checkpointChoices(opts.checkpoint);
   const repoPath = await checkRepo(resolve(expandHome(folder)));
   const store = openStore(config);
   const baseBranch = await checkBaseBranch(repoPath, opts.base, store);
@@ -439,12 +468,14 @@ async function featureCommand(io: CliIO, folder: string, requestText: string, op
     repoPath,
     baseBranch,
     ...choices,
+    ...(checkpoints.length > 0 && { checkpoints }),
     nowMs: Date.now(),
   });
   say(
     io.stdout,
     `Queued a change to ${repoPath}: "${mission.title}" (starting from branch ${baseBranch}).`,
     `Mission id: ${mission.id}`,
+    ...stopLine(checkpoints),
     `It starts on the next run, for example: mc run --until 07:00`,
   );
 }
@@ -455,6 +486,23 @@ function missionChoices(config: Config, opts: MissionOptions): { profile: string
     throw new Error(`There is no profile called "${profile}". Choose one of: ${Object.keys(config.profiles).join(", ")}.`);
   }
   return { profile, roleOverrides: opts.role.map(parseRoleOverride) };
+}
+
+/** The kinds asked for with --checkpoint, each once, in the order the owner meets them. */
+function checkpointChoices(given: string[]): CheckpointKind[] {
+  for (const kind of given) {
+    if (!CHECKPOINT_KINDS.includes(kind as CheckpointKind)) {
+      throw new Error(`“${kind}” is not a checkpoint. Choose from: ${CHECKPOINT_KINDS.join(", ")}.`);
+    }
+  }
+  return CHECKPOINT_KINDS.filter((kind) => given.includes(kind));
+}
+
+/** The queue output's extra line: where the mission will stop. */
+function stopLine(kinds: CheckpointKind[]): string[] {
+  if (kinds.length === 0) return [];
+  const words: Record<CheckpointKind, string> = { plan: "the plan", feature: "each feature, before it is added", final: "the finished app" };
+  return [`It will stop for your check: ${kinds.map((kind) => words[kind]).join(", ")}.`];
 }
 
 /** The given name, else the request's first sentence, shortened at a word boundary. */
@@ -547,7 +595,13 @@ function shellWord(s: string): string {
 // ───────────────────────────── run / stop ─────────────────────────────
 
 async function runCommand(io: CliIO, opts: RunOptions): Promise<void> {
-  const { missions, summaryPath, waitingForYou } = await runNight({
+  const parked = opts.mission === undefined ? undefined : parkedMission(opts.mission);
+  if (parked?.checkpoint) {
+    // Nothing to start: the mission waits for its owner, so no run (and no night summary or phone notice) is made for it.
+    say(io.stdout, `“${parked.title}” is still waiting for your check (${waitingWhat(parked, parked.checkpoint)}). Nothing was started.`);
+    return;
+  }
+  const { missions, summaryPath, waitingForYou, waitingForCheck } = await runNight({
     ...(opts.until !== undefined && { until: opts.until }),
     ...(opts.mission !== undefined && { missionId: opts.mission }),
     ...(opts.profile !== undefined && { profile: opts.profile }),
@@ -556,15 +610,35 @@ async function runCommand(io: CliIO, opts: RunOptions): Promise<void> {
   const lines = missions.map((m) => `- ${m.title}: ${missionOutcome(m)}`);
   // A failed mission is not "nothing queued": it waits for its owner, who needs the command that continues it.
   const help = waitingForYou.map((m) => `- ${m.title} needs your help: see what with "mc report ${m.id}", then run "mc run --mission ${m.id}"`);
-  const nothing = waitingForYou.length > 0 ? "No mission could run by itself:" : "Nothing was queued. Add work with: mc new \"<your idea>\"";
+  // A mission that stopped on purpose for the owner's check is not "nothing queued" either.
+  const checks = waitingForCheck.flatMap((m) =>
+    m.checkpoint
+      ? [
+          `- ${m.title} is waiting for your check (${waitingWhat(m, m.checkpoint)}). Look at it with: mc report ${m.id}. ` +
+            `Then: mc approve ${m.id}   or   mc send-back ${m.id} --note "what to change".`,
+        ]
+      : [],
+  );
+  const nothing = waitingForYou.length > 0 || waitingForCheck.length > 0 ? "No mission could run by itself:" : "Nothing was queued. Add work with: mc new \"<your idea>\"";
   say(
     io.stdout,
     missions.length === 0 ? nothing : "Night finished:",
     ...lines,
     ...help,
+    ...checks,
     `Night summary: ${summaryPath}`,
     ...(missions.length > 0 ? ["Read the report: mc report"] : []),
   );
+}
+
+/** The mission `mc run --mission` names, when it waits for its owner's check; undefined when it doesn't, or can't be read. */
+function parkedMission(id: string): Mission | undefined {
+  try {
+    const m = openStore(loadConfig()).load(id);
+    return isWaitingForCheck(m) ? m : undefined;
+  } catch {
+    return undefined; // runNight explains what is wrong
+  }
 }
 
 function stopCommand(io: CliIO): void {
@@ -574,6 +648,87 @@ function stopCommand(io: CliIO): void {
     "Stop requested. A running night run stops its current step, saves its progress, writes the report and notifies you.",
     'The next "mc run" continues where it stopped.',
   );
+}
+
+// ───────────────────────────── approve / send-back ─────────────────────────────
+
+/**
+ * Records the owner's answer to a check. It takes the run lock, the same one `mc run` takes, so it only ever writes
+ * the mission file while no run holds its own copy of it; while a run is going it says so and records nothing.
+ */
+async function answerCommand(io: CliIO, decision: AnswerInput["decision"], id: string, note: string | undefined): Promise<number> {
+  const input: AnswerInput = { decision, ...(note !== undefined && { note }) };
+  if (decision === "send_back" && cleanNote(note ?? "") === "") {
+    throw new Error(`Say what to change, for example: mc send-back ${id} --note "make the buttons bigger"`);
+  }
+  const store = lenientStore(io);
+  const before = findMission(store, id);
+  const early = answerProblem(before, input);
+  if (early) throw new Error(problemText(before, early));
+  let release: () => void;
+  try {
+    release = store.acquireLock();
+  } catch (err) {
+    if (err instanceof Error && /another mc run is active/.test(err.message)) {
+      throw new Error("A run is going right now, so the answer can't be recorded safely. Wait until it ends (see: mc status), then try again.");
+    }
+    throw err;
+  }
+  let result: ReturnType<typeof applyAnswer>;
+  try {
+    result = applyAnswer(store, id, input, Date.now());
+  } finally {
+    release();
+  }
+  if (!result.ok) throw new Error(problemText(before, result));
+  const { mission, answer } = result;
+  const cp = mission.checkpoint;
+  if (!cp) return 0;
+  const notice = answerNotice(mission, cp, answer);
+  await notifierFor().notify(notice.title, notice.message);
+  if (decision === "approve") {
+    say(io.stdout, `Recorded: ${didWhat(mission, cp, decision)}.`, `It continues on the next run, for example: mc run --mission ${id}`);
+  } else if (result.limit) {
+    say(io.stdout, `Recorded. You have sent this back twice before, so the work stops here: ${endState(cp.kind)}. The report says what to do next.`);
+  } else {
+    say(io.stdout, `Recorded: ${didWhat(mission, cp, decision)}.`, `${afterSendBack(cp.kind)} (change ${result.change} of ${MAX_SEND_BACKS}).`);
+  }
+  return 0;
+}
+
+function afterSendBack(kind: CheckpointKind): string {
+  switch (kind) {
+    case "plan":
+      return "The planner revises it with your note and asks you again";
+    case "feature":
+      return "The engineer changes it with your note, the reviewer looks again, and it asks you again";
+    case "final":
+      return "The team adds your change as a new feature, checks it, and asks you again";
+  }
+}
+
+function problemText(m: Mission, problem: AnswerProblem): string {
+  switch (problem.reason) {
+    case "not_waiting":
+      return `“${m.title}” is not waiting for your check, so there is nothing to answer. See what it is doing with: mc status`;
+    case "already_answered":
+      return `You already answered this check (${problem.decision === "approve" ? "approved" : "sent back"} at ${localClock(problem.at)}). It continues on the next run.`;
+    case "no_note":
+      return `Say what to change, for example: mc send-back ${m.id} --note "make the buttons bigger"`;
+    case "note_too_long":
+      return `Your note is too long (at most ${MAX_NOTE_CHARS} characters). Shorten it and try again.`;
+    case "damaged":
+      return `This check can't be answered because its record is damaged. Ask the owner to run: mc run --mission ${m.id}`;
+  }
+}
+
+/** The phone notifier from the settings; silent when the settings can't be read. */
+function notifierFor(): Notifier {
+  try {
+    return createNotifier(loadConfig().notify.ntfyUrl);
+  } catch {
+    return { notify: async () => {} };
+  }
 }
 
 // ───────────────────────────── status ─────────────────────────────
@@ -591,6 +746,14 @@ interface StatusRow {
   waitingUntil: string | null;
   /** Saved as running or waiting, but no run is working: the last run was cut off. The next run continues it. */
   interrupted: boolean;
+  /** The owner's check the mission stops for or has just been answered; null when it has none. */
+  checkpoint: null | {
+    kind: CheckpointKind;
+    featureId: string | null;
+    round: number;
+    state: "pending" | "answered";
+    decision: "approve" | "send_back" | null;
+  };
 }
 
 function statusCommand(io: CliIO, json: boolean): void {
@@ -610,7 +773,7 @@ function statusCommand(io: CliIO, json: boolean): void {
     ...rows.map((r) => [
       r.id,
       r.kind === "greenfield" ? "new app" : "change",
-      r.interrupted ? "interrupted" : r.status,
+      r.interrupted ? "interrupted" : r.checkpoint ? (r.checkpoint.state === "pending" ? "needs your check" : "answered") : r.status,
       r.stage,
       `${r.featuresDone}/${r.featuresTotal}`,
       String(r.blocked),
@@ -624,6 +787,17 @@ function statusCommand(io: CliIO, json: boolean): void {
       "",
       "interrupted: the last run ended without finishing (it was stopped with docker stop, or the computer or Docker restarted). " +
         'Nothing is lost: the next "mc run" continues it.',
+    );
+  }
+  for (const m of store.list()) {
+    const cp = m.stage !== "complete" && isCheckpointShape(m.checkpoint) ? m.checkpoint : undefined;
+    if (!cp) continue;
+    say(
+      io.stdout,
+      "",
+      cp.state === "pending"
+        ? `“${m.title}” is waiting for your check (${waitingWhat(m, cp)}). Read it: mc report ${m.id}. Then: mc approve ${m.id}  or  mc send-back ${m.id} --note "..."`
+        : `${capitalize(didWhat(m, cp, cp.answer?.decision ?? "approve"))}. It continues on the next run: mc run`,
     );
   }
   // A failed mission waits for its owner (unless only a login expired: the next run retries that one by itself).
@@ -651,7 +825,19 @@ function statusRow(store: MissionStore, m: Mission, runActive: boolean): StatusR
     blocked: m.features.filter((f) => f.status === "blocked").length,
     waitingUntil: m.status === "waiting" ? lastWaitUntil(store, m.id) : null,
     interrupted: (m.status === "running" || m.status === "waiting") && !runActive,
+    checkpoint: checkpointRow(m),
   };
+}
+
+/** A hand-damaged checkpoint is left out of the listing. */
+function checkpointRow(m: Mission): StatusRow["checkpoint"] {
+  const cp = m.checkpoint;
+  if (!isCheckpointShape(cp)) return null;
+  return { kind: cp.kind, featureId: cp.featureId ?? null, round: cp.round, state: cp.state, decision: cp.answer?.decision ?? null };
+}
+
+function capitalize(s: string): string {
+  return `${s.charAt(0).toUpperCase()}${s.slice(1)}`;
 }
 
 /** The `mc run` holding the lock ("pid 7 on host …"), or undefined; an unreadable lock counts as no run. */
@@ -870,10 +1056,36 @@ export function describeEvent(event: MissionEvent): string {
       return `report written: ${text(d.path)}`;
     case "error":
       return `${feature}error: ${text(d.message)}`;
+    case "checkpoint.parked":
+      return `waiting for your check of ${checkpointWords(d)}${d.round !== undefined && d.round !== 1 ? ` (shown ${text(d.round)} times)` : ""}`;
+    case "checkpoint.answered":
+      return d.decision === "approve" ? `you approved ${checkpointWords(d)}` : `you sent ${checkpointWords(d)} back`;
+    case "checkpoint.reworked":
+      return d.ok === false ? `your change to ${checkpointWords(d)} could not be made; the earlier version is shown again` : `${checkpointWords(d)} was changed after your note`;
+    case "checkpoint.passed":
+      return `your answer was applied: ${text(d.id)}`;
+    case "checkpoint.limit":
+      return `you sent ${checkpointWords(d)} back twice before, so the work stops there`;
+    case "checkpoint.rejected":
+      return `an answer to the check ${text(d.id)} was ignored (${text(d.reason)}); the check is still waiting`;
     default: {
       const details = Object.entries(d).map(([key, value]) => `${key}=${text(value)}`);
       return details.length > 0 ? `${event.type}: ${details.join(", ")}` : event.type;
     }
+  }
+}
+
+/** What a checkpoint event is about, from its data: the plan, a feature, the finished app. Never the owner's note. */
+function checkpointWords(d: Record<string, unknown>): string {
+  switch (d.kind) {
+    case "plan":
+      return "the plan";
+    case "feature":
+      return `${text(d.feature)} (before it is added)`;
+    case "final":
+      return "the finished app";
+    default:
+      return text(d.id);
   }
 }
 

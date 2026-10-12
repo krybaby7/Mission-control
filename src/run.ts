@@ -2,6 +2,7 @@
 // are finished, a stop is requested or the deadline passes, then writes the night summary and notifies.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { isWaitingForCheck, parkedNotice, waitingWhat } from "./checkpoint.js";
 import { loadConfig } from "./config.js";
 import { Dispatcher } from "./dispatcher.js";
 import { RoleExecutor, type WaitCause } from "./executor.js";
@@ -41,6 +42,8 @@ export interface NightResult {
   summaryPath: string;
   /** Failed missions that wait for their owner (see needsOwner), whether or not they ran tonight. */
   waitingForYou: Mission[];
+  /** Missions stopped on purpose for the owner's check (see isWaitingForCheck), whether or not they ran tonight. */
+  waitingForCheck: Mission[];
 }
 
 /** How often the STOP file and the deadline are checked while an agent or a test run is busy. */
@@ -92,14 +95,16 @@ export async function runNight(opts: NightOptions = {}): Promise<NightResult> {
     logger.info(deadline === undefined ? "Working until the queue is done (no stop time given)." : `Working until ${describeDeadline(deadline, startedAt)}.`);
     const night: Night = { config, clock, store, logger, notifier, stop, deadline, startedAt, opts };
     await reportInterruptedRun(night);
+    await repairCheckpointNotices(night);
     const dispatcher = buildDispatcher(night, opts.runners);
     const missions = await workThroughQueue(night, dispatcher, opts.missionId);
     const waitingForYou = store.list().filter(needsOwner);
-    const summaryPath = writeSummary(night, missions, waitingForYou);
+    const waitingForCheck = store.list().filter(isWaitingForCheck);
+    const summaryPath = writeSummary(night, missions, waitingForYou, waitingForCheck);
     logger.info(`Night finished. Summary: ${summaryPath}`);
-    const priority = missions.some((m) => m.status === "failed") || waitingForYou.length > 0 ? "high" : "default";
-    await notifier.notify("Night finished", nightMessage(missions, waitingForYou), { priority });
-    return { missions, summaryPath, waitingForYou };
+    const priority = missions.some((m) => m.status === "failed") || waitingForYou.length > 0 || waitingForCheck.length > 0 ? "high" : "default";
+    await notifier.notify("Night finished", nightMessage(missions, waitingForYou, waitingForCheck), { priority });
+    return { missions, summaryPath, waitingForYou, waitingForCheck };
   } catch (err) {
     logger.error(`The night run stopped because of an error: ${errorText(err)}`);
     await notifier.notify("Mission Control stopped", `The night run stopped because of an error: ${errorText(err)}`, { priority: "high" });
@@ -398,6 +403,22 @@ async function reportInterruptedRun(night: Night): Promise<void> {
 }
 
 /**
+ * A mission that stopped for its owner's check but never told the phone (Mission Control died between saving the check and
+ * sending the notice) tells it now, and is marked as told only after the notice went out.
+ */
+async function repairCheckpointNotices(night: Night): Promise<void> {
+  const { store, notifier, clock } = night;
+  for (const m of store.list().filter(isWaitingForCheck)) {
+    const cp = m.checkpoint;
+    if (cp === undefined || cp.notifiedAt !== undefined) continue;
+    const notice = parkedNotice(m, cp);
+    await notifier.notify(notice.title, notice.message, { priority: "high", tags: ["eyes"] });
+    cp.notifiedAt = new Date(clock.now()).toISOString();
+    store.save(m, clock.now());
+  }
+}
+
+/**
  * The given mission, or else the oldest one with work left, unless it already ran tonight. Read fresh each time,
  * so missions queued during the night run too.
  */
@@ -410,10 +431,11 @@ function nextMission(store: MissionStore, seen: Set<string>, onlyId: string | un
  * Not complete yet, and not failed, unless the failure was an expired login: the owner fixes that outside Mission
  * Control, so the next run simply tries again. Any other failed mission waits for its owner (`mc run --mission <id>`).
  * By stage, not status: a "done" or "partial" mission cut off while being finalized still needs its report and
- * notification.
+ * notification. A mission stopped on purpose for its owner's check has nothing to do until they answer, so the run
+ * moves on to the others (and ends when nothing else is left) instead of waiting.
  */
 function hasWorkLeft(m: Mission): boolean {
-  return m.stage !== "complete" && (m.status !== "failed" || m.failure?.retryable === true);
+  return m.stage !== "complete" && (m.status !== "failed" || m.failure?.retryable === true) && !isWaitingForCheck(m);
 }
 
 /** A failed mission only its owner can move on: what it needs is in its report, then `mc run --mission <id>`. */
@@ -489,16 +511,16 @@ function reportsDir(config: Config): string {
   return join(config.home, "reports");
 }
 
-function writeSummary(night: Night, missions: Mission[], waitingForYou: Mission[]): string {
+function writeSummary(night: Night, missions: Mission[], waitingForYou: Mission[], waitingForCheck: Mission[]): string {
   const dir = ensureDir(reportsDir(night.config));
   const base = `night-${localDate(night.startedAt)}`;
   let path = join(dir, `${base}.md`);
   for (let n = 2; existsSync(path); n++) path = join(dir, `${base}-${n}.md`);
-  writeFileSync(path, renderSummary(night, missions, waitingForYou));
+  writeFileSync(path, renderSummary(night, missions, waitingForYou, waitingForCheck));
   return path;
 }
 
-function renderSummary(night: Night, missions: Mission[], waitingForYou: Mission[]): string {
+function renderSummary(night: Night, missions: Mission[], waitingForYou: Mission[], waitingForCheck: Mission[]): string {
   const { startedAt, clock } = night;
   const lines = [
     `# Night of ${localDate(startedAt)}`,
@@ -509,11 +531,16 @@ function renderSummary(night: Night, missions: Mission[], waitingForYou: Mission
     "",
     ...(missions.length > 0
       ? missions.map((m) => missionLine(m, existsSync(night.store.reportPath(m.id))))
-      : [waitingForYou.length > 0 ? "No mission could run by itself tonight: the ones left need your help first (below)." : 'Nothing was queued. Add work with: mc new "<your idea>"']),
+      : [
+          waitingForYou.length > 0 || waitingForCheck.length > 0
+            ? `No mission could run by itself tonight: the ones left need ${waitingForCheck.length > 0 ? "you" : "your help"} first (below).`
+            : 'Nothing was queued. Add work with: mc new "<your idea>"',
+        ]),
   ];
   const decisions = missions.flatMap((m) => m.decisionsNeeded.map((d) => `- **${oneLine(m.title)}**: ${oneLine(d)}`));
   if (decisions.length > 0) lines.push("", "## Needs your decision", "", ...decisions);
   if (waitingForYou.length > 0) lines.push("", "## Waiting for you", "", ...waitingForYou.map(ownerLine));
+  if (waitingForCheck.length > 0) lines.push("", "## Waiting for your check", "", ...waitingForCheck.map(checkLine));
   const queued = night.store.list().filter((m) => hasWorkLeft(m) && !missions.some((w) => w.id === m.id));
   if (queued.length > 0) lines.push("", `Still waiting in the queue: ${queued.length} mission(s). They start on the next run.`);
   return lines.join("\n") + "\n";
@@ -522,6 +549,12 @@ function renderSummary(night: Night, missions: Mission[], waitingForYou: Mission
 /** How the owner moves a failed mission on. */
 function ownerLine(m: Mission): string {
   return `- **${oneLine(m.title)}** stopped and needs your help. See what it needs with \`mc report ${m.id}\`, then continue it with \`mc run --mission ${m.id}\`.`;
+}
+
+/** How the owner answers a check: read the report, then approve or send back. */
+function checkLine(m: Mission): string {
+  const what = m.checkpoint ? ` (${waitingWhat(m, m.checkpoint)})` : "";
+  return `- **${oneLine(m.title)}** is waiting for your check${what}. Look at it with \`mc report ${m.id}\`, then run \`mc approve ${m.id}\` or \`mc send-back ${m.id} --note "what to change"\`.`;
 }
 
 function endingSentence(night: Night, missions: Mission[]): string {
@@ -533,7 +566,9 @@ function endingSentence(night: Night, missions: Mission[]): string {
       return "Stopped early because you asked it to.";
     default:
       if (night.noWork !== undefined) return `Ended early because ${night.noWork}; the remaining missions start on the next run.`;
-      if (missions.some((m) => m.status === "stopped")) return "Some work is paused; it continues on the next run. Each report says why it paused.";
+      if (missions.some((m) => m.status === "stopped" && !isWaitingForCheck(m))) {
+        return "Some work is paused; it continues on the next run. Each report says why it paused.";
+      }
       return "Every queued mission was worked on.";
   }
 }
@@ -544,19 +579,20 @@ function missionLine(m: Mission, hasReport: boolean): string {
   return hasReport ? `${line} [Read the report](${missionLinkBase(m.id)}/report.md), or run \`mc report ${m.id}\`` : line;
 }
 
-function nightMessage(missions: Mission[], waitingForYou: Mission[]): string {
-  if (missions.length === 0 && waitingForYou.length === 0) return 'Nothing was queued. Add work with: mc new "<your idea>"';
+function nightMessage(missions: Mission[], waitingForYou: Mission[], waitingForCheck: Mission[]): string {
+  if (missions.length === 0 && waitingForYou.length === 0 && waitingForCheck.length === 0) return 'Nothing was queued. Add work with: mc new "<your idea>"';
   const helped = new Set(missions.map((m) => m.id));
   return [
     ...missions.map((m) => `${oneLine(m.title)}: ${missionOutcome(m)}`),
     ...waitingForYou.filter((m) => !helped.has(m.id)).map((m) => `${oneLine(m.title)}: still needs your help (mc report ${m.id})`),
+    ...waitingForCheck.filter((m) => !helped.has(m.id)).map((m) => `${oneLine(m.title)}: waiting for your check (mc report ${m.id})`),
     "Read the report: mc report",
   ].join("\n");
 }
 
 /** A mission's result in plain words, e.g. "Partly done, 4 of 6 features done". */
 export function missionOutcome(m: Mission): string {
-  return `${statusPhrase(m.status)}, ${featureCount(m)}`;
+  return `${isWaitingForCheck(m) ? "Waiting for your check" : statusPhrase(m.status)}, ${featureCount(m)}`;
 }
 
 function statusPhrase(status: MissionStatus): string {

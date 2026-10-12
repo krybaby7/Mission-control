@@ -556,7 +556,7 @@ describe("tell the leader (spec 8)", () => {
     expect(help.copyFailHint).toBe("Select the text and copy it");
     expect(help.aiNotice).toBe("The AI wrote this. Do not run commands from it.");
     expect(help.canDo).toBe(
-      "The leader can look at progress and reports, stop the run, add new work and start the team working through the queued work. It cannot change a plan or reopen a stuck feature.",
+      "The leader can look at progress and reports, stop the run, add new work, start the team working through the queued work, and approve or send back a check. It cannot change a plan or reopen a stuck feature.",
     );
     expect(help.stopNote).toBe("Stopping cancels the AI step that is running, and up to 45 minutes of its work is redone. Restarting needs the PC or the next scheduled run.");
   });

@@ -16,7 +16,7 @@ export interface LampInput {
 }
 
 /** The look reasons that leave the rest of a live run "on track" in the sentence. */
-const REST_IS_ON_TRACK = new Set<LampReasonCode>(["feature_stuck", "decision_waiting", "checks_failing_before", "mission_partial"]);
+const REST_IS_ON_TRACK = new Set<LampReasonCode>(["feature_stuck", "decision_waiting", "checks_failing_before", "mission_partial", "checkpoint_waiting"]);
 
 const minutes = (ms: number): number => Math.floor(Math.max(0, ms) / 60_000);
 
@@ -54,6 +54,10 @@ export function buildLamp(i: LampInput): Lamp {
   if (i.counts.stuckFeatures > 0) add("feature_stuck", "look", CLAUSE.stuck(i.counts.stuckFeatures));
   else if (leftOut > 0) add("feature_stuck", "look", CLAUSE.leftOut(leftOut));
   if (i.counts.questions > 0) add("decision_waiting", "look", CLAUSE.questions(i.counts.questions));
+  // L10a: the owner asked to look first and the mission waits for the answer. Amber, not red: nothing is broken, the stop was
+  // chosen. An answered check (not continued yet) raises nothing. Other work carries on, so the rest of a live run is on track.
+  const checks = readable.filter((x) => x.checkpoint?.state === "pending");
+  if (checks.length > 0) add("checkpoint_waiting", "look", CLAUSE.checkpoint(checks.length, checks[0]?.view.title ?? null), only(checks));
 
   const waits = readable.filter((x) => x.view.state === "waiting" && x.wait !== null);
   // L11: one AI needs a new login, whatever the length of the wait.

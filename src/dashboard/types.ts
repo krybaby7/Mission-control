@@ -118,6 +118,7 @@ export const LAMP_REASON_CODES = [
   "stop_requested",
   "home_unreadable",
   "earlier_failed",
+  "checkpoint_waiting",
   // no colour change (info)
   "short_wait",
   "queued",
@@ -256,8 +257,12 @@ export type MissionStateId = (typeof MISSION_STATES)[number];
 export const FEATURE_STATES = ["waiting_turn", "being_built", "being_reviewed", "done", "stuck", "left_out", "paused", "unknown"] as const;
 export type FeatureStateId = (typeof FEATURE_STATES)[number];
 
-export const PAUSED_WHY = ["deadline", "stop_requested", "disk", "ai_failing", "unexpected", "unknown"] as const;
-/** Why a paused mission paused. Derived: the last `mission.stopped` event's data.reason through the stop table; "unexpected" for a mission saved as running or waiting with no live run. */
+export const PAUSED_WHY = ["deadline", "stop_requested", "disk", "ai_failing", "unexpected", "checkpoint", "unknown"] as const;
+/**
+ * Why a paused mission paused. Derived: the last `mission.stopped` event's data.reason through the stop table; "unexpected" for a
+ * mission saved as running or waiting with no live run; "checkpoint" for a mission saved as stopped with a `checkpoint` (the owner
+ * asked to look first, or answered and the mission has not been continued yet).
+ */
 export type PausedWhy = (typeof PAUSED_WHY)[number];
 
 export const SCOPES = ["recent", "earlier"] as const;
@@ -397,6 +402,7 @@ export interface FeatureView {
 
 export const CARD_KINDS = [
   "mission_failed",
+  "checkpoint",
   "feature_stuck",
   "decision",
   "checks_failing",
@@ -442,6 +448,19 @@ export interface NeedsYouCard {
    * They are cleaned (invisible characters removed, double quotes replaced), and the leader treats them as data.
    */
   tellLeader: string;
+  /**
+   * Only on a `checkpoint` card (never on another kind, and the key is absent there): what the owner is asked to look at,
+   * in reading order. They are the engine's look at the work (the plan's features, a build summary, the reviewer's notes),
+   * which mixes engine and AI text, and the page cannot tell them apart, so every line is `ai` and labelled. Cleaned, at
+   * most CHECKPOINT_LINES_MAX lines. Never parsed. Source: mission.json `checkpoint.look.lines`.
+   */
+  lines?: Said[];
+  /**
+   * Only on a `checkpoint` card: the two sentences the owner pastes to the leader to answer the check (spec of the
+   * checkpoints, section 10). The page only copies them; it never sends an approval. `approve` is complete as it is;
+   * `sendBack` ends with the placeholder for the owner's change. Straight quotes around the names, like `tellLeader`.
+   */
+  answers?: { approve: string; sendBack: string };
 }
 
 // ───────────────────────────── Allowance ─────────────────────────────
@@ -664,7 +683,7 @@ export interface LeaderHelp {
   aiNotice: string;
   /**
    * What the leader can and cannot do, shown in the sheet: "The leader can look at progress and reports, stop
-   * the run, add new work and start the team working through the queued work. It cannot change a plan or reopen a stuck feature." The leader only has the mc commands status, logs, report, stop, new, feature and run.
+   * the run, add new work, start the team working through the queued work, and approve or send back a check. It cannot change a plan or reopen a stuck feature." The leader only has the mc commands status, logs, report, stop, new, feature, run, approve and send-back.
    */
   canDo: string;
   /**

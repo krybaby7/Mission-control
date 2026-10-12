@@ -353,6 +353,8 @@ const FEATURE_REASONS: { exact?: string; start?: RegExp; shown: string }[] = [
   },
   { start: /^the mission reached its safety cap of \d+ agent runs/, shown: "The mission used up its safety limit of AI runs before this was finished." },
   { exact: "it needs a decision from you", shown: "The AI team needs a decision from you." },
+  // A feature the owner sent back once too often (src/dispatcher.ts, limitReached).
+  { exact: "you asked for changes twice and it still was not right", shown: "You asked for changes twice and it still was not right, so it was set aside." },
 ];
 
 const WAITING_ON = /^waiting on "(.+)", which was (blocked|skipped)$/;
@@ -390,6 +392,11 @@ const FAILURE_REASONS: { test: RegExp; shown: string }[] = [
   { test: /^The project's own checks already fail/, shown: "The project's own checks already fail, and they could not be used to check new work." },
   { test: /^Mission Control stopped unexpectedly \d+ times/, shown: "Mission Control kept stopping at one step (for example a restart or a failure)." },
   { test: /^Internal error in stage /, shown: "Something went wrong inside Mission Control. The work so far is kept." },
+  // The plan was sent back once too often (src/dispatcher.ts, limitReached): the engine's own plain sentence, shown as it is.
+  {
+    test: /^You asked for changes to the plan twice and sent it back a third time/,
+    shown: "You asked for changes to the plan twice and sent it back a third time, so Mission Control stopped before building anything.",
+  },
 ];
 
 /** `reason` is a mission's failure reason, already cleaned. */
@@ -500,4 +507,21 @@ export const TL = {
   repairFeatureAdded: "The final check found problems, so a repair feature was added.",
   runInterrupted: "Work was cut off by a restart or a failure. That step is tried again.",
   versionSettingsRestored: "An AI changed the app's version-control settings. The change was undone.",
+  // The checks the owner asked for (docs/checkpoints-spec.md, 12). `f` is a feature title, null when the file does not have it.
+  // The owner's note and the proof of an answer are never part of a sentence.
+  checkpointParked(kind: string, t: string, f: string | null): string {
+    return kind === "plan" ? `Waiting for your check of the plan for ${name(t)}.` : kind === "final" ? "Waiting for your check of the finished app." : `Waiting for your check of ${f === null ? A_FEATURE : name(f)} before it is added.`;
+  },
+  checkpointAnswered(decision: unknown, kind: string, t: string, f: string | null): { text: string; tone: Tone } {
+    const subject = kind === "plan" ? "the plan" : kind === "final" ? "the finished app" : f === null ? A_FEATURE : name(f);
+    if (decision === "approve") return { text: `You approved ${subject}. ${name(t)} carries on when the next run starts.`, tone: "good" };
+    const then = kind === "plan" ? "It is revised and shown to you again." : kind === "final" ? "Your change is added and shown to you again." : "It is changed and shown to you again.";
+    return { text: `You sent ${subject} back. ${then}`, tone: "info" };
+  },
+  checkpointReworked(ok: boolean, kind: string, f: string | null): { text: string; tone: Tone } {
+    if (!ok) return { text: "Your change could not be made. The earlier version is shown again.", tone: "warn" };
+    return { text: kind === "plan" ? "The plan was revised after your note." : kind === "final" ? "A new feature was added for your change." : `${f === null ? "A feature" : name(f)} was changed after your note.`, tone: "info" };
+  },
+  checkpointLimit: (t: string) => `You sent this back twice before, so ${name(t)} stops here. The report says what to do.`,
+  checkpointRejected: (t: string) => `An answer to the check of ${name(t)} was ignored because it did not match. The check is still waiting.`,
 } as const;

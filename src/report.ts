@@ -5,8 +5,9 @@ import { type Dirent, readFileSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
+import { endState, isCheckpointShape, isWaitingForCheck, localClock, MAX_SEND_BACKS, sendBacks, shown, subjectOf, waitingWhat } from "./checkpoint.js";
 import { inContainer } from "./config.js";
-import type { Attempt, Feature, Finding, Mission, MissionStatus, Provider, ReportProseOutput, UsageRecord } from "./types.js";
+import type { Attempt, Feature, Finding, Mission, MissionStatus, PendingCheckpoint, Provider, ReportProseOutput, UsageRecord } from "./types.js";
 import { stripControlChars } from "./util/terminal.js";
 
 // ───────────────────────────── Usage ─────────────────────────────
@@ -130,8 +131,10 @@ function appsSubfolder(m: Mission, container: boolean): string | undefined {
 function checkoutStep(m: Mission): string | undefined {
   const branch = shellQuote(m.integrationBranch);
   if (m.kind === "greenfield") {
-    // Finalize fast-forwards main, which the app folder has checked out, to the mission's work.
-    return m.stage === "finalize" || m.stage === "complete" ? undefined : `git checkout --detach ${branch}`;
+    // Finalize fast-forwards main, which the app folder has checked out, to the mission's work. (Not yet while the
+    // owner's check of the finished app is open: main has not moved.)
+    const moved = (m.stage === "finalize" || m.stage === "complete") && m.checkpoint?.kind !== "final";
+    return moved ? undefined : `git checkout --detach ${branch}`;
   }
   return m.status === "done" ? `git checkout ${branch}` : `git checkout --detach ${branch}`;
 }
@@ -245,12 +248,14 @@ export function renderReport(m: Mission, opts: RenderReportOptions): string {
   const usage = missionUsage(m, opts.usage);
   const container = opts.inContainer ?? inContainer();
   const sections = [
+    checkSection(m, container, opts.reportDir),
     headerSection(m, opts.generatedAt),
     narrative(m, opts.prose, container),
     whatYouCanDoSection(m, opts.prose),
     howToTrySection(m, container),
     decisionsSection(m, container),
     featuresSection(m),
+    yourChecksSection(m),
     screenshotsSection(opts.screenshots, opts.reportDir),
     choicesSection(m),
     reviewNotesSection(m),
@@ -264,11 +269,15 @@ export function renderReport(m: Mission, opts: RenderReportOptions): string {
 function headerSection(m: Mission, generatedAt: string): string {
   const { done, total } = countFeatures(m.features);
   const progress = total === 0 ? "no features planned yet" : `${done} of ${total} features done`;
-  return `# ${oneLine(m.title)}\n\n**${statusLabel(m.status)}** · ${progress} · report written ${formatLocalTime(generatedAt)}`;
+  return `# ${oneLine(m.title)}\n\n**${statusLabel(m.status, m)}** · ${progress} · report written ${formatLocalTime(generatedAt)}`;
 }
 
-/** The same words as the night summary and the notifications (run.ts statusPhrase). */
-function statusLabel(status: MissionStatus): string {
+/**
+ * The same words as the night summary and the notifications (run.ts statusPhrase). Given the mission, a stop for the
+ * owner's check reads as that, not as a pause. (The fact sheet for the scout passes no mission: it never mentions checks.)
+ */
+function statusLabel(status: MissionStatus, m?: Mission): string {
+  if (m && isWaitingForCheck(m)) return "Waiting for your check";
   switch (status) {
     case "done":
       return "Done";
@@ -283,6 +292,97 @@ function statusLabel(status: MissionStatus): string {
   }
 }
 
+// ───────────────────────────── The owner's checks ─────────────────────────────
+
+/** The block at the very top of the report (what `mc report` shows first) while a check waits, or after it was answered. */
+function checkSection(m: Mission, container: boolean, reportDir: string | undefined): string {
+  const cp = m.checkpoint;
+  if (!isCheckpointShape(cp) || m.stage === "complete") return "";
+  return cp.state === "pending" ? waitingSection(m, cp, container, reportDir) : answeredSection(m, cp);
+}
+
+function waitingSection(m: Mission, cp: PendingCheckpoint, container: boolean, reportDir: string | undefined): string {
+  const { look } = cp;
+  const sent = sendBacks(m, cp.scope);
+  // The two answers come before the look: a long plan must not push them out of the first lines `mc report` shows.
+  const parts = [
+    `The team stopped here on purpose, because you asked to look at ${waitingWhat(m, cp)} first. Nothing else is waiting on this mission; other work carries on.`,
+    [
+      "What your answer does:",
+      `- **Approve** lets the team carry on from here: ${code(`mc approve ${m.id}`)}. You can add ${code('--note "..."')}; it is kept in this report.`,
+      `- **Send back** with what to change: ${code(`mc send-back ${m.id} --note "what to change"`)}. ${sendBackEffect(cp, sent)}`,
+    ].join("\n"),
+    `**${oneLine(shown(look.headline))}**`,
+    bulletList(look.lines.map((line) => shown(String(line))), ""),
+  ].filter((p) => p !== "");
+  if (look.files && look.files.length > 0) parts.push(`Files that changed: ${listWords(look.files.map((p) => code(shown(p))))}.`);
+  const howTo = lookHowTo(m, cp, container);
+  if (howTo) parts.push(howTo);
+  if (look.screenshots && look.screenshots.length > 0) {
+    parts.push(look.screenshots.map((p) => `![${screenshotCaption(p)}](${imageLink(p, reportDir)})`).join("\n\n"));
+  }
+  return section("Waiting for your check", parts.join("\n\n"));
+}
+
+function sendBackEffect(cp: PendingCheckpoint, sent: number): string {
+  if (sent >= MAX_SEND_BACKS) return `Sending it back again stops the work here: ${endState(cp.kind)}.`;
+  const how: Record<PendingCheckpoint["kind"], string> = {
+    plan: "The planner revises the plan with your note, then shows it to you again.",
+    feature: "The engineer changes it with your note, the reviewer looks again, then it is shown to you again.",
+    final: "The team adds your change as a new feature, checks everything again, then shows the result to you again.",
+  };
+  return `${how[cp.kind]} You can do this ${MAX_SEND_BACKS - sent === 1 ? "one more time" : `${MAX_SEND_BACKS - sent} more times`}.`;
+}
+
+/** How to open the work on its branch (a feature before it is added, or the finished app), like "How to try it". */
+function lookHowTo(m: Mission, cp: PendingCheckpoint, container: boolean): string {
+  const branch = cp.look.branch;
+  if (cp.kind === "plan" || !branch || !m.repoPath) return "";
+  const steps = [`cd ${shownPath(m.repoPath, container)}`, `git checkout --detach ${shellQuote(branch)}`];
+  if (m.kind === "greenfield") steps.push("npm install", "npm run dev", "open http://localhost:3000");
+  else {
+    if (m.verify?.install) steps.push(m.verify.install);
+    const start = startCommand(m.repoPath);
+    steps.push(...(start ? [start] : m.verify?.full ? [m.verify.full] : []));
+  }
+  const starts = steps.some((cmd) => cmd === "npm run dev" || cmd === "npm start");
+  const leave = [
+    ...(starts ? ["press Ctrl+C to stop the app"] : []),
+    `put the folder back on your own version with ${code(`git checkout ${shellQuote(m.baseBranch)}`)}`,
+    ...(container ? ["type `exit`"] : []),
+  ];
+  return [
+    "To look at it yourself:",
+    container
+      ? "In the Ubuntu window, run `mc shell` first: it opens a terminal inside Mission Control's container, which has everything the app needs. Then run these one at a time:"
+      : "Open a terminal and run these one at a time:",
+    steps.map((cmd, i) => `${i + 1}. ${describeStep(m, cmd)}`).join("\n"),
+    `When you're done, ${listWords(leave)}.`,
+  ].join("\n\n");
+}
+
+function answeredSection(m: Mission, cp: PendingCheckpoint): string {
+  const answer = cp.answer;
+  if (!answer) return "";
+  const when = `at ${localClock(answer.at)}`;
+  const text =
+    answer.decision === "approve"
+      ? `You approved ${subjectOf(m, cp)} ${when}. The mission carries on from there when it runs next: ${code(`mc run --mission ${m.id}`)}.`
+      : `You sent ${subjectOf(m, cp)} back ${when}. The team makes the change and shows it to you again when the mission runs next: ${code(`mc run --mission ${m.id}`)}.`;
+  return section("Your answer is recorded", text);
+}
+
+/** Every answer the owner gave, oldest first. */
+function yourChecksSection(m: Mission): string {
+  const log = m.checkpointLog ?? [];
+  if (log.length === 0) return "";
+  const rows = log.map((r) => {
+    const what = r.kind === "plan" ? "The plan" : r.kind === "final" ? "The finished app" : `“${oneLine(shown(m.features.find((f) => f.id === r.featureId)?.title ?? r.featureId ?? "A feature"))}”`;
+    return `| ${cell(what)} | ${r.decision === "approve" ? "Approved" : "Sent back"} | ${formatLocalTime(r.at)} | ${cell(shown(r.note ?? ""))} |`;
+  });
+  return section("Your checks", ["| What you checked | Your answer | When | Your note |", "|---|---|---|---|", ...rows].join("\n"));
+}
+
 function narrative(m: Mission, prose: ReportProseOutput | null | undefined, container: boolean): string {
   return prose?.narrative.trim() || templateNarrative(m, container);
 }
@@ -295,7 +395,7 @@ function templateNarrative(m: Mission, container: boolean): string {
   ];
   if (m.spec?.summary) sentences.push(`The plan: ${sentence(m.spec.summary)}`);
   const counts = countFeatures(m.features);
-  sentences.push(...progressSentences(counts), ...statusSentence(m.status, counts));
+  sentences.push(...progressSentences(counts), ...(isWaitingForCheck(m) ? ["I stopped here on purpose, so you can look at it before I go on."] : statusSentence(m.status, counts)));
   const decisions = decisionItems(m, container).length;
   if (decisions > 0) {
     sentences.push(

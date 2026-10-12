@@ -1,0 +1,130 @@
+{
+  "id": "2026-10-11-shout",
+  "kind": "feature",
+  "title": "Shout",
+  "request": "Add shout(text) in src/shout.js: returns the text in capitals with an exclamation mark",
+  "repoPath": "/fixture/mc-apps/shout",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-shout",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "stopped",
+  "stage": "features",
+  "createdAt": "2026-10-11T09:58:00.000Z",
+  "updatedAt": "2026-10-11T09:58:12.000Z",
+  "features": [
+    {
+      "id": "add-shout",
+      "title": "Add shout",
+      "story": "As a user I can shout a text in capitals.",
+      "acceptance": [
+        "run() in src/add-shout.mjs returns \"add-shout works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "reviewing",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "implemented add-shout",
+          "at": "2026-10-11T09:58:08.600Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/add-shout.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "add-docs",
+      "title": "Update the readme",
+      "story": "As a user I can read how to shout.",
+      "acceptance": [
+        "run() in src/add-docs.mjs returns \"add-docs works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "add-shout"
+      ],
+      "status": "pending",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 7,
+  "notes": [],
+  "spec": {
+    "appName": "Shout",
+    "summary": "Shout.",
+    "features": [
+      {
+        "id": "add-shout",
+        "title": "Add shout",
+        "story": "As a user I can shout a text in capitals.",
+        "acceptance": [
+          "run() in src/add-shout.mjs returns \"add-shout works\""
+        ],
+        "kind": "standard",
+        "deps": []
+      },
+      {
+        "id": "add-docs",
+        "title": "Update the readme",
+        "story": "As a user I can read how to shout.",
+        "acceptance": [
+          "run() in src/add-docs.mjs returns \"add-docs works\""
+        ],
+        "kind": "standard",
+        "deps": [
+          "add-shout"
+        ]
+      }
+    ],
+    "assumptions": [],
+    "uiContract": "Feature <id> lives in src/<id>.mjs and exports run()."
+  },
+  "checkpoints": [
+    "feature"
+  ],
+  "checkpoint": {
+    "id": "feature:add-shout#1",
+    "scope": "feature:add-shout",
+    "kind": "feature",
+    "featureId": "add-shout",
+    "round": 1,
+    "state": "pending",
+    "parkedAt": "2026-10-11T09:58:12.000Z",
+    "notifiedAt": "2026-10-11T09:58:12.200Z",
+    "look": {
+      "headline": "Check “Add shout” before it is added",
+      "lines": [
+        "“Add shout” is built, passed its checks, and was reviewed.",
+        "Implemented shout(text) in src/shout.js: returns the text in capitals with an exclamation mark.",
+        "The reviewer left 1 small note: the empty text case could say what it returns."
+      ],
+      "branch": "mc/2026-10-11-shout--add-shout",
+      "commit": "3f2a91c",
+      "files": [
+        "src/shout.js",
+        "tests/shout.test.mjs"
+      ]
+    }
+  }
+}

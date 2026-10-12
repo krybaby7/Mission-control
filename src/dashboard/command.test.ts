@@ -1,6 +1,6 @@
 // Tests for `mc dashboard` (docs/dashboard-spec.md, 2.5 and 15: T-CLI, T-EDGE-35, T-EDGE-40). The page file belongs to
 // another part of the build, so the tests give the command a page of their own.
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,22 @@ import type { Snapshot } from "./types.js";
 
 const pageState = vi.hoisted(() => ({ load: (): string => "" }));
 vi.mock("./page.js", () => ({ loadPage: () => pageState.load(), PAGE_FILE: "dashboard/index.html" }));
+
+/**
+ * A copy of a fixture whose missions were saved just now. These tests look at the home with the real clock, and a fixture's
+ * missions are dated 2026-10-11: a day later they are no longer recent, the snapshot lists none, and the test would fail
+ * for a reason that has nothing to do with the command.
+ */
+function copyFreshHome(name: string): string {
+  const home = copyHome(name);
+  const missions = join(home, "missions");
+  for (const folder of readdirSync(missions)) {
+    const file = join(missions, folder, "mission.json");
+    const mission = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    writeFileSync(file, JSON.stringify({ ...mission, updatedAt: new Date().toISOString() }, null, 2) + "\n");
+  }
+  return home;
+}
 
 const PAGE = "<!doctype html><html><head><title>Mission Control</title></head><body><p>Now</p></body></html>";
 
@@ -98,7 +114,7 @@ async function start(home: string, extra: Partial<Parameters<typeof runDashboard
 
 describe("T-CLI: runDashboard", () => {
   it("serves the page and the snapshot of the home, says where, and stops when told to", async () => {
-    const home = copyHome("done");
+    const home = copyFreshHome("done");
     const s = await start(home);
     expect(s.lines).toEqual([`Dashboard ready: http://localhost:${s.port}`, "It only reads Mission Control's files. Press Ctrl+C to stop it."]);
     expect(await (await fetch(`http://127.0.0.1:${s.port}/`)).text()).toBe(PAGE);
@@ -277,7 +293,7 @@ describe("T-CLI: mc dashboard", () => {
   });
 
   it("serves the folder $MC_HOME names, prints two lines, stops on Ctrl+C with exit 0, and changes nothing", async () => {
-    const home = copyHome("done");
+    const home = copyFreshHome("done");
     vi.stubEnv("MC_HOME", home);
     const before = hashTree(home);
     const handlers = captureSignals();
@@ -298,7 +314,7 @@ describe("T-CLI: mc dashboard", () => {
   });
 
   it("still starts when the settings file has a problem: it warns, uses the built-in settings, and /healthz says so (E40)", async () => {
-    const home = copyHome("done");
+    const home = copyFreshHome("done");
     vi.stubEnv("MC_HOME", home);
     const settingsFile = join(root, "config.yaml");
     writeFileSync(settingsFile, "pacing: [this is not valid\n");

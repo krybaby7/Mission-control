@@ -278,6 +278,7 @@ describe("T-VOC: the words of every snapshot", () => {
       ...s.leader.quickPhrases,
       ...s.missions.flatMap((m) => [m.tellLeader, ...m.features.map((f) => f.tellLeader)]),
       ...s.needsYou.map((c) => c.tellLeader),
+      ...s.needsYou.flatMap((c) => (c.answers === undefined ? [] : [c.answers.approve, c.answers.sendBack])),
       ...(s.debrief?.missions.map((d) => d.tellLeader) ?? []),
     ].map(strip);
     return { display: display.filter((t) => t !== ""), pasted };

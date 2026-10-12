@@ -1,0 +1,147 @@
+{
+  "id": "2026-10-11-recipe-box",
+  "kind": "greenfield",
+  "title": "Recipe box",
+  "request": "A recipe box I can search",
+  "repoPath": "/fixture/mc-apps/recipe-box",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-recipe-box",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "stopped",
+  "stage": "finalize",
+  "createdAt": "2026-10-11T09:58:00.000Z",
+  "updatedAt": "2026-10-11T09:58:20.000Z",
+  "features": [
+    {
+      "id": "add-recipe",
+      "title": "Add a recipe",
+      "story": "As a user I can save a recipe.",
+      "acceptance": [
+        "run() in src/add-recipe.mjs returns \"add-recipe works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "implemented add-recipe",
+          "at": "2026-10-11T09:58:08.600Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/add-recipe.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    },
+    {
+      "id": "find-recipe",
+      "title": "Find a recipe",
+      "story": "As a user I can search my recipes.",
+      "acceptance": [
+        "run() in src/find-recipe.mjs returns \"find-recipe works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "add-recipe"
+      ],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "implemented find-recipe",
+          "at": "2026-10-11T09:58:08.600Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/find-recipe.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 14,
+  "notes": [],
+  "spec": {
+    "appName": "Recipe box",
+    "summary": "Recipe box.",
+    "features": [
+      {
+        "id": "add-recipe",
+        "title": "Add a recipe",
+        "story": "As a user I can save a recipe.",
+        "acceptance": [
+          "run() in src/add-recipe.mjs returns \"add-recipe works\""
+        ],
+        "kind": "standard",
+        "deps": []
+      },
+      {
+        "id": "find-recipe",
+        "title": "Find a recipe",
+        "story": "As a user I can search my recipes.",
+        "acceptance": [
+          "run() in src/find-recipe.mjs returns \"find-recipe works\""
+        ],
+        "kind": "standard",
+        "deps": [
+          "add-recipe"
+        ]
+      }
+    ],
+    "assumptions": [],
+    "uiContract": "Feature <id> lives in src/<id>.mjs and exports run()."
+  },
+  "checkpoints": [
+    "final"
+  ],
+  "checkpoint": {
+    "id": "final#1",
+    "scope": "final",
+    "kind": "final",
+    "round": 1,
+    "state": "pending",
+    "parkedAt": "2026-10-11T09:58:20.000Z",
+    "notifiedAt": "2026-10-11T09:58:20.200Z",
+    "look": {
+      "headline": "Check the finished app for “Recipe box”",
+      "lines": [
+        "All 2 features are built. The final checks passed.",
+        "The final review found no serious problem.",
+        "The app has 1 screenshot to look at."
+      ],
+      "branch": "mc/2026-10-11-recipe-box",
+      "files": [
+        "src/add-recipe.mjs",
+        "src/find-recipe.mjs"
+      ],
+      "screenshots": [
+        "screenshots/home.png"
+      ]
+    }
+  }
+}

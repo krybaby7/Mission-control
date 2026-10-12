@@ -8,8 +8,10 @@
 import { closeSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync, type Stats } from "node:fs";
 import { join, resolve } from "node:path";
 import { MissionStore } from "../state.js";
-import type { Attempt, Feature, Mission, MissionEvent } from "../types.js";
+import type { Attempt, CheckpointKind, CheckpointRecord, Feature, Mission, MissionEvent, PendingCheckpoint } from "../types.js";
 import {
+  CHECKPOINT_LINES_MAX,
+  CHECKPOINT_LOG_MAX,
   DECISION_MAX_CHARS,
   EVENTS_TAIL_BYTES,
   EVENT_FIELD_MAX_CHARS,
@@ -347,6 +349,9 @@ function cleanMission(m: Mission): Mission | null {
   const created = new Date(Date.parse(m.createdAt)).toISOString();
   const updated = Number.isFinite(Date.parse(m.updatedAt)) ? new Date(Date.parse(m.updatedAt)).toISOString() : created;
   const failure = raw.failure;
+  const checkpoints = checkpointKinds(raw.checkpoints);
+  const checkpoint = cleanCheckpoint(raw.checkpoint);
+  const checkpointLog = cleanCheckpointLog(raw.checkpointLog);
   return {
     id,
     kind: m.kind,
@@ -377,7 +382,68 @@ function cleanMission(m: Mission): Mission | null {
           },
         }
       : {}),
+    ...(checkpoints.length > 0 && { checkpoints }),
+    ...(checkpoint !== undefined && { checkpoint }),
+    ...(checkpointLog.length > 0 && { checkpointLog }),
   };
+}
+
+// ───────────────────────────── Checkpoints (docs/checkpoints-spec.md, 4 and 10) ─────────────────────────────
+// The owner's note, the fingerprint a rework resumes from, the changed files and the screenshots are not read: the page
+// shows none of them, and the note is the owner's own text, which never needs to travel.
+
+const CHECKPOINT_KINDS = new Set<string>(["plan", "feature", "final"]);
+const DECISIONS = new Set<string>(["approve", "send_back"]);
+
+const isKind = (v: unknown): v is CheckpointKind => isString(v) && CHECKPOINT_KINDS.has(v);
+
+function checkpointKinds(list: unknown): CheckpointKind[] {
+  return Array.isArray(list) ? [...new Set(list.filter(isKind))] : [];
+}
+
+function isoOrNow(v: unknown): string {
+  return isString(v) && Number.isFinite(Date.parse(v)) ? new Date(Date.parse(v)).toISOString() : new Date(0).toISOString();
+}
+
+/** The checkpoint of a mission file, or undefined when it is missing or not a checkpoint (it is then no checkpoint at all). */
+function cleanCheckpoint(v: unknown): PendingCheckpoint | undefined {
+  if (!isRecord(v) || !isKind(v.kind) || !isString(v.id) || !isString(v.scope)) return undefined;
+  if (v.state !== "pending" && v.state !== "answered") return undefined;
+  const look = isRecord(v.look) ? v.look : {};
+  const answer = isRecord(v.answer) ? v.answer : null;
+  return {
+    id: cleanId(v.id),
+    scope: cleanId(v.scope),
+    kind: v.kind,
+    ...(isString(v.featureId) && { featureId: cleanId(v.featureId) }),
+    round: isNumber(v.round) && v.round >= 1 ? Math.floor(v.round) : 1,
+    state: v.state,
+    parkedAt: isoOrNow(v.parkedAt),
+    look: {
+      headline: isString(look.headline) ? clean(look.headline, TITLE_MAX_CHARS) : "",
+      lines: strings(look.lines, REASON_MAX_CHARS).slice(0, CHECKPOINT_LINES_MAX),
+      ...(isString(look.branch) && clean(look.branch, ID_MAX_CHARS) !== "" && { branch: clean(look.branch, ID_MAX_CHARS) }),
+    },
+    ...(answer !== null && isString(answer.decision) && DECISIONS.has(answer.decision) && { answer: { decision: answer.decision as "approve" | "send_back", at: isoOrNow(answer.at) } }),
+  };
+}
+
+function cleanCheckpointLog(list: unknown): CheckpointRecord[] {
+  if (!Array.isArray(list)) return [];
+  const out: CheckpointRecord[] = [];
+  for (const r of list) {
+    if (!isRecord(r) || !isKind(r.kind) || !isString(r.id) || !isString(r.scope) || !isString(r.decision) || !DECISIONS.has(r.decision)) continue;
+    out.push({
+      id: cleanId(r.id),
+      scope: cleanId(r.scope),
+      kind: r.kind,
+      ...(isString(r.featureId) && { featureId: cleanId(r.featureId) }),
+      round: isNumber(r.round) && r.round >= 1 ? Math.floor(r.round) : 1,
+      decision: r.decision as "approve" | "send_back",
+      at: isoOrNow(r.at),
+    });
+  }
+  return out.slice(-CHECKPOINT_LOG_MAX);
 }
 
 /** The strings of a list, cleaned; other entries are dropped. Empty strings are kept out: they say nothing. */
@@ -488,7 +554,7 @@ function readTail(file: string, bytes: number): string {
 }
 
 /** The data keys the timeline and the now line use (spec 7.1 and 1.4). Every other key is dropped here. */
-const EVENT_TEXT_KEYS = ["stage", "status", "from", "to", "action", "outcome", "role", "until"] as const;
+const EVENT_TEXT_KEYS = ["stage", "status", "from", "to", "action", "outcome", "role", "until", "kind", "decision"] as const;
 const EVENT_LIST_KEYS = ["files", "features"] as const;
 
 function pickEvent(v: unknown, folder: string): MissionEvent | null {

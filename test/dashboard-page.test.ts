@@ -281,6 +281,11 @@ describe("T-PAGE the page's words (docs/dashboard-spec.md 17.1)", () => {
     "Choose a quick answer or type your own words first, then tap Copy.",
     "Stopped here",
     "Paused here",
+    // a check the owner asked for: what to look at, and the two answers, which are sentences to copy like every other button
+    "What to look at",
+    "Tell the leader: approve",
+    "Tell the leader: send it back",
+    "This page cannot send messages. Tap Copy, then paste the sentence into your chat with the leader.",
   ];
 
   it.each(PAGE_WORDS.map((w) => [w] as const))("contains %j", (word) => {
@@ -451,7 +456,9 @@ describe("T-PAGE what the review round asked for (page parts of M5, M6, M7, m8 t
     expect(at("sheet-phrases-box")).toBeLessThan(at("sheet-own-box"));
     expect(at("sheet-own-box")).toBeLessThan(at("sheet-msg"));
     expect(markup).toMatch(/id="sheet-msg"[^>]*\breadonly\b/);
-    expect(lexed.noComments).toMatch(/function canCopy\(\) \{ return sheet\.mode === "stop" \|\| sheet\.answer\.trim\(\) !== ""; \}/);
+    // Copy waits for a message: the stop sentence and a sentence with nothing to fill in (an approval) are complete as they are,
+    // every other sentence needs a quick answer or the owner's own words first.
+    expect(lexed.noComments).toMatch(/function canCopy\(\) \{ return sheet\.mode === "stop" \|\| sheet\.template\.indexOf\(PLACEHOLDER\) < 0 \|\| sheet\.answer\.trim\(\) !== ""; \}/);
     expect(functionSource("copyMessage")).toContain("if (!canCopy())");
     expect(lexed.noComments).toContain('"aria-disabled"');
     expect(style).toContain('.btn[aria-disabled="true"]');
@@ -496,6 +503,57 @@ describe("T-PAGE what the review round asked for (page parts of M5, M6, M7, m8 t
     expect(stepper).toContain("W.pausedHere");
     expect(style).toMatch(/\.card \{[^}]*scroll-margin-top: calc\(16px/);
     expect(functionSource("goCard")).toContain("requestAnimationFrame");
+  });
+});
+
+describe("T-PAGE a check the owner asked for (docs/checkpoints-spec.md, 10)", () => {
+  it("draws the card with an eye, and the page has the eye in its sprite", () => {
+    expect(lexed.noComments).toMatch(/CARD_ICON = \{[^}]*checkpoint: "eye"/);
+    expect(markup).toContain('<symbol id="i-eye"');
+  });
+
+  it("gives the card two buttons, approve and send it back, only when the snapshot has the two answers", () => {
+    const card = functionSource("card");
+    expect(card).toContain("if (c.answers)");
+    expect(card).toContain("tellButton(c.answers.approve,");
+    expect(card).toContain("tellButton(c.answers.sendBack,");
+    expect(card.indexOf("W.approveBtn")).toBeLessThan(card.indexOf("W.sendBackBtn"));
+    // the generic button stays, after the two, as the quiet one
+    expect(card.indexOf("W.sendBackBtn")).toBeLessThan(card.indexOf("tellButton(c.tellLeader,"));
+    expect(card).toContain("!!c.answers");
+    expect(lexed.noComments).toContain('approveBtn: "Tell the leader: approve"');
+    expect(lexed.noComments).toContain('sendBackBtn: "Tell the leader: send it back"');
+  });
+
+  it("a button only opens the sheet with a sentence to copy: the buttons add no way to send an approval", () => {
+    const button = functionSource("tellButton");
+    expect(button).toContain("openSheet(\"tell\", template, b)");
+    expect(button).toContain("label || W.tell");
+    // the page's only request is still the one read of the snapshot (the fetch test above), and no method but GET appears
+    expect(lexed.noComments).not.toMatch(/method\s*:/);
+  });
+
+  it("shows the look's lines under What happened: one label for the list, then each line as a quote", () => {
+    const card = functionSource("card");
+    expect(card).toContain("c.lines && c.lines.length");
+    expect(card).toContain("aiLabel(snap.leader.aiNotice)");
+    expect(card).toContain("quoted(line)");
+    expect(card.indexOf("W.happened")).toBeLessThan(card.indexOf("W.lookAt"));
+    expect(card).toContain("add(body, what, todo, nothing)");
+  });
+
+  it("a sentence with nothing to fill in is complete: Copy works at once, and the sheet hides the answers it does not need", () => {
+    const open = functionSource("openSheet");
+    expect(open).toContain('var ready = !stop && template.indexOf(PLACEHOLDER) < 0;');
+    expect(open).toContain("W.cannotSendReady");
+    expect(open).toContain("$(\"sheet-phrases-box\").hidden = stop || ready;");
+    expect(open).toContain("$(\"sheet-own-box\").hidden = stop || ready;");
+    // a sentence with the placeholder still waits for an answer
+    expect(lexed.noComments).toMatch(/function canCopy\(\) \{ return [^}]*\|\| sheet\.answer\.trim\(\) !== ""; \}/);
+  });
+
+  it("the card with the buttons wraps on a phone", () => {
+    expect(style).toMatch(/\.card-foot \{[^}]*display: flex; flex-wrap: wrap;/);
   });
 });
 

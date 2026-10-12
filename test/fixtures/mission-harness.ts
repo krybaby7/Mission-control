@@ -15,6 +15,7 @@ import { MissionStore } from "../../src/state.js";
 import type {
   AgentJob,
   BuildOutput,
+  CheckpointKind,
   Clock,
   Config,
   DiagnosisOutput,
@@ -271,7 +272,15 @@ export class MissionHarness {
 
   createMission(
     kind: MissionKind,
-    init: { request?: string; repoPath?: string; baseBranch?: string; profile?: string; roleOverrides?: RoleOverride[] } = {},
+    init: {
+      request?: string;
+      repoPath?: string;
+      baseBranch?: string;
+      profile?: string;
+      roleOverrides?: RoleOverride[];
+      /** Where the owner looks before the mission goes on; absent = a mission that runs straight through. */
+      checkpoints?: CheckpointKind[];
+    } = {},
   ): Mission {
     return this.store.createMission({
       kind,
@@ -281,6 +290,7 @@ export class MissionHarness {
       baseBranch: init.baseBranch ?? "main",
       profile: init.profile ?? this.config.defaultProfile,
       roleOverrides: init.roleOverrides,
+      checkpoints: init.checkpoints,
       nowMs: this.clock.now(),
     });
   }

@@ -1,11 +1,12 @@
 // The Needs-you cards (docs/dashboard-spec.md, 9): what the AI team could not settle alone. One fact, one card.
 // Pure: it reads the mission views and the cleaned mission files. The words are in vocabulary.ts.
-import { MAX_DECISIONS_SHOWN } from "./constants.js";
+import { CHECKPOINT_LINES_MAX, CHECKPOINT_SEND_BACK_CAP, MAX_DECISIONS_SHOWN } from "./constants.js";
 import type { MissionFacts } from "./missions.js";
 import type { CardKind, FeatureView, NeedsYouCard, Said } from "./types.js";
 import { CARD_KINDS } from "./types.js";
 import {
   CARD_TEXT,
+  checkpointSummary,
   concernsHappened,
   concernsOf,
   decisionTitle,
@@ -14,6 +15,7 @@ import {
   loginFailureAis,
   makeLeaderNames,
   type Formatter,
+  type LeaderCheck,
   loginHappened,
   loginWhatToDo,
   stuckIfNothing,
@@ -158,6 +160,39 @@ function decisionCards(x: MissionFacts, names: LeaderNames, rank: number): Draft
   });
 }
 
+/**
+ * The card of a mission that waits for the owner's check (checkpoints spec, 10). The engine's look at the work is shown line
+ * by line and never parsed; every line is labelled as the AI's, because the engine's own lines and the AI's are mixed in it.
+ */
+function checkpointCard(x: MissionFacts, names: LeaderNames): NeedsYouCard | null {
+  const mission = x.data.mission;
+  const cp = mission?.checkpoint;
+  const facts = x.checkpoint;
+  if (mission === null || cp === undefined || facts === null || facts.state !== "pending") return null;
+  const ref: MissionRef = { id: x.view.id, title: x.view.title };
+  const feature = cp.kind === "feature" ? mission.features.find((f) => f.id === cp.featureId) : undefined;
+  // A feature check whose feature is not in the file has no sentence that names it, so it gets no answers (the page shows no buttons).
+  const what: LeaderCheck | null = cp.kind === "plan" ? { kind: "plan" } : cp.kind === "final" ? { kind: "final" } : feature === undefined ? null : { kind: "feature", feature: { id: feature.id, title: feature.title } };
+  const sentBack = (mission.checkpointLog ?? []).filter((r) => r.scope === cp.scope && r.decision === "send_back").length;
+  return {
+    id: `checkpoint:${x.view.id}:0`,
+    kind: "checkpoint",
+    severity: "look",
+    missionId: x.view.id,
+    missionTitle: x.view.title,
+    fromEarlier: false,
+    featureId: cp.kind === "feature" && feature !== undefined ? feature.id : null,
+    title: CARD_TEXT.checkpointTitle(x.view.title, cp.kind, facts.featureTitle),
+    happened: engineSays(CARD_TEXT.checkpointHappened),
+    summary: checkpointSummary(cp.kind, cp.look.branch ?? null, sentBack, CHECKPOINT_SEND_BACK_CAP),
+    ifNothing: CARD_TEXT.checkpointIfNothing,
+    whatToDo: engineSays(CARD_TEXT.checkpointWhatToDo),
+    tellLeader: LEADER.checkpoint(names, ref),
+    ...(cp.look.lines.length > 0 && { lines: cp.look.lines.slice(0, CHECKPOINT_LINES_MAX).map((text): Said => ({ text, author: "ai" })) }),
+    ...(what !== null && { answers: { approve: LEADER.approve(names, ref, what), sendBack: LEADER.sendBack(names, ref, what) } }),
+  };
+}
+
 function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
   const { view } = x;
   const ref: MissionRef = { id: view.id, title: view.title };
@@ -194,6 +229,8 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
       }),
     });
   }
+  const check = checkpointCard(x, names);
+  if (check !== null) drafts.push({ order: at("checkpoint"), card: check });
   if (view.state === "paused" && view.pausedWhy === "disk") {
     drafts.push({
       order: at("paused_disk"),

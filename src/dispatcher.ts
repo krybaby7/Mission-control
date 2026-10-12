@@ -4,6 +4,21 @@
 // passing verify tail, unit installs, init attempts, the final verify result) live next to it in <missionDir>/dispatch.json.
 import { type Dirent, existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  answerIsRecorded,
+  checkpointId,
+  endState,
+  isCheckpointShape,
+  isDerivedFeature,
+  isWaitingForCheck,
+  MAX_SEND_BACKS,
+  nextCheckpointState,
+  parkedNotice,
+  scopeOf,
+  sendBacks,
+  shown,
+  trimLog,
+} from "./checkpoint.js";
 import { resolveFamily } from "./config.js";
 import { AuthUnavailableError, DeadlineError, type ExecResult, ProvidersFailingError, type RoleExecutor, StopRequestedError } from "./executor.js";
 import type { Git } from "./git.js";
@@ -33,6 +48,9 @@ import type {
   Access,
   Attempt,
   BuildOutput,
+  CheckpointKind,
+  CheckpointLook,
+  CheckpointRecord,
   Clock,
   Config,
   ContextPackOutput,
@@ -51,6 +69,7 @@ import type {
   Mission,
   MissionStatus,
   OnboardOutput,
+  PendingCheckpoint,
   Profile,
   Provider,
   ReportProseOutput,
@@ -67,7 +86,7 @@ import type {
   VerifyConfig,
   VerifyResult,
 } from "./types.js";
-import { expandHome, readJsonOr, writeJsonAtomic } from "./util/fs.js";
+import { expandHome, readJsonOr, sha256, writeJsonAtomic } from "./util/fs.js";
 import { runProcess } from "./util/process.js";
 import { reapOrphans } from "./util/reap.js";
 import { checkFrozen, hashFiles, isTestPath, scanAntiCheat, type Verifier } from "./verify.js";
@@ -340,9 +359,24 @@ class DiskSpaceError extends Error {
   override readonly name = "DiskSpaceError";
 }
 
+/**
+ * The mission stops on purpose: its owner asked to look at something first (a checkpoint). Not a failure; `end` parks the
+ * mission, and a run leaves it alone until the owner answers. `ignored`: an answer found in the mission file was not trusted.
+ */
+class CheckpointParked extends Error {
+  override readonly name = "CheckpointParked";
+  constructor(
+    readonly cp: PendingCheckpoint,
+    readonly ignored?: "no_record",
+  ) {
+    super(`waiting for the owner's check (${cp.scope})`);
+  }
+}
+
 /** Errors that end a feature step and must reach the mission loop instead of blocking the feature. */
 function isMissionLevel(err: unknown): boolean {
   return (
+    err instanceof CheckpointParked ||
     err instanceof StopRequestedError ||
     err instanceof DeadlineError ||
     err instanceof AuthUnavailableError ||
@@ -410,6 +444,7 @@ class MissionRun {
 
   async drive(): Promise<void> {
     if (this.m.stage === "complete") return;
+    if (isWaitingForCheck(this.m)) return; // stopped on purpose for the owner's look: nothing to do until they answer
     try {
       await this.begin();
       while (!this.ended()) {
@@ -519,7 +554,7 @@ class MissionRun {
     for (const f of this.m.features) if (IN_PROGRESS.has(f.status)) await this.blockFeature(f, reason);
   }
 
-  private runStage(stage: Stage): Promise<void> {
+  private async runStage(stage: Stage): Promise<void> {
     switch (stage) {
       case "onboard":
         return this.onboard();
@@ -528,19 +563,23 @@ class MissionRun {
       case "gate_a":
         return this.gateA();
       case "init":
+        await this.checkpointGate("plan"); // stops here, before the scaffold, if the owner wants to see the plan
         return this.init();
       case "features":
+        await this.checkpointGate("plan"); // the first of the two stages reached asks; this one finds it passed
         return this.featuresStage();
       case "gate_c":
         return this.gateC();
       case "finalize":
+        if (this.m.features.some((f) => f.status === "done") && (await this.checkpointGate("final")) === "leave") return;
         return this.finalize();
       case "complete":
-        return Promise.resolve();
+        return;
     }
   }
 
   private async end(err: unknown): Promise<void> {
+    if (err instanceof CheckpointParked) return this.park(err);
     if (isStop(err)) return this.stop(err.message);
     if (err instanceof DiskSpaceError) return this.pauseForDisk(err.message);
     if (err instanceof ProvidersFailingError) return this.pauseForFailingAgents(err);
@@ -566,6 +605,24 @@ class MissionRun {
     this.event("mission.stopped", { stage: this.m.stage, reason });
     this.save();
     await this.writeReport(null);
+  }
+
+  /**
+   * Stopped on purpose for the owner's look. Unlike `stop` it records no "paused" event (nothing went wrong), and the
+   * phone hears about it with the commands that answer. The notice is sent after the checkpoint is saved and marked
+   * only once it went out, so a crash in between is repaired by the next run (run.ts).
+   */
+  private async park(parked: CheckpointParked): Promise<void> {
+    const { m } = this;
+    m.status = "stopped";
+    this.save();
+    await this.writeReport(null);
+    const cp = m.checkpoint;
+    if (cp === undefined || cp.state !== "pending" || cp.notifiedAt !== undefined) return;
+    const notice = parkedNotice(m, cp, parked.ignored !== undefined);
+    await this.deps.notifier.notify(notice.title, notice.message, { priority: "high", tags: ["eyes"] });
+    cp.notifiedAt = new Date(this.deps.clock.now()).toISOString();
+    this.save();
   }
 
   /** Out of disk space: stopped (the next run carries on), with a note and a loud notification saying what to do. */
@@ -1750,22 +1807,37 @@ class MissionRun {
     const wt = await this.ensureUnitWorktree(f);
     await this.deps.git.resetHard(wt, need(f.passingCommit, "the passing commit")); // drops a fix interrupted mid-way
     for (;;) {
+      // The work the owner is about to look at was reviewed once already; a resume must not ask the reviewer again.
+      if (!this.reviewSettled(f)) {
+        const finished = await this.reviewAndFix(f, wt);
+        if (this.looksAt(f)) this.scratch.updateUnit(f.id, { reviewedCommit: f.passingCommit, reviewSkipped: !finished });
+      }
+      const gate = await this.checkpointGate("feature", f);
+      if (gate === "leave") return;
+      if (gate === "go") break;
+      // "again": the engineer changed the work after the owner's note; it is reviewed again and shown again
+    }
+    await this.merge(f);
+  }
+
+  /** The review and fix rounds; false when the review did not finish. */
+  private async reviewAndFix(f: Feature, wt: string): Promise<boolean> {
+    for (;;) {
       const findings = await this.review(f, wt);
       if (!findings) {
         this.noteOnce(`The review of "${f.title}" did not finish, so it was merged after passing its checks.`);
-        break;
+        return false;
       }
       this.keepOpen(f, findings.filter((x) => !isBlocking(x)));
       const blocking = findings.filter(isBlocking);
-      if (blocking.length === 0) break;
+      if (blocking.length === 0) return true;
       if (f.reviewRounds >= this.deps.config.limits.maxReviewRounds || !(await this.fixFindings(f, wt, blocking))) {
         this.keepOpen(f, blocking);
-        break;
+        return true;
       }
       f.reviewRounds++;
       this.save();
     }
-    await this.merge(f);
   }
 
   private async review(f: Feature, wt: string): Promise<Finding[] | null> {
@@ -2094,6 +2166,301 @@ class MissionRun {
     ];
     await this.deps.notifier.notify(title, lines.join("\n"), { priority });
   }
+
+  // ───────────── Checkpoints: stopping for the owner's look ─────────────
+
+  /** Whether the owner looks at this feature before it is merged. Features the engine adds by itself are not asked about. */
+  private looksAt(f: Feature): boolean {
+    return this.m.checkpoints?.includes("feature") === true && !isDerivedFeature(f.id);
+  }
+
+  /** The feature was reviewed at the commit that is about to be shown or merged (tracked only when the owner looks at it). */
+  private reviewSettled(f: Feature): boolean {
+    return this.looksAt(f) && f.passingCommit !== undefined && this.scratch.unit(f.id).reviewedCommit === f.passingCommit;
+  }
+
+  /**
+   * The gate of one kind of checkpoint, at the entry of the work it guards (so a resume comes back here and never repeats
+   * the work before it). "go": carry on. "again" (feature): the work was changed after the owner's note, so it is
+   * reviewed and shown again. "leave": the work this gate guards is no longer here (the feature was set aside, or the
+   * final send-back added a feature and went back to building). Otherwise it throws CheckpointParked.
+   * A mission that did not choose this kind returns at once and changes nothing: it runs as it always did.
+   */
+  private async checkpointGate(kind: CheckpointKind, f?: Feature): Promise<"go" | "again" | "leave"> {
+    const { m } = this;
+    if (!m.checkpoints?.includes(kind)) return "go";
+    const cp = m.checkpoint;
+    // An answer is believed only if the event that records it exists (see answerIsRecorded).
+    const recorded = cp?.state === "answered" && isCheckpointShape(cp) && answerIsRecorded(cp, this.deps.store.readEvents(m.id));
+    const step = nextCheckpointState(m, kind, f?.id, recorded);
+    switch (step.step) {
+      case "go":
+        return "go";
+      case "ask":
+        if (step.drop !== undefined && cp !== undefined) {
+          this.event("checkpoint.rejected", { id: typeof cp.id === "string" ? cp.id : "?", reason: step.drop });
+          delete m.checkpoint;
+          this.save();
+        }
+        return this.startCheckpoint(kind, f, step.round);
+      case "stay":
+        throw new CheckpointParked(need(m.checkpoint, "the checkpoint"));
+      case "forged": {
+        const waiting = need(m.checkpoint, "the checkpoint");
+        this.event("checkpoint.rejected", { id: waiting.id, reason: "no_record" });
+        const reset: PendingCheckpoint = { ...waiting, state: "pending" };
+        delete reset.answer;
+        delete reset.notifiedAt;
+        delete reset.reworkFrom;
+        m.checkpoint = reset;
+        m.status = "stopped";
+        this.save();
+        throw new CheckpointParked(reset, "no_record");
+      }
+      case "pass": {
+        const approved = need(m.checkpoint, "the checkpoint");
+        this.event("checkpoint.passed", { id: approved.id });
+        this.commitCheckpoint(approved);
+        return "go";
+      }
+      case "rework":
+        return this.rework(kind, f, need(m.checkpoint, "the checkpoint"));
+      case "limit":
+        return this.limitReached(kind, f, need(m.checkpoint, "the checkpoint"));
+    }
+  }
+
+  /** Shows the work to the owner: saves the checkpoint, stops the mission in the same save, and throws to park it. */
+  private async startCheckpoint(kind: CheckpointKind, f: Feature | undefined, round: number): Promise<never> {
+    const { m } = this;
+    const scope = scopeOf(kind, f?.id);
+    const cp: PendingCheckpoint = {
+      id: checkpointId(scope, round),
+      scope,
+      kind,
+      ...(f && { featureId: f.id }),
+      round,
+      state: "pending",
+      parkedAt: new Date(this.deps.clock.now()).toISOString(),
+      look: await this.buildLook(kind, f, scope),
+    };
+    this.event("checkpoint.parked", { id: cp.id, kind, ...(f && { feature: f.id }), round });
+    m.checkpoint = cp;
+    m.status = "stopped"; // in the same save: a mission with a pending check is never saved as "running"
+    this.save();
+    throw new CheckpointParked(cp);
+  }
+
+  /** What the owner is shown (see CheckpointLook). Never fails: a look without file names is still a look. */
+  private async buildLook(kind: CheckpointKind, f: Feature | undefined, scope: string): Promise<CheckpointLook> {
+    const { m } = this;
+    const key = f?.id ?? `_${kind}`;
+    const failed = this.scratch.unit(key).reworkFailed === true;
+    if (failed) this.scratch.updateUnit(key, { reworkFailed: undefined });
+    const warning = sendBacks(m, scope) >= MAX_SEND_BACKS ? [`You have sent this back ${MAX_SEND_BACKS} times. If you send it back again, the work stops here: ${endState(kind)}. You can still approve.`] : [];
+    const title = shown(m.title);
+    switch (kind) {
+      case "plan": {
+        const features = m.features;
+        const choices = (m.spec?.assumptions ?? []).map((a) => shown(a)).join(" ");
+        return {
+          headline: `Check the plan for “${title}”`,
+          lines: [
+            ...(failed ? ["Your change could not be made, so this is the earlier plan."] : []),
+            ...(m.spec?.summary ? [shown(m.spec.summary)] : []),
+            `The plan has ${plural(features.length, "feature")}: ${features.map((x) => shown(x.title)).join(", ")}.`,
+            ...features.map((x) => `“${shown(x.title)}”: ${shown(x.story)}`),
+            ...(choices !== "" ? [`Choices made for you: ${choices}`] : []),
+            ...warning,
+          ],
+        };
+      }
+      case "feature": {
+        const feature = need(f, "the feature");
+        const built = feature.attempts.filter((a) => a.outcome === "pass" && a.action !== "diagnose").at(-1)?.summary;
+        const unreviewed = this.scratch.unit(feature.id).reviewSkipped === true;
+        const notes = feature.openFindings;
+        const files = await this.changedFilesOf(feature.worktree, m.integrationBranch);
+        return {
+          headline: `Check “${shown(feature.title)}” before it is added`,
+          lines: [
+            ...(failed ? ["Your change could not be made, so this is the earlier version."] : []),
+            `“${shown(feature.title)}” is built and passed its checks${unreviewed ? ", but its review did not finish" : ", and was reviewed"}.`,
+            ...(built ? [`What was built: ${shown(built)}`] : []),
+            ...(notes.length > 0 ? [`The reviewer left ${plural(notes.length, notes.every((n) => n.severity === "minor") ? "small note" : "note")}: ${notes.slice(0, 3).map((n) => shown(n.description)).join("; ")}${notes.length > 3 ? ` and ${notes.length - 3} more` : ""}.`] : []),
+            ...warning,
+          ],
+          ...(feature.branch !== undefined && { branch: feature.branch }),
+          ...(feature.passingCommit !== undefined && { commit: feature.passingCommit.slice(0, 10) }),
+          ...(files.length > 0 && { files: files.map((p) => shown(p)) }),
+        };
+      }
+      case "final": {
+        const done = m.features.filter((x) => x.status === "done").length;
+        const stuck = m.features.filter((x) => x.status === "blocked");
+        const verify = this.scratch.finalVerify();
+        const open = m.features.flatMap((x) => x.openFindings);
+        const files = await this.changedFilesOf(m.integrationWorktree, m.baseSha);
+        const shots = (await this.screenshots()).map((p) => relative(this.missionDir(), p).split(/[\\/]/).join("/"));
+        return {
+          headline: `Check the finished app “${title}”`,
+          lines: [
+            done === m.features.length ? `All ${plural(done, "feature")} ${done === 1 ? "is" : "are"} built.` : `${done} of ${m.features.length} features are built.`,
+            verify === undefined ? "The final checks did not run." : verify.ok ? "The final checks passed." : "The final checks did not pass.",
+            ...(verify?.reviewed === false ? ["The final review did not finish."] : []),
+            ...((verify?.blocking ?? 0) > 0 ? [`The final review found ${plural(verify?.blocking ?? 0, "serious problem")} that ${verify?.blocking === 1 ? "was" : "were"} not fixed.`] : []),
+            ...(stuck.length > 0 ? [`${plural(stuck.length, "feature")} got stuck: ${stuck.map((x) => shown(x.title)).join(", ")}.`] : []),
+            ...(open.length > 0 ? [`The reviewers left ${plural(open.length, "note")}: ${open.slice(0, 3).map((n) => shown(n.description)).join("; ")}${open.length > 3 ? ` and ${open.length - 3} more` : ""}.`] : []),
+            ...warning,
+          ],
+          branch: m.integrationBranch,
+          ...(files.length > 0 && { files: files.map((p) => shown(p)) }),
+          ...(shots.length > 0 && { screenshots: shots }),
+        };
+      }
+    }
+  }
+
+  private async changedFilesOf(cwd: string | undefined, from: string | undefined): Promise<string[]> {
+    if (!cwd || !from || !existsSync(cwd)) return [];
+    try {
+      return (await this.deps.git.changedFiles(cwd, from)).slice(0, MAX_LISTED_FILES);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * One atomic save: the answer goes into the log and the checkpoint is cleared (and, for a final send-back, the stage was
+   * set just before). So an answer is never applied twice, and a crash leaves it either still answered or fully handled.
+   */
+  private commitCheckpoint(cp: PendingCheckpoint): void {
+    const { m } = this;
+    const answer = need(cp.answer, "the answer");
+    const record: CheckpointRecord = {
+      id: cp.id,
+      scope: cp.scope,
+      kind: cp.kind,
+      ...(cp.featureId !== undefined && { featureId: cp.featureId }),
+      round: cp.round,
+      decision: answer.decision,
+      ...(answer.note !== undefined && { note: answer.note }),
+      at: answer.at,
+    };
+    m.checkpointLog = trimLog([...(m.checkpointLog ?? []), record]);
+    delete m.checkpoint;
+    this.save();
+  }
+
+  /**
+   * The owner sent the work back with a note: change it, record that, and show it again (plan: now; feature: after it is
+   * reviewed again; final: after the new feature is built and checked). What changed is fingerprinted first
+   * (`reworkFrom`), so a resume never runs the same step twice.
+   */
+  private async rework(kind: CheckpointKind, f: Feature | undefined, cp: PendingCheckpoint): Promise<"again" | "leave"> {
+    let ok = true;
+    switch (kind) {
+      case "plan":
+        ok = await this.reworkPlan(cp);
+        break;
+      case "feature":
+        ok = await this.reworkFeature(need(f, "the feature"), cp);
+        break;
+      case "final":
+        this.reworkFinal(cp);
+        break;
+    }
+    this.event("checkpoint.reworked", { id: cp.id, kind, ...(f && { feature: f.id }), ok });
+    this.commitCheckpoint(cp);
+    if (kind === "plan") return this.startCheckpoint("plan", undefined, sendBacks(this.m, "plan") + 1);
+    return kind === "final" ? "leave" : "again";
+  }
+
+  /** The architect revises the plan with the owner's note (nothing is built yet, so nothing is lost). False if it could not. */
+  private async reworkPlan(cp: PendingCheckpoint): Promise<boolean> {
+    const { m } = this;
+    const previous = need(m.spec, "the spec");
+    cp.reworkFrom ??= sha256(JSON.stringify(previous));
+    this.save();
+    if (sha256(JSON.stringify(m.spec)) !== cp.reworkFrom) return true; // the architect already changed it before a stop
+    const { spec } = await this.writeSpec(1, { previous, issues: [`The owner asked for this change to the plan: ${cp.answer?.note ?? ""}`] });
+    if (spec) {
+      this.adoptSpec(spec);
+      return true;
+    }
+    this.noteOnce("A requested change to the plan could not be made, so the earlier plan was kept.");
+    this.scratch.updateUnit("_plan", { reworkFailed: true });
+    return false;
+  }
+
+  /** The engineer that passed the feature changes it with the owner's note; a change that cannot pass its checks is rolled back. */
+  private async reworkFeature(f: Feature, cp: PendingCheckpoint): Promise<boolean> {
+    cp.reworkFrom ??= need(f.passingCommit, "the passing commit");
+    this.save();
+    if (f.passingCommit === cp.reworkFrom) {
+      const wt = await this.ensureUnitWorktree(f);
+      const asked: Finding = { severity: "major", file: null, description: `The owner looked at this and asked: ${cp.answer?.note ?? ""}`, suggestedTest: null };
+      await this.fixFindings(f, wt, [asked]);
+    }
+    const landed = f.passingCommit !== cp.reworkFrom;
+    if (!landed) this.scratch.updateUnit(f.id, { reworkFailed: true });
+    return landed;
+  }
+
+  /** The owner's change becomes a feature of its own, built through the normal pipeline; the stage goes back to building. */
+  private reworkFinal(cp: PendingCheckpoint): void {
+    const { m } = this;
+    const note = cp.answer?.note ?? "";
+    if (cp.reworkFrom === undefined) {
+      let n = 1;
+      while (this.feature(`owner-change-${n}`)) n++;
+      cp.reworkFrom = `owner-change-${n}`;
+      this.save();
+    }
+    const id = cp.reworkFrom;
+    if (!this.feature(id)) {
+      const change = newFeature({
+        id,
+        title: "The change you asked for",
+        story: note,
+        acceptance: [`The change the owner asked for is in place: ${note}`, "The full verification still passes."],
+        kind: "standard",
+        deps: [],
+      });
+      m.features.push(change);
+      this.event("feature.added", { feature: id, acceptance: change.acceptance });
+      this.save();
+    }
+    this.event("stage", { from: m.stage, to: "features" });
+    m.stage = "features"; // saved together with the log entry, in commitCheckpoint
+  }
+
+  /** The owner sent this back once too often: the work stops here, honestly, instead of going round again. */
+  private async limitReached(kind: CheckpointKind, f: Feature | undefined, cp: PendingCheckpoint): Promise<"go" | "leave"> {
+    const { m } = this;
+    this.event("checkpoint.limit", { kind, ...(f && { feature: f.id }) });
+    switch (kind) {
+      case "plan":
+        this.commitCheckpoint(cp);
+        throw new MissionFailedError(
+          "You asked for changes to the plan twice and sent it back a third time, so Mission Control stopped before building anything.",
+          'Queue it again with a clearer description of what you want, for example: mc new "<your idea>"',
+        );
+      case "feature": {
+        const feature = need(f, "the feature");
+        const reason = "you asked for changes twice and it still was not right";
+        m.decisionsNeeded.push(`"${feature.title}": ${reason}`);
+        this.commitCheckpoint(cp);
+        await this.blockFeature(feature, reason); // its branch keeps the work; the mission carries on and ends partly done
+        return "leave";
+      }
+      case "final":
+        m.status = "partial";
+        m.decisionsNeeded.push("You sent the finished result back twice; it was finalized as it is.");
+        this.commitCheckpoint(cp);
+        return "go";
+    }
+  }
 }
 
 // ───────────────────────────── Side state (dispatch.json) ─────────────────────────────
@@ -2148,6 +2515,12 @@ interface UnitScratch {
   attempts?: number;
   /** A test dispute still to be diagnosed, and the rung that diagnosis is recorded on. */
   pendingDiagnosis?: { dispute: Dispute | null; rung: number };
+  /** Only for a feature the owner looks at: the commit the review and fix rounds ended on (a resume then asks, not reviews). */
+  reviewedCommit?: string;
+  /** The review of that commit did not finish. */
+  reviewSkipped?: boolean;
+  /** The owner's last change could not be made; the next look says so (keys "_plan" and "_final" stand for those checks). */
+  reworkFailed?: boolean;
 }
 
 interface FinalCheck {

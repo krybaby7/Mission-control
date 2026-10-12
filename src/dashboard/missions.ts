@@ -1,6 +1,6 @@
 // Scope, mission and feature views, the open agent run and the now line (docs/dashboard-spec.md, 1.4, 4, 6.1, 12).
 // Pure: it gets the data read by read.ts, the run facts and the clock. It never touches the disk.
-import type { Feature, Mission, MissionEvent } from "../types.js";
+import type { CheckpointKind, Feature, Mission, MissionEvent } from "../types.js";
 import { MAX_FEATURES_SHOWN, RECENT_WINDOW_MS, RUN_GONE_GRACE_MS, STALE_BUSY_AFTER_MS, WAIT_OVER_GRACE_MS } from "./constants.js";
 import type { DispatchPicks, HomeData, MissionData } from "./read.js";
 import type { DashboardSettings } from "./snapshot.js";
@@ -23,6 +23,7 @@ import {
   PROGRESS_WORDS,
   REASON_LEFT_OUT_FALLBACK,
   REASON_PAUSED,
+  REASON_PAUSED_FOR_CHECK,
   REASON_RECOVERED,
   REASON_STUCK_FALLBACK,
   reasonOnHold,
@@ -50,6 +51,14 @@ import {
 /** The run facts the views need. A full RunInfo fits. */
 export type RunFacts = Pick<RunInfo, "active" | "startedAt" | "heartbeat">;
 
+/** The checkpoint of a stopped mission (docs/checkpoints-spec.md, 16: pending or answered, nothing else is one). */
+export interface CheckpointFacts {
+  state: "pending" | "answered";
+  kind: CheckpointKind;
+  /** The title of the feature a `feature` checkpoint is about; null for the other kinds, and when the file has no such feature. */
+  featureTitle: string | null;
+}
+
 export interface MissionFacts {
   data: MissionData;
   view: MissionView;
@@ -68,6 +77,8 @@ export interface MissionFacts {
   baselineBroken: boolean;
   /** Saved busy with no live run: "pending" inside RUN_GONE_GRACE_MS of the last save, "gone" after it (spec 5.3, L2 and L3). */
   runGone: "pending" | "gone" | null;
+  /** Saved as stopped with a checkpoint: waiting for the owner's look, or answered and not continued yet. null otherwise. */
+  checkpoint: CheckpointFacts | null;
 }
 
 // ───────────────────────────── Small checks ─────────────────────────────
@@ -92,6 +103,14 @@ function unresolved(m: Mission): boolean {
 
 function ms(iso: string): number {
   return Date.parse(iso);
+}
+
+/** The checkpoint of a mission that is stopped on one. Pending = stopped and pending, answered = stopped and answered (checkpoints spec, 16). */
+export function checkpointOf(m: Mission): CheckpointFacts | null {
+  const cp = m.checkpoint;
+  if (m.status !== "stopped" || cp === undefined) return null;
+  const featureTitle = cp.kind === "feature" && cp.featureId !== undefined ? (m.features.find((f) => f.id === cp.featureId)?.title ?? null) : null;
+  return { state: cp.state, kind: cp.kind, featureTitle };
 }
 
 /** The newest `at` of a list of events (0 for none). Not the last one: the file order is the append order, not a sort. */
@@ -121,7 +140,8 @@ export function scopeMissions(d: HomeData, live: boolean, now: number): Map<Miss
     const m = entry.mission;
     if (!entry.readable || m === null) {
       out.set(entry, "recent"); // unknown data is never green, and its age is not reliable
-    } else if (ms(m.updatedAt) >= recentStart || (live && hasWorkLeft(m))) {
+    } else if (ms(m.updatedAt) >= recentStart || (live && hasWorkLeft(m)) || checkpointOf(m)?.state === "pending") {
+      // A mission that waits for the owner's check stays recent however long it waits: its card and its lamp reason must not age out.
       out.set(entry, "recent");
     } else {
       out.set(entry, unresolved(m) ? "earlier" : "hidden");
@@ -213,6 +233,7 @@ function stateOf(x: StateInput): { state: MissionStateId; pausedWhy: PausedWhy |
   if (m.status === "waiting" && x.live && x.asleep) return { state: "waiting", pausedWhy: null };
   if (x.savedBusy && x.live) return { state: "working", pausedWhy: null };
   if (x.savedBusy) return { state: "paused", pausedWhy: "unexpected" };
+  if (checkpointOf(m) !== null) return { state: "paused", pausedWhy: "checkpoint" };
   if (m.status === "stopped") {
     const stopped = lastOfType(x.events, "mission.stopped");
     return { state: "paused", pausedWhy: stopped === null ? "unknown" : MAP_STOP[stopReasonKind(stopped.data.reason)] };
@@ -276,7 +297,7 @@ function featureState(status: string, mission: MissionStateId): FeatureStateId {
   }
 }
 
-function featureView(f: Feature, state: FeatureStateId, mission: { state: MissionStateId; wait: WaitInfo | null }, settings: DashboardSettings): FeatureView {
+function featureView(f: Feature, state: FeatureStateId, mission: { state: MissionStateId; wait: WaitInfo | null; checkpoint: CheckpointFacts | null }, settings: DashboardSettings): FeatureView {
   const builds = f.attempts.filter((a) => a.action === "build").length;
   const diagnoses = f.attempts.filter((a) => a.action === "diagnose").length;
   const fixes = f.attempts.filter((a) => a.action === "fix").length;
@@ -286,7 +307,7 @@ function featureView(f: Feature, state: FeatureStateId, mission: { state: Missio
   let reason: FeatureView["reason"] = null;
   if (state === "stuck") reason = f.blockedReason === undefined ? { text: REASON_STUCK_FALLBACK, author: "engine" } : explainFeatureReason(f.blockedReason);
   else if (state === "left_out") reason = f.blockedReason === undefined ? { text: REASON_LEFT_OUT_FALLBACK, author: "engine" } : explainFeatureReason(f.blockedReason);
-  else if (state === "paused") reason = { text: REASON_PAUSED, author: "engine" };
+  else if (state === "paused") reason = { text: mission.checkpoint?.state === "pending" ? REASON_PAUSED_FOR_CHECK : REASON_PAUSED, author: "engine" };
   else if ((state === "being_built" || state === "being_reviewed") && mission.state === "waiting") {
     reason = { text: reasonOnHold(mission.wait?.cause ?? "unknown", mission.wait?.untilText ?? ""), author: "engine" };
   } else if (state === "done" && recovered) reason = { text: REASON_RECOVERED, author: "engine" };
@@ -370,7 +391,7 @@ function unreadableFacts(data: MissionData): MissionFacts {
     updatedAt: 0,
     tellLeader: "",
   };
-  return { data, view, savedBusy: false, staleBusy: false, asleep: false, wait: null, openRun: null, unbuilt: 0, baselineBroken: false, runGone: null };
+  return { data, view, savedBusy: false, staleBusy: false, asleep: false, wait: null, openRun: null, unbuilt: 0, baselineBroken: false, runGone: null, checkpoint: null };
 }
 
 function factsFor(data: MissionData, scope: Scope, cx: Context): MissionFacts {
@@ -420,8 +441,9 @@ function factsFor(data: MissionData, scope: Scope, cx: Context): MissionFacts {
   const finished = m.features.filter((f) => f.status === "done" || f.status === "blocked" || f.status === "skipped").length;
   const k = Math.min(n, firstInProgress === -1 ? finished + 1 : firstInProgress + 1);
 
+  const checkpoint = checkpointOf(m);
   const { progress, progressWord } = progressOf(m.stage, state);
-  const features = pickFeatures(m.features, cx.featureCap).map((f) => featureView(f, featureState(f.status, state), { state, wait: waitingNow }, cx.settings));
+  const features = pickFeatures(m.features, cx.featureCap).map((f) => featureView(f, featureState(f.status, state), { state, wait: waitingNow, checkpoint }, cx.settings));
   const view: MissionView = {
     id: m.id,
     title: m.title,
@@ -432,7 +454,7 @@ function factsFor(data: MissionData, scope: Scope, cx: Context): MissionFacts {
     openFromEarlier: scope === "earlier",
     state,
     word: MISSION_WORDS[state],
-    sentence: missionSentence({ state, stage: m.stage, pausedWhy, staleBusy, waitText: waitingNow?.text ?? null, n, k, u: unbuilt, d: done, stuck, leftOut }),
+    sentence: missionSentence({ state, stage: m.stage, pausedWhy, staleBusy, waitText: waitingNow?.text ?? null, n, k, u: unbuilt, d: done, stuck, leftOut, checkpoint }),
     pausedWhy,
     progress,
     progressWord,
@@ -446,7 +468,7 @@ function factsFor(data: MissionData, scope: Scope, cx: Context): MissionFacts {
     tellLeader: "",
   };
   const runGone = savedBusy && !cx.live ? (cx.now - updatedAt >= RUN_GONE_GRACE_MS ? "gone" : "pending") : null;
-  return { data, view, savedBusy, staleBusy, asleep, wait: waitingNow, openRun, unbuilt, baselineBroken: m.baselineBroken, runGone };
+  return { data, view, savedBusy, staleBusy, asleep, wait: waitingNow, openRun, unbuilt, baselineBroken: m.baselineBroken, runGone, checkpoint };
 }
 
 function createdAt(x: MissionFacts): number {

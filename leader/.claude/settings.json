@@ -9,7 +9,9 @@
       "Bash(../scripts/mc-docker.sh stop:*)",
       "Bash(../scripts/mc-docker.sh new:*)",
       "Bash(../scripts/mc-docker.sh feature:*)",
-      "Bash(../scripts/mc-docker.sh run:*)"
+      "Bash(../scripts/mc-docker.sh run:*)",
+      "Bash(../scripts/mc-docker.sh approve:*)",
+      "Bash(../scripts/mc-docker.sh send-back:*)"
     ],
     "deny": ["Edit", "Write", "NotebookEdit", "Bash(git:*)", "Bash(../scripts/mc-docker.sh logs *--follow*)"]
   }
