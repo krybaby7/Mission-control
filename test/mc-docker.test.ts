@@ -21,13 +21,17 @@ const STANDARD_VOLUMES = [
 // Records argv as JSON lines. `info` fails FAKE_INFO_FAILURES times, `info --format` prints FAKE_MEM_TOTAL (8 GiB
 // unless set), `image inspect` fails when FAKE_IMAGE_MISSING is set, `container inspect` prints FAKE_RUN_STATE (or fails
 // when it is unset), and a container running `mc config get notify.ntfyUrl` prints FAKE_NTFY_URL ("(not set)" unless
-// set), or fails when FAKE_CONFIG_FAILS is set.
+// set), or fails when FAKE_CONFIG_FAILS is set. A `run` with --interactive copies its standard input to FAKE_STDIN_LOG
+// when that is set, as a real container would receive it.
 const FAKE_DOCKER = `#!${process.execPath}
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 const log = process.env.FAKE_DOCKER_LOG;
 fs.appendFileSync(log, JSON.stringify(args) + "\\n");
 const [command, sub] = args;
+if (command === "run" && args.includes("--interactive") && process.env.FAKE_STDIN_LOG) {
+  fs.writeFileSync(process.env.FAKE_STDIN_LOG, fs.readFileSync(0, "utf8"));
+}
 if (command === "info" && args.includes("--format")) {
   console.log(process.env.FAKE_MEM_TOTAL ?? "8589934592");
   process.exit(0);
@@ -104,7 +108,7 @@ function readLines(file: string): string[] {
 }
 
 /** Runs the wrapper with only the fakes and the system directories on PATH. `undefined` removes a variable. */
-function wrapper(args: string[], opts: { env?: Record<string, string | undefined>; cwd?: string; path?: string } = {}): WrapperResult {
+function wrapper(args: string[], opts: { env?: Record<string, string | undefined>; cwd?: string; path?: string; input?: string } = {}): WrapperResult {
   const dockerLog = path.join(tmp, "docker.log");
   const sleepLog = path.join(tmp, "sleep.log");
   const curlLog = path.join(tmp, "curl.log");
@@ -120,7 +124,7 @@ function wrapper(args: string[], opts: { env?: Record<string, string | undefined
     ...opts.env,
   };
   for (const [key, value] of Object.entries(entries)) if (value !== undefined) env[key] = value;
-  const result = spawnSync(BASH, [SCRIPT, ...args], { cwd: opts.cwd ?? home, env, input: "", encoding: "utf8" });
+  const result = spawnSync(BASH, [SCRIPT, ...args], { cwd: opts.cwd ?? home, env, input: opts.input ?? "", encoding: "utf8" });
   const calls = readLines(dockerLog).map((line) => JSON.parse(line) as string[]);
   return {
     status: result.status,
@@ -185,6 +189,10 @@ describe("mc-docker.sh: help and preconditions", () => {
     expect(r.calls).toEqual([]);
   });
 
+  it("lists the plan commands in the help", () => {
+    expect(wrapper(["help"]).stdout).toContain("plan preview|queue|show      Plans written outside the team (write - after preview or queue to send the plan in)");
+  });
+
   it("refuses to run as root", () => {
     const r = wrapper(["status"], { env: { FAKE_UID: "0" } });
     expect(r.status).toBe(1);
@@ -246,6 +254,32 @@ describe("mc-docker.sh: containers", () => {
     expect(r.run?.slice(-6)).toEqual([
       "mc", "feature", "/home/pwuser/mc-apps/habit-tracker", "Add dark mode", "/home/pwuser/mc-apps", `${home}/mc-apps-old/x`,
     ]);
+  });
+
+  it("keeps the container's input open for `plan preview -` and `plan queue -` (a plan sent in with the command), with no terminal flag", () => {
+    for (const args of [["plan", "preview", "-"], ["plan", "queue", "-", "--no-plan-checkpoint"], ["plan", "queue", "-", "--checkpoint", "final"]]) {
+      const r = wrapper(args);
+      expect(r.status, args.join(" ")).toBe(0);
+      expect(r.run, args.join(" ")).toEqual(expectedRun(["--interactive"], ["mc", ...args]));
+      expect(r.run).not.toContain("--tty");
+    }
+  });
+
+  it("hands the text sent in with the command to the container unchanged, quotes and all", () => {
+    const plan = ["mc-plan 1", "name: Bob's \"list\"", "check: Total: 3 \\ done; $(not run) `x`", "PLAN-NOT-THE-END", ""].join("\n");
+    const log = path.join(tmp, "stdin.log");
+    const r = wrapper(["plan", "preview", "-"], { input: plan, env: { FAKE_STDIN_LOG: log } });
+    expect(r.status).toBe(0);
+    expect(fs.readFileSync(log, "utf8")).toBe(plan);
+  });
+
+  it("does not keep it open for a plan given as a file or read by mission, nor for any other command", () => {
+    const file = `${home}/mc-apps/my-plan.txt`;
+    expect(wrapper(["plan", "preview", file]).run).toEqual(expectedRun([], ["mc", "plan", "preview", "/home/pwuser/mc-apps/my-plan.txt"]));
+    expect(wrapper(["plan", "show", "2026-10-12-dark-mode"]).run).toEqual(expectedRun([], ["mc", "plan", "show", "2026-10-12-dark-mode"]));
+    expect(wrapper(["status", "-"]).run).toEqual(expectedRun([], ["mc", "status", "-"]));
+    expect(wrapper(["new", "-"]).run).not.toContain("--interactive");
+    expect(wrapper(["doctor"]).run).not.toContain("--interactive");
   });
 
   it("starts in the matching container folder when run from inside ~/mc-apps, so relative paths work", () => {

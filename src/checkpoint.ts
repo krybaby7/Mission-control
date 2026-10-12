@@ -3,8 +3,8 @@
 // mission: the state machine the dispatcher follows at a gate, the one function that records an answer, and the
 // plain-language texts the command line, the report and the phone notices share. The dispatcher (dispatcher.ts)
 // does the stopping, the reworking and the carrying on.
-import type { MissionStore } from "./state.js";
-import type { CheckpointAnswer, CheckpointKind, CheckpointRecord, Mission, MissionEvent, PendingCheckpoint } from "./types.js";
+import { type MissionStore, planOf } from "./state.js";
+import type { CheckpointAnswer, CheckpointKind, CheckpointRecord, Mission, MissionEvent, PendingCheckpoint, PlanReview } from "./types.js";
 import { stripControlChars } from "./util/terminal.js";
 
 /** In the order the owner meets them in a mission. */
@@ -42,7 +42,7 @@ export function cleanNote(raw: string): string {
 }
 
 /** One line: whitespace runs become one space and control characters go. */
-function oneLine(text: string): string {
+export function oneLine(text: string): string {
   return stripControlChars(text.replace(/\s+/g, " ")).replace(/\s+/g, " ").trim();
 }
 
@@ -266,15 +266,73 @@ export function answerCommands(id: string): string {
   return `mc approve ${id}, or: mc send-back ${id} --note "what to change"`;
 }
 
+/** The plan stop of a mission whose plan the leader wrote (queued with `mc plan queue`): such a plan is looked at first, whatever else was chosen. */
+export function isLeaderPlanStop(m: Pick<Mission, "plan">, cp: Pick<PendingCheckpoint, "kind">): boolean {
+  return cp.kind === "plan" && planOf(m) !== undefined;
+}
+
+/**
+ * Why the team stopped, for "The team stopped because ...": the owner asked to look at `what` (the place, in the words of
+ * the caller), or the leader wrote this plan. The second names the command that prints all of the plan, because
+ * `mc report` shows only its first 40 lines.
+ */
+export function whyStopped(m: Pick<Mission, "id" | "plan" | "features">, cp: Pick<PendingCheckpoint, "kind" | "featureId">, what = lookAt(m, cp)): string {
+  if (isLeaderPlanStop(m, cp)) return `the leader wrote this plan, and you look at such a plan first. Read all of it with: mc plan show ${m.id}`;
+  return `you asked to look at ${what} first`;
+}
+
+/** The command that shows what a check is about: all of a leader's plan, else the report. */
+export function lookCommand(m: Pick<Mission, "id" | "plan">, cp: Pick<PendingCheckpoint, "kind"> | undefined): string {
+  return cp && isLeaderPlanStop(m, cp) ? `mc plan show ${m.id}` : `mc report ${m.id}`;
+}
+
 /** The phone notice when a mission stops for a check (high priority). `ignored`: an answer found in the file was not trusted. */
 export function parkedNotice(m: Mission, cp: PendingCheckpoint, ignored = false): { title: string; message: string } {
   const lead = ignored ? "An answer was found in this mission's file that was not given with mc approve or mc send-back, so it was ignored. " : "";
+  const read = isLeaderPlanStop(m, cp) ? "" : ` Read it with: mc report ${m.id}.`;
   return {
     title: `${title(m)}: please check ${lookAt(m, cp)}`,
-    message:
-      `${lead}The team stopped because you asked to look at ${lookAt(m, cp)} first. Read it with: mc report ${m.id}. ` +
-      `Then run: ${answerCommands(m.id)}. Nothing else is waiting on this; other work carries on.`,
+    message: `${lead}The team stopped because ${whyStopped(m, cp)}.${read} Then run: ${answerCommands(m.id)}. Nothing else is waiting on this; other work carries on.`,
   };
+}
+
+// ───────────────────────────── The plan reviewer's answer (plans from outside) ─────────────────────────────
+
+/** What the team's plan reviewer (gate A) did with a plan the leader wrote, in full: the owner's look and `mc plan show`. */
+export function planReviewSentence(review: PlanReview): string {
+  switch (review.outcome) {
+    case "approved":
+      return "The team's plan reviewer read it and asked for no changes.";
+    case "revised":
+      return `The team's plan reviewer asked for changes, so the team's planner revised the plan. This is the revised plan.${asked(review.issues)}`;
+    case "not_applied":
+      return `The team's plan reviewer asked for changes that could not be applied, so the plan is as the leader wrote it.${asked(review.issues)}`;
+    case "unfinished":
+      return "The team's plan reviewer did not finish, so the plan is as the leader wrote it.";
+  }
+}
+
+/** The same, shortened for the report's header line. */
+export function planReviewShort(review: PlanReview): string {
+  switch (review.outcome) {
+    case "approved":
+      return "the team's plan reviewer asked for no changes.";
+    case "revised":
+      return "the team's plan reviewer asked for changes and the planner revised it.";
+    case "not_applied":
+      return "the team's plan reviewer asked for changes that could not be applied.";
+    case "unfinished":
+      return "the team's plan reviewer did not finish.";
+  }
+}
+
+/** " It asked: a; b; c and 2 more." (sentences that end in a full stop follow each other without the semicolon). The points are AI-written text, so each goes through `shown`. */
+function asked(issues: string[]): string {
+  if (issues.length === 0) return "";
+  const points = issues.slice(0, 3).map((i) => shown(i));
+  const text = points.reduce((all, point) => (all === "" ? point : `${all}${/[.!?]$/.test(all) ? " " : "; "}${point}`), "");
+  const more = issues.length > 3 ? ` and ${issues.length - 3} more` : "";
+  return ` It asked: ${text}${more}${/[.!?]$/.test(`${text}${more}`) ? "" : "."}`;
 }
 
 /** What the owner did, in the words of the confirmations: "you approved the plan for “Shout”". */

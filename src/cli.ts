@@ -3,12 +3,12 @@
 // and 1 when it didn't.
 import { closeSync, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError } from "commander";
 import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
-import { type AnswerInput, type AnswerProblem, answerNotice, answerProblem, applyAnswer, CHECKPOINT_KINDS, cleanNote, didWhat, endState, isCheckpointShape, isWaitingForCheck, localClock, MAX_NOTE_CHARS, MAX_SEND_BACKS, waitingWhat } from "./checkpoint.js";
+import { type AnswerInput, type AnswerProblem, answerNotice, answerProblem, applyAnswer, CHECKPOINT_KINDS, cleanNote, didWhat, endState, isCheckpointShape, isWaitingForCheck, localClock, lookCommand, MAX_NOTE_CHARS, MAX_SEND_BACKS, sendBacks, shown, waitingWhat } from "./checkpoint.js";
 import { parsePort, runDashboard } from "./dashboard/command.js";
 import { DEFAULT_PORT } from "./dashboard/constants.js";
 import { builtInSettings, settingsFromConfig } from "./dashboard/snapshot.js";
@@ -16,19 +16,24 @@ import { ConfigProblemsError, configPath, configTemplateYaml, defaultConfig, inC
 import { type DoctorCheck, runDoctor, unkeptFolderProblems } from "./doctor.js";
 import { Git } from "./git.js";
 import { createNotifier, type Notifier } from "./notify.js";
+import { describePlan, PLAN_MAX_CHARS, PLAN_PROBLEMS_SHOWN, parsePlan, reviewLines } from "./plan.js";
 import { packageRoot } from "./prompts.js";
 import { renderReport } from "./report.js";
 import { findMission, missionOutcome, runNight } from "./run.js";
-import { MissionStore } from "./state.js";
+import { MissionStore, planOf } from "./state.js";
 import type { CheckpointKind, Config, Mission, MissionEvent, MissionStatus, RoleOverride } from "./types.js";
 import { ensureDir, expandHome } from "./util/fs.js";
 import { runProcess } from "./util/process.js";
 import { stripControlChars } from "./util/terminal.js";
 
-/** Where the CLI writes; tests capture it. */
+/** Where the CLI writes, and what it reads from standard input; tests capture and feed them. */
 export interface CliIO {
   stdout(text: string): void;
   stderr(text: string): void;
+  /** The text sent in with the command (`mc plan preview -`). Default: standard input, read to the end. Read only when a command asks for it. */
+  stdin?: () => Promise<string>;
+  /** Whether standard input is a terminal, where nothing was sent in. Default: the real one; false when `stdin` is given. */
+  stdinIsTerminal?: () => boolean;
 }
 
 const processIO: CliIO = {
@@ -43,6 +48,8 @@ const EVENT_VALUE_MAX_CHARS = 120;
 
 const CHECKPOINT_HELP =
   "stop for your check at this point: plan (before building), feature (before each feature is added), final (before finishing). Can be repeated.";
+
+const NO_PLAN_CHECKPOINT_HELP = "do not stop for your check of the plan (only when you said you do not want to look at it first)";
 
 const EXAMPLES = `
 Examples:
@@ -59,7 +66,13 @@ Examples:
 export async function main(argv: string[], given: CliIO = processIO): Promise<number> {
   // Agents write much of what mc prints (report prose, findings, run errors, event summaries): control characters
   // in it could drive the terminal (OSC 52 writes the clipboard), so they never reach it.
-  const io: CliIO = { stdout: (text) => given.stdout(stripControlChars(text)), stderr: (text) => given.stderr(stripControlChars(text)) };
+  const io: CliIO = {
+    stdout: (text) => given.stdout(stripControlChars(text)),
+    stderr: (text) => given.stderr(stripControlChars(text)),
+    // Copied as they are: input is read, not printed, and a field left out here would make the tests read the real standard input.
+    ...(given.stdin && { stdin: given.stdin }),
+    ...(given.stdinIsTerminal && { stdinIsTerminal: given.stdinIsTerminal }),
+  };
   let exitCode = 0;
   const program = buildProgram(io, (code) => {
     exitCode = Math.max(exitCode, code);
@@ -125,6 +138,26 @@ function buildProgram(io: CliIO, setExit: (code: number) => void): Command {
     .option("--checkpoint <kind>", CHECKPOINT_HELP, collect, [])
     .action((folder: string, request: string[], opts: FeatureOptions) => featureCommand(io, folder, request.join(" "), opts));
 
+  const plan = program.command("plan").description("preview, queue and read plans written outside the team (by the leader)");
+  plan
+    .command("preview [file]")
+    .description("show a plan in plain words and make sure it can be used; nothing is queued. Give a file, or write - to read the plan sent in with the command")
+    .option("--checkpoint <kind>", CHECKPOINT_HELP, collect, [])
+    .option("--no-plan-checkpoint", NO_PLAN_CHECKPOINT_HELP)
+    .action(async (file: string | undefined, opts: PlanOptions) => setExit(await planIntakeCommand(io, "preview", file, opts)));
+  plan
+    .command("queue [file]")
+    .description(
+      "queue a plan. The team's planner is skipped and a second AI still reads the plan first. By default the mission stops for your check of the plan before anything is built",
+    )
+    .option("--checkpoint <kind>", CHECKPOINT_HELP, collect, [])
+    .option("--no-plan-checkpoint", NO_PLAN_CHECKPOINT_HELP)
+    .action(async (file: string | undefined, opts: PlanOptions) => setExit(await planIntakeCommand(io, "queue", file, opts)));
+  plan
+    .command("show <mission>")
+    .description("show the plan of a mission in plain words, all of it")
+    .action((id: string) => setExit(planShowCommand(io, id)));
+
   program
     .command("run")
     .description("work through the queued missions")
@@ -188,6 +221,12 @@ interface MissionOptions {
 
 interface FeatureOptions extends MissionOptions {
   base?: string;
+}
+
+interface PlanOptions {
+  checkpoint: string[];
+  /** False with --no-plan-checkpoint. */
+  planCheckpoint: boolean;
 }
 
 interface RunOptions {
@@ -517,8 +556,11 @@ export function missionTitle(name: string | undefined, request: string): string 
   return `${atWord.replace(/[\s,;:-]+$/, "")}…`;
 }
 
+/** Who is asking about a folder: `mc feature` (the texts name its command and flag) or a plan (they name its lines). */
+type Asker = "command" | "plan";
+
 /** The app folder must be the top folder of a git repository with its full history. Returns its canonical path. */
-async function checkRepo(dir: string): Promise<string> {
+async function checkRepo(dir: string, asker: Asker = "command"): Promise<string> {
   if (!existsSync(dir) || !statSync(dir).isDirectory()) {
     const apps = join(homedir(), "mc-apps");
     const outside = inContainer() && dir !== apps && !dir.startsWith(`${apps}/`);
@@ -537,7 +579,8 @@ async function checkRepo(dir: string): Promise<string> {
   const root = top.stdout.trim();
   if (top.exitCode !== 0 || root === "") throw new Error(notRepo);
   if (realpathSync(root) !== realpathSync(dir)) {
-    throw new Error(`${dir} is inside the git repository ${root}. Give the app's top folder instead: mc feature ${root} "..."`);
+    const instead = asker === "plan" ? "Use the app's top folder for “folder” instead." : `Give the app's top folder instead: mc feature ${root} "..."`;
+    throw new Error(`${dir} is inside the git repository ${root}. ${instead}`);
   }
   if (await git.isShallow(dir)) {
     throw new Error(`${dir} only has part of its git history (a shallow clone). Get the full history first: git -C ${dir} fetch --unshallow`);
@@ -545,14 +588,14 @@ async function checkRepo(dir: string): Promise<string> {
   return realpathSync(dir);
 }
 
-async function checkBaseBranch(repo: string, given: string | undefined, store: MissionStore): Promise<string> {
+async function checkBaseBranch(repo: string, given: string | undefined, store: MissionStore, asker: Asker = "command"): Promise<string> {
   const git = new Git();
   let branch = given;
   if (branch === undefined) {
     try {
       branch = await git.currentBranch(repo);
     } catch {
-      throw new Error(await detachedHint(git, repo, store));
+      throw new Error(await detachedHint(git, repo, store, asker));
     }
   }
   if (!(await git.branchExists(repo, branch))) throw new Error(`There is no branch called "${branch}" in ${repo}.`);
@@ -564,7 +607,7 @@ async function checkBaseBranch(repo: string, given: string | undefined, store: M
  * "How to try it" can leave the folder there (a detached checkout of a mission's work), so the branch that folder
  * was on before, as the last mission on it recorded it, is the way back.
  */
-async function detachedHint(git: Git, repo: string, store: MissionStore): Promise<string> {
+async function detachedHint(git: Git, repo: string, store: MissionStore, asker: Asker = "command"): Promise<string> {
   const previous = store.list().filter((m) => m.repoPath === repo && m.baseBranch !== "").at(-1)?.baseBranch;
   const candidates = [previous, "main", "master"].filter((b): b is string => b !== undefined);
   let back: string | undefined;
@@ -574,7 +617,7 @@ async function detachedHint(git: Git, repo: string, store: MissionStore): Promis
       break;
     }
   }
-  const choose = "Choose the branch to start from with --base <branch>.";
+  const choose = asker === "plan" ? "Choose the branch to start from with a “base” line." : "Choose the branch to start from with --base <branch>.";
   if (back === undefined) return `${repo} has no branch checked out. ${choose}`;
   return (
     `${repo} has no branch checked out: it is still on a version you were trying (as a report's "How to try it" leaves it). ` +
@@ -591,6 +634,190 @@ function shownPath(path: string): string {
 
 function shellWord(s: string): string {
   return /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+// ───────────────────────────── plan ─────────────────────────────
+
+/** A plan sent in on standard input or kept in a file is read up to this many bytes: more than that cannot be a plan of 30,000 characters. */
+const PLAN_READ_MAX_BYTES = 4 * PLAN_MAX_CHARS + 16;
+
+/** The folder ~/mc-apps: the only one the container shares with the PC, and where a plan's app and plan files live. */
+function appsDir(): string {
+  return join(homedir(), "mc-apps");
+}
+
+/**
+ * `mc plan preview` and `mc plan queue`: read a plan, check it and the app folder it names, and show it in plain words.
+ * `preview` stops there; `queue` also makes the mission. Anything wrong is listed (up to 12) and nothing is queued.
+ */
+async function planIntakeCommand(io: CliIO, mode: "preview" | "queue", file: string | undefined, opts: PlanOptions): Promise<number> {
+  // Problems with the command itself come first and alone; the plan is read only when the command is right.
+  const checkpoints = planCheckpoints(opts.checkpoint, opts.planCheckpoint);
+  const parsed = parsePlan(await readPlanText(io, file), { quoteFirstLine: file === "-" });
+  if (!parsed.ok) return planProblems(io, parsed.problems);
+  const { envelope, spec } = parsed;
+  // A preview needs no settings and writes nothing; a queue makes the mission.
+  const queue = mode === "queue" ? { config: loadConfig() } : undefined;
+  const store = queue ? openStore(queue.config) : lenientStore(io);
+  let target: { repoPath: string; baseBranch: string } | undefined;
+  if (envelope.folder !== undefined) {
+    try {
+      target = await checkPlanFolder(envelope.folder, envelope.base, store);
+    } catch (err) {
+      return planProblems(io, [err instanceof Error ? err.message : String(err)]);
+    }
+  }
+  const quoted = `“${envelope.name}”`;
+  const subject = target ? `a change to ~/mc-apps/${envelope.folder}, starting from branch ${target.baseBranch}` : "a new app";
+  const stop = checkpoints.length > 0 ? stopLine(checkpoints) : ["It will not stop for your check."];
+  const block = describePlan(spec, { request: envelope.request, style: "text", newApp: target === undefined });
+  if (!queue) {
+    say(
+      io.stdout,
+      "This plan can be used. Nothing was queued.",
+      "",
+      `Plan ${quoted}: ${subject}.`,
+      `Plan code: ${parsed.code} (the same plan always gets the same code).`,
+      ...block,
+      "",
+      "What happens next:",
+      "- The team's planner is skipped. This plan is used as written.",
+      "- A second AI reads the plan first and may ask for changes.",
+      ...stop.map((line) => `- ${line}`),
+      "- For each feature the checks are written first, the work is done until they pass, and a different AI reviews it.",
+      "",
+      'To queue it, run the same command with "plan queue" instead of "plan preview".',
+    );
+    return 0;
+  }
+  const now = Date.now();
+  const mission = store.createMission({
+    kind: target ? "feature" : "greenfield",
+    title: envelope.name,
+    request: envelope.request,
+    repoPath: target?.repoPath ?? "", // a new app's folder is decided when it is created
+    baseBranch: target?.baseBranch ?? "main",
+    ...missionChoices(queue.config, { role: [], checkpoint: [] }),
+    ...(checkpoints.length > 0 && { checkpoints }),
+    plan: { spec, sha256: parsed.sha256, at: new Date(now).toISOString() },
+    nowMs: now,
+  });
+  say(
+    io.stdout,
+    target ? `Queued the plan ${quoted}: ${subject}.` : `Queued the plan ${quoted} for a new app.`,
+    `Mission id: ${mission.id}`,
+    `Plan code: ${parsed.code} (compare it with the code the preview showed).`,
+    ...stop,
+    `It starts on the next run, for example: mc run --mission ${mission.id}`,
+    "",
+    ...block,
+  );
+  return 0;
+}
+
+/** The kinds asked for with --checkpoint, plus the plan unless --no-plan-checkpoint, in the order the owner meets them. */
+function planCheckpoints(given: string[], planStop: boolean): CheckpointKind[] {
+  const asked = checkpointChoices(given);
+  return CHECKPOINT_KINDS.filter((kind) => asked.includes(kind) || (kind === "plan" && planStop));
+}
+
+/** The problems of a plan, up to 12, on standard error. Returns the exit code. */
+function planProblems(io: CliIO, problems: string[]): number {
+  const more = problems.length - PLAN_PROBLEMS_SHOWN;
+  say(
+    io.stderr,
+    "This plan can't be used yet. Fix these and preview it again:",
+    ...problems.slice(0, PLAN_PROBLEMS_SHOWN).map((p) => `- ${p}`),
+    ...(more > 0 ? [`- ... and ${more} more.`] : []),
+  );
+  return 1;
+}
+
+/** The plan text: the file named, or with `-` what was sent in with the command. Standard input is never read unless the file is `-`. */
+async function readPlanText(io: CliIO, file: string | undefined): Promise<string> {
+  if (file === undefined) throw new Error("There is no plan to read. Give a file name, or write - to read the plan sent in with the command.");
+  if (file === "-") {
+    const terminal = io.stdinIsTerminal ?? (io.stdin ? () => false : () => process.stdin.isTTY === true);
+    if (terminal()) throw new Error("Nothing was sent in. Send the plan with the command, or give a file name.");
+    return (io.stdin ?? (() => readCapped(process.stdin)))();
+  }
+  const path = resolve(expandHome(file));
+  const missing = new Error(`There is no plan file at ${path}. A file must be inside ~/mc-apps to be seen from the container; or send the plan in and write - instead.`);
+  let real: string;
+  try {
+    real = realpathSync(path);
+    if (!statSync(real).isFile() || !isInside(realpathSync(appsDir()), real)) throw missing;
+  } catch {
+    throw missing; // a file elsewhere in the container is not for a plan to read (its Claude login lives there)
+  }
+  const fd = openSync(real, "r");
+  try {
+    const buffer = Buffer.alloc(PLAN_READ_MAX_BYTES + 1);
+    return buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, 0)).toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Reads a stream to its end, or until it has sent more than a plan can hold (the reader then says the plan is too long). */
+export async function readCapped(source: AsyncIterable<Buffer | string>, maxBytes = PLAN_READ_MAX_BYTES): Promise<string> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of source) {
+    const buffer = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
+    chunks.push(buffer);
+    size += buffer.length;
+    if (size > maxBytes) break;
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/** Whether `path` is a strict descendant of `parent` (both already real paths). */
+function isInside(parent: string, path: string): boolean {
+  const rel = relative(parent, path);
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+/** The folder a plan names, checked as `mc feature` checks an app folder (in the plan's words). Returns its real path and branch. */
+async function checkPlanFolder(folder: string, base: string | undefined, store: MissionStore): Promise<{ repoPath: string; baseBranch: string }> {
+  const dir = join(appsDir(), folder);
+  if (existsSync(dir)) {
+    let inside = false;
+    try {
+      inside = isInside(realpathSync(appsDir()), realpathSync(dir));
+    } catch {
+      // unreadable: treated as leading outside
+    }
+    if (!inside) throw new Error(`The folder “${folder}” leads outside ~/mc-apps, so it can't be used.`);
+  }
+  const repoPath = await checkRepo(dir, "plan");
+  return { repoPath, baseBranch: await checkBaseBranch(repoPath, base, store, "plan") };
+}
+
+/** `mc plan show`: the plan a mission holds, in plain words, all of it, and who wrote it and who changed it. */
+function planShowCommand(io: CliIO, id: string): number {
+  const store = lenientStore(io);
+  const m = findMission(store, id);
+  const plan = planOf(m);
+  const spec = m.spec ?? plan?.spec;
+  if (!spec) {
+    say(io.stderr, `“${shown(m.title)}” has no plan yet. The team's planner writes it when the mission starts.`);
+    return 1;
+  }
+  const apps = appsDir();
+  const where =
+    m.kind === "greenfield"
+      ? "a new app"
+      : `a change to ${m.repoPath.startsWith(`${apps}${sep}`) ? `~/mc-apps/${m.repoPath.slice(apps.length + 1)}` : shownPath(m.repoPath)}`;
+  say(
+    io.stdout,
+    `Plan for “${shown(m.title)}” (mission ${m.id}): ${where}.`,
+    plan ? `Written by the leader. Plan code ${plan.sha256.slice(0, 8)} (of the plan as the leader wrote it).` : "Written by the team's planner.",
+    ...reviewLines(plan?.review, sendBacks(m, "plan")),
+    "",
+    ...describePlan(spec, { request: m.request, style: "text", newApp: m.kind === "greenfield" && m.repoPath === "" }),
+  );
+  return 0;
 }
 
 // ───────────────────────────── run / stop ─────────────────────────────
@@ -615,7 +842,7 @@ async function runCommand(io: CliIO, opts: RunOptions): Promise<void> {
   const checks = waitingForCheck.flatMap((m) =>
     m.checkpoint
       ? [
-          `- ${m.title} is waiting for your check (${waitingWhat(m, m.checkpoint)}). Look at it with: mc report ${m.id}. ` +
+          `- ${m.title} is waiting for your check (${waitingWhat(m, m.checkpoint)}). Look at it with: ${lookCommand(m, m.checkpoint)}. ` +
             `Then: mc approve ${m.id}   or   mc send-back ${m.id} --note "what to change".`,
         ]
       : [],
@@ -812,7 +1039,7 @@ function statusCommand(io: CliIO, json: boolean): void {
       io.stdout,
       "",
       cp.state === "pending"
-        ? `“${m.title}” is waiting for your check (${waitingWhat(m, cp)}). Read it: mc report ${m.id}. Then: mc approve ${m.id}  or  mc send-back ${m.id} --note "..."`
+        ? `“${m.title}” is waiting for your check (${waitingWhat(m, cp)}). Read it: ${lookCommand(m, cp)}. Then: mc approve ${m.id}  or  mc send-back ${m.id} --note "..."`
         : `${capitalize(didWhat(m, cp, cp.answer?.decision ?? "approve"))}. It continues on the next run: mc run`,
     );
   }

@@ -6,6 +6,7 @@ import {
   allDoneSentence,
   capitalise,
   CARD_TEXT,
+  checkpointSummary,
   CLAUSE,
   concernsHappened,
   concernsOf,
@@ -449,6 +450,14 @@ describe("card words", () => {
     expect(loginWhatToDo(["Claude"])).toBe("Log in again to Claude on the PC, then tell the leader.");
     expect(loginWhatToDo(["Claude", "Codex"])).toBe("Log in again to Claude and Codex on the PC, then tell the leader.");
     expect(loginWhatToDo([])).toBe("Log in again on the PC to the AI that needs it, then tell the leader.");
+  });
+
+  it("the plan stop of a plan the leader wrote has its own two sentences; a feature or final stop and an ordinary plan stop keep theirs", () => {
+    expect(CARD_TEXT.checkpointHappenedLeaderPlan).toBe("The team stopped here because the leader wrote this plan, and you look at it first.");
+    expect(checkpointSummary("plan", null, 0, 2, true)).toBe("Nothing is built yet. Ask the leader to show you every check of the plan, word for word. The owner can also print all of it at the PC.");
+    expect(checkpointSummary("plan", null, 0, 2, false)).toBe("Nothing is built yet. The report has the whole plan.");
+    expect(checkpointSummary("plan", null, 0, 2)).toBe(checkpointSummary("plan", null, 0, 2, false));
+    for (const kind of ["feature", "final"] as const) expect(checkpointSummary(kind, "mc/x", 0, 2, true)).toBe(checkpointSummary(kind, "mc/x", 0, 2, false));
   });
 
   it("the other what-to-do and if-nothing sentences are plain and name nobody", () => {

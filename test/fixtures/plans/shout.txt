@@ -1,0 +1,42 @@
+mc-plan 1
+name: Shout
+request: Add a shout(text) function to word-tools in src/shout.js. It returns the text in capital letters followed by one exclamation mark. An empty string returns an empty string. A non-string input throws a TypeError. Export it from src/index.js and add automated tests that cover each rule.
+folder: word-tools
+base: main
+app-name: word-tools: shout
+summary: word-tools is a small library of text helpers for JavaScript programs. This change adds a new helper called shout: give it some text and it returns the same text in capital letters with an exclamation mark on the end, for example "hello" becomes "HELLO!". Automated tests check each of its rules.
+assumption: shout always adds exactly one exclamation mark, even if the text already ends with one ("wow!" becomes "WOW!!"). The request says 'followed by one exclamation mark', and removing the user's own punctuation could be surprising.
+assumption: Capitals come from JavaScript's standard toUpperCase(), with no locale-specific rules.
+assumption: Text made only of spaces (for example " ") is not empty, so it gets the exclamation mark: " !". Only the exact empty string "" returns "".
+assumption: Anything that isn't a string throws a TypeError with the message "shout expects a string", including null, undefined, numbers, arrays and String objects created with new String(). This matches how capitalize reports bad input.
+assumption: The code follows the existing capitalize.js style: a one-line doc comment, a named ES module export, and no new dependencies.
+assumption: The tests go in a new file, src/shout.test.js, which the existing npm test (node --test) picks up automatically, so package.json does not change.
+assumption: The README is not changed because the request didn't ask for documentation.
+contract: No UI and no HTTP endpoints. This is a JavaScript library (ES modules, "type": "module").
+contract: Module API:
+contract: File: src/shout.js. Contents: export function shout(text) with a one-line JSDoc comment, matching src/capitalize.js.
+contract: src/index.js must contain both lines: export capitalize from "./capitalize.js"; (existing, unchanged) and export shout from "./shout.js";.
+contract: Behavior:
+contract: If typeof text !== "string", throw new TypeError("shout expects a string").
+contract: If text === "", return "".
+contract: Otherwise return text.toUpperCase() + "!".
+contract: Examples: shout("hello") === "HELLO!"; shout("Hello World") === "HELLO WORLD!"; shout("wow!") === "WOW!!"; shout("") === ""; shout(42) throws TypeError.
+contract: Tests:
+contract: File: src/shout.test.js. Use import test from "node:test"; import assert from "node:assert/strict"; import shout from "./index.js";.
+contract: Use assert.equal for return values and assert.throws(fn, TypeError) for errors.
+contract: Run with npm test (node --test), which finds src/**/*.test.js.
+contract: Existing code that must keep working: capitalize(word) from src/capitalize.js, re-exported by src/index.js, and its tests in src/capitalize.test.js.
+
+feature: shout-function
+title: Add shout(text) helper, export it, and test each rule
+story: As a developer using word-tools, I want a shout(text) function that turns text into capital letters followed by one exclamation mark, so I can emphasise messages without writing that logic myself.
+kind: mechanical
+check: src/shout.js exists and exports a named function shout
+check: src/index.js exports shout (re-exported from ./shout.js) alongside the existing capitalize export, so import shout, capitalize from "./index.js" works
+check: shout("hello") returns "HELLO!"
+check: shout("Hello World") returns "HELLO WORLD!" (every letter upper-cased, spaces kept, exactly one "!" appended)
+check: shout("wow!") returns "WOW!!" (exactly one "!" is appended; existing punctuation is kept as-is)
+check: shout("") returns "" (empty string, no exclamation mark)
+check: shout(42), shout(null), shout(undefined) and shout(["a"]) each throw a TypeError
+check: A new test file src/shout.test.js, using node:test and node:assert/strict and importing from ./index.js like src/capitalize.test.js, contains at least one test for each rule: upper-casing plus one exclamation mark, empty string returns empty string, non-string throws TypeError
+check: npm test exits 0 with both the existing capitalize tests and the new shout tests passing

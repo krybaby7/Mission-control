@@ -14,7 +14,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { isAbsolute, join } from "node:path";
-import type { CheckpointKind, Mission, MissionEvent, MissionKind, RoleOverride, UsageRecord } from "./types.js";
+import type { CheckpointKind, Mission, MissionEvent, MissionKind, PlanSource, RoleOverride, UsageRecord } from "./types.js";
 import { appendJsonl, ensureDir, readJson, readJsonl, sha256, writeJsonAtomic } from "./util/fs.js";
 
 const DEFAULT_SLUG_MAX = 40;
@@ -45,6 +45,8 @@ export interface CreateMissionInit {
   roleOverrides?: RoleOverride[];
   /** Where the owner wants to look before the mission goes on; absent or empty = nowhere. */
   checkpoints?: CheckpointKind[];
+  /** A plan written outside the team (mc plan queue); the mission adopts it instead of asking the planner. */
+  plan?: PlanSource;
   nowMs: number;
 }
 
@@ -115,6 +117,7 @@ export class MissionStore {
       agentRuns: 0,
       notes: [],
       ...(init.checkpoints?.length ? { checkpoints: [...init.checkpoints] } : {}),
+      ...(init.plan ? { plan: init.plan } : {}),
     };
     try {
       this.save(mission, init.nowMs);
@@ -333,6 +336,40 @@ const MISSION_FIELD_CHECKS = {
 function invalidMissionField(data: unknown): string | undefined {
   if (!isRecord(data)) return "object";
   return Object.entries(MISSION_FIELD_CHECKS).find(([field, check]) => !check(data[field]))?.[0];
+}
+
+const PLAN_OUTCOMES: readonly unknown[] = ["approved", "revised", "not_applied", "unfinished"];
+
+/**
+ * The plan a mission was queued with by `mc plan queue`, or undefined for a mission the team's planner writes (and for
+ * a hand-damaged `plan`, which counts as none, so nothing that reads it can throw). A damaged `review` is left out.
+ */
+export function planOf(m: Pick<Mission, "plan">): PlanSource | undefined {
+  const plan: unknown = m.plan;
+  if (!isRecord(plan) || !isString(plan.sha256) || !isString(plan.at) || !isSpecShape(plan.spec)) return undefined;
+  const review = plan.review;
+  if (review === undefined || (isRecord(review) && PLAN_OUTCOMES.includes(review.outcome) && isStringList(review.issues))) return m.plan;
+  const { review: _damaged, ...rest } = plan;
+  return rest as unknown as PlanSource;
+}
+
+function isSpecShape(x: unknown): boolean {
+  if (!isRecord(x) || !isString(x.appName) || !isString(x.summary) || !isString(x.uiContract) || !isStringList(x.assumptions)) return false;
+  if (!Array.isArray(x.features)) return false;
+  return x.features.every(
+    (f) =>
+      isRecord(f) &&
+      isString(f.id) &&
+      isString(f.title) &&
+      isString(f.story) &&
+      isStringList(f.acceptance) &&
+      (f.kind === "standard" || f.kind === "mechanical") &&
+      isStringList(f.deps),
+  );
+}
+
+function isStringList(x: unknown): boolean {
+  return Array.isArray(x) && x.every(isString);
 }
 
 function isEventLike(x: unknown): x is MissionEvent {

@@ -11,20 +11,25 @@ import {
   endState,
   isCheckpointShape,
   isDerivedFeature,
+  isLeaderPlanStop,
   isWaitingForCheck,
+  lookCommand,
   MAX_LOG_ENTRIES,
   MAX_NOTE_CHARS,
   nextCheckpointState,
   parkedNotice,
+  planReviewSentence,
+  planReviewShort,
   scopeOf,
   sendBacks,
   subjectOf,
   trimLog,
   waitingWhat,
+  whyStopped,
 } from "./checkpoint.js";
 import { buildReportFacts, renderReport } from "./report.js";
 import { MissionStore } from "./state.js";
-import type { CheckpointAnswer, CheckpointKind, CheckpointRecord, Feature, Mission, PendingCheckpoint } from "./types.js";
+import type { CheckpointAnswer, CheckpointKind, CheckpointRecord, Feature, Mission, PendingCheckpoint, PlanReview, PlanSource } from "./types.js";
 
 let root: string;
 let store: MissionStore;
@@ -409,5 +414,86 @@ describe("the report", () => {
     const facts = buildReportFacts(waiting, []);
     expect(facts).not.toMatch(/check|waiting|approve|send back/i);
     expect(facts).toContain("Status: Paused, continues on the next run (stopped).");
+  });
+});
+
+// ───────────────────────────── A plan written outside the team ─────────────────────────────
+
+describe("a plan written outside the team", () => {
+  const plan: PlanSource = {
+    spec: { appName: "Shout", summary: "Shouts.", features: [], assumptions: [], uiContract: "" },
+    sha256: `a4adaca5${"0".repeat(56)}`,
+    at: "2026-10-12T09:00:00.000Z",
+  };
+  const m = { title: "Shout", id: "2026-10-12-shout", features: [{ id: "add-shout", title: "Add shout" }], plan } as unknown as Mission;
+  const old = { ...m, plan: undefined } as unknown as Mission;
+  const render = (mission: Mission) => renderReport(mission, { usage: [], screenshots: [], generatedAt: "2026-10-12T14:00:00.000Z", inContainer: false });
+
+  it("sends the owner to mc plan show at the plan stop, in the notice, the report and the commands, and nowhere else", () => {
+    expect(isLeaderPlanStop(m, pending())).toBe(true);
+    expect(isLeaderPlanStop(m, pending("feature", 1, "add-shout"))).toBe(false);
+    expect(isLeaderPlanStop(old, pending())).toBe(false);
+    expect(whyStopped(m, pending())).toBe("the leader wrote this plan, and you look at such a plan first. Read all of it with: mc plan show 2026-10-12-shout");
+    expect(whyStopped(m, pending("final"))).toBe("you asked to look at the finished app first");
+    expect(whyStopped(old, pending("feature", 1, "add-shout"))).toBe("you asked to look at “Add shout” before it is added first");
+    expect(lookCommand(m, pending())).toBe("mc plan show 2026-10-12-shout");
+    expect(lookCommand(m, pending("final"))).toBe("mc report 2026-10-12-shout");
+    expect(lookCommand(old, pending())).toBe("mc report 2026-10-12-shout");
+    expect(lookCommand(m, undefined)).toBe("mc report 2026-10-12-shout");
+    expect(parkedNotice(m, pending()).message).toBe(
+      'The team stopped because the leader wrote this plan, and you look at such a plan first. Read all of it with: mc plan show 2026-10-12-shout. Then run: mc approve 2026-10-12-shout, or: mc send-back 2026-10-12-shout --note "what to change". Nothing else is waiting on this; other work carries on.',
+    );
+    expect(parkedNotice(m, pending()).title).toBe("Shout: please check the plan");
+    // a stop the owner chose for the feature or the finished app of a plan mission keeps the old words
+    expect(parkedNotice(m, pending("final")).message).toContain("The team stopped because you asked to look at the finished app first. Read it with: mc report 2026-10-12-shout. Then run:");
+    expect(parkedNotice(old, pending()).message).toContain("The team stopped because you asked to look at the plan first. Read it with: mc report 2026-10-12-shout. Then run:");
+  });
+
+  it("words the plan reviewer's answer in full and short", () => {
+    const answers: PlanReview[] = [
+      { outcome: "approved", issues: [] },
+      { outcome: "revised", issues: ["a", "b", "c", "d"] },
+      { outcome: "not_applied", issues: ["Ask."] },
+      { outcome: "unfinished", issues: [] },
+    ];
+    expect(answers.map((a) => planReviewSentence(a))).toEqual([
+      "The team's plan reviewer read it and asked for no changes.",
+      "The team's plan reviewer asked for changes, so the team's planner revised the plan. This is the revised plan. It asked: a; b; c and 1 more.",
+      "The team's plan reviewer asked for changes that could not be applied, so the plan is as the leader wrote it. It asked: Ask.",
+      "The team's plan reviewer did not finish, so the plan is as the leader wrote it.",
+    ]);
+    expect(answers.map((a) => planReviewShort(a))).toEqual([
+      "the team's plan reviewer asked for no changes.",
+      "the team's plan reviewer asked for changes and the planner revised it.",
+      "the team's plan reviewer asked for changes that could not be applied.",
+      "the team's plan reviewer did not finish.",
+    ]);
+  });
+
+  it("puts the plan, who wrote it and what its reviewer did under the title of the report, and only for such a plan", () => {
+    const withReview = (outcome: "approved" | "revised" | "not_applied" | "unfinished"): Mission => mission({ plan: { ...plan, review: { outcome, issues: [] } }, features: [] });
+    expect(render(mission({ plan, features: [] }))).toContain("\n\nPlan: written by the leader (plan code a4adaca5).\n");
+    expect(render(withReview("approved"))).toContain("\n\nPlan: written by the leader (plan code a4adaca5); the team's plan reviewer asked for no changes.\n");
+    expect(render(withReview("revised"))).toContain("(plan code a4adaca5); the team's plan reviewer asked for changes and the planner revised it.\n");
+    expect(render(withReview("not_applied"))).toContain("; the team's plan reviewer asked for changes that could not be applied.\n");
+    expect(render(withReview("unfinished"))).toContain("; the team's plan reviewer did not finish.\n");
+    expect(render(mission({ features: [] }))).not.toContain("Plan: written by the leader");
+    // a damaged plan field is no plan
+    expect(render(mission({ plan: "x" as unknown as PlanSource, features: [] }))).not.toContain("Plan: written by the leader");
+  });
+
+  it("says in the waiting block why the team stopped, and where to read all of the plan; an owner's own stop reads as before", () => {
+    const cp = { ...pending(), look: { headline: "Check the plan for “Shout”", lines: ["a"] } };
+    const parked = mission({ plan, stage: "init", checkpoint: cp, features: [] });
+    expect(render(parked)).toContain(
+      `The team stopped here on purpose, because the leader wrote this plan, and you look at such a plan first. Read all of it with: mc plan show ${parked.id}. Nothing else is waiting on this mission; other work carries on.`,
+    );
+    expect(render(parked)).not.toContain("because you asked to look at");
+    expect(render(mission({ stage: "init", checkpoint: cp, features: [] }))).toContain(
+      "The team stopped here on purpose, because you asked to look at the plan first. Nothing else is waiting on this mission; other work carries on.",
+    );
+    const stage = { id: "add-shout", title: "Add shout", story: "s", acceptance: [], kind: "standard", deps: [], status: "reviewing", rung: 0, attempts: [], frozenTests: [], reviewRounds: 0, openFindings: [] } satisfies Feature;
+    const feature = { ...pending("feature", 1, "add-shout"), look: { headline: "Check", lines: ["a"] } };
+    expect(render(mission({ plan, checkpoint: feature, features: [stage] }))).toContain("because you asked to look at “Add shout”, before it is added first.");
   });
 });

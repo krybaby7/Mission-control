@@ -1,0 +1,44 @@
+{
+  "request": "Add a whisper(text) function in src/whisper.js that returns the text in lower case with three dots at the end. Export it from src/index.js with tests.",
+  "spec": {
+    "appName": "word-tools: whisper",
+    "summary": "word-tools is a small library of text helpers that programmers can use in their own code. This change adds a new helper called whisper. It takes a piece of text, makes the first letter a capital and everything else lower case, and adds \"...\" on the end, so \"hELLO WORLD\" becomes \"Hello world...\".",
+    "features": [
+      {
+        "id": "whisper-function",
+        "title": "Add whisper(text) and export it from the package entry point",
+        "story": "As a developer using word-tools, I want a whisper(text) helper that I can import from the package entry point. It should return my text with only the first letter capitalised, everything else in lower case, and three dots on the end.",
+        "acceptance": [
+          "Importing { whisper } from src/index.js gives a function",
+          "whisper(\"hELLO\") returns \"Hello...\"",
+          "whisper(\"Hello World\") returns \"Hello world...\" (only the first letter of the whole text is capitalised, not the first letter of every word)",
+          "whisper(\"hELLO wORLD\") returns \"Hello world...\"",
+          "whisper(\"SHH\") returns \"Shh...\"",
+          "whisper(\"already quiet\") returns \"Already quiet...\"",
+          "whisper(\"\") returns \"...\"",
+          "whisper(\"Wait...\") returns \"Wait......\" (dots are always added, even if the text already ends with dots)",
+          "whisper(\" hi\") returns \" hi...\" (only the very first character is upper-cased, so a leading space stays a space)",
+          "whisper(42) throws a TypeError with message \"whisper expects a string\"",
+          "whisper(undefined) throws a TypeError",
+          "The existing capitalize tests still pass, and capitalize is still exported from src/index.js",
+          "src/whisper.test.js exists and npm test exits with code 0"
+        ],
+        "kind": "mechanical",
+        "deps": []
+      }
+    ],
+    "assumptions": [
+      "whisper follows the same pattern as capitalize: an ES module named export in its own file, src/whisper.js, re-exported from src/index.js, with a one-line doc comment.",
+      "Following the owner's change: only the very first character of the whole text is upper-cased. Everything after it is lower-cased, including the first letters of later words. \"Hello World\" becomes \"Hello world...\".",
+      "The capitalising rule is the same as the existing capitalize helper: upper-case text[0] and lower-case the rest. If the text starts with a space or punctuation, that character is left as is, so whisper(\" hi\") returns \" hi...\". It does not skip ahead to the first letter.",
+      "Non-string input throws a TypeError with the message \"whisper expects a string\". whisper checks this itself, so the message names whisper and not capitalize.",
+      "An empty string returns \"...\".",
+      "Three dots are always added, even if the text already ends with dots or other punctuation. whisper(\"Wait...\") returns \"Wait......\".",
+      "The dots are three ASCII period characters (\"...\"), not the single ellipsis character (…).",
+      "Case changes use JavaScript's standard toUpperCase()/toLowerCase(), with no locale-specific rules.",
+      "The README gets a short whisper(text) section next to the capitalize one, so the new helper is documented.",
+      "Tests use the built-in node:test and node:assert/strict, like the existing tests, so no dependencies are added."
+    ],
+    "uiContract": "This is a library, so it has no UI, routes or HTTP endpoints. The contract is the module API.\n\nExisting (do not change):\n- src/capitalize.js exports `capitalize(word)`. It upper-cases word[0], lower-cases the rest, returns \"\" for \"\", and throws TypeError(\"capitalize expects a string\") for non-strings.\n- src/index.js contains `export { capitalize } from \"./capitalize.js\";`.\n- src/capitalize.test.js stays unchanged and must keep passing.\n- package.json is an ES module (\"type\": \"module\"). The test script is `node --test`.\n\nNew:\n- File src/whisper.js has a named export `export function whisper(text)`.\n  - If typeof text !== \"string\": throw new TypeError(\"whisper expects a string\"). This check must come before any call to capitalize so the message is whisper's own.\n  - If text === \"\": return \"...\".\n  - Otherwise return text[0].toUpperCase() + text.slice(1).toLowerCase() + \"...\". Importing and reusing capitalize from \"./capitalize.js\" after the type check is fine, because it gives the same result.\n- src/index.js adds the line `export { whisper } from \"./whisper.js\";` and keeps the capitalize export.\n- Test file src/whisper.test.js imports `{ test }` from \"node:test\", `assert` from \"node:assert/strict\", and `{ whisper }` from \"./index.js\" (the entry point, not ./whisper.js).\n- Example values: whisper(\"hELLO\") === \"Hello...\"; whisper(\"Hello World\") === \"Hello world...\"; whisper(\"hELLO wORLD\") === \"Hello world...\"; whisper(\"SHH\") === \"Shh...\"; whisper(\"already quiet\") === \"Already quiet...\"; whisper(\"\") === \"...\"; whisper(\"Wait...\") === \"Wait......\"; whisper(\" hi\") === \" hi...\"; whisper(42) throws TypeError with message \"whisper expects a string\"; whisper(undefined) throws TypeError.\n- README.md gets a section `## whisper(text)` placed before `## Tests`, stating that `whisper(\"hELLO wORLD\")` returns `\"Hello world...\"`."
+  }
+}

@@ -419,6 +419,26 @@ export interface Mission {
   checkpoint?: PendingCheckpoint;
   /** Finished checkpoints, newest last, at most 50. A scope is passed when this holds an "approve" entry for it. */
   checkpointLog?: CheckpointRecord[];
+  /** Set only when the plan was handed in with `mc plan queue` (written outside the team, by the leader). Absent = the team's planner writes it. */
+  plan?: PlanSource;
+}
+
+/** A plan written outside the team: what the team adopts instead of calling its own planner, and how it was received. */
+export interface PlanSource {
+  /** The plan as the leader wrote it. `Mission.spec` is the plan the team works from (the same, or a revision). */
+  spec: SpecOutput;
+  /** Hex SHA-256 of the plan in its fixed written form (src/plan.ts canonicalText); its first 8 characters are the plan code. */
+  sha256: string;
+  at: string; // ISO
+  /** What the team's plan reviewer (gate A) did with it; absent until gate A has run. */
+  review?: PlanReview;
+}
+
+/** The outcome of gate A for a plan from outside: it asked for no change, its change was made, its change could not be made, or it did not answer. */
+export interface PlanReview {
+  outcome: "approved" | "revised" | "not_applied" | "unfinished";
+  /** What the reviewer asked for (empty unless it asked for changes). */
+  issues: string[];
 }
 
 /** Where the owner looks: before building (plan), before one feature is added (feature), before finishing (final). */

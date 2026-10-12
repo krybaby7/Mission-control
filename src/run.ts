@@ -2,7 +2,7 @@
 // are finished, a stop is requested or the deadline passes, then writes the night summary and notifies.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { isWaitingForCheck, parkedNotice, waitingWhat } from "./checkpoint.js";
+import { isWaitingForCheck, lookCommand, parkedNotice, waitingWhat } from "./checkpoint.js";
 import { loadConfig } from "./config.js";
 import { Dispatcher } from "./dispatcher.js";
 import { RoleExecutor, type WaitCause } from "./executor.js";
@@ -554,7 +554,7 @@ function ownerLine(m: Mission): string {
 /** How the owner answers a check: read the report, then approve or send back. */
 function checkLine(m: Mission): string {
   const what = m.checkpoint ? ` (${waitingWhat(m, m.checkpoint)})` : "";
-  return `- **${oneLine(m.title)}** is waiting for your check${what}. Look at it with \`mc report ${m.id}\`, then run \`mc approve ${m.id}\` or \`mc send-back ${m.id} --note "what to change"\`.`;
+  return `- **${oneLine(m.title)}** is waiting for your check${what}. Look at it with \`${lookCommand(m, m.checkpoint)}\`, then run \`mc approve ${m.id}\` or \`mc send-back ${m.id} --note "what to change"\`.`;
 }
 
 function endingSentence(night: Night, missions: Mission[]): string {
@@ -585,7 +585,7 @@ function nightMessage(missions: Mission[], waitingForYou: Mission[], waitingForC
   return [
     ...missions.map((m) => `${oneLine(m.title)}: ${missionOutcome(m)}`),
     ...waitingForYou.filter((m) => !helped.has(m.id)).map((m) => `${oneLine(m.title)}: still needs your help (mc report ${m.id})`),
-    ...waitingForCheck.filter((m) => !helped.has(m.id)).map((m) => `${oneLine(m.title)}: waiting for your check (mc report ${m.id})`),
+    ...waitingForCheck.filter((m) => !helped.has(m.id)).map((m) => `${oneLine(m.title)}: waiting for your check (${lookCommand(m, m.checkpoint)})`),
     "Read the report: mc report",
   ].join("\n");
 }

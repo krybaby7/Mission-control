@@ -71,6 +71,7 @@ Everything else goes to Mission Control inside the container, for example:
   new "<idea>"                 Queue a new app
   run --until 07:00            Work until 7am (only one run at a time)
   status | report | stop       See progress, read the report, stop a run
+  plan preview|queue|show      Plans written outside the team (write - after preview or queue to send the plan in)
 
   --help                       List all Mission Control commands
 EOF
@@ -289,6 +290,23 @@ build_image() {
   say "the image is ready."
 }
 
+# True for a `plan` command that was told to read the plan sent in with it (an argument is `-`) when the input is not
+# a terminal: a here-document or a pipe. Docker closes a container's input unless it is asked to keep it open, and then
+# the plan would never arrive. The leader's tool has no terminal, so this is the case it meets.
+plan_reads_input() {
+  [ "${1:-}" = "plan" ] || return 1
+  if [ -t 0 ]; then
+    return 1
+  fi
+  local arg
+  for arg in "$@"; do
+    if [ "$arg" = "-" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Runs mc. Your shell turns ~/mc-apps/... into /home/<you>/mc-apps/..., which doesn't exist in the container,
 # so arguments inside that folder are pointed at the same folder as the container sees it.
 run_mc() {
@@ -302,7 +320,11 @@ run_mc() {
     translated="$(container_path "$arg")"
     args+=("${translated:-$arg}")
   done
-  run_container -- mc "${args[@]}"
+  if plan_reads_input "$@"; then
+    run_container --interactive -- mc "${args[@]}"
+  else
+    run_container -- mc "${args[@]}"
+  fi
 }
 
 # mc's own lock can't see a run in another container, so a fixed container name lets Docker refuse a second one.

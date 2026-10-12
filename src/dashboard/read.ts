@@ -7,8 +7,8 @@
 // or logsDir() (it creates a folder).
 import { closeSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync, type Stats } from "node:fs";
 import { join, resolve } from "node:path";
-import { MissionStore } from "../state.js";
-import type { Attempt, CheckpointKind, CheckpointRecord, Feature, Mission, MissionEvent, PendingCheckpoint } from "../types.js";
+import { MissionStore, planOf } from "../state.js";
+import type { Attempt, CheckpointKind, CheckpointRecord, Feature, Mission, MissionEvent, PendingCheckpoint, PlanSource } from "../types.js";
 import {
   CHECKPOINT_LINES_MAX,
   CHECKPOINT_LOG_MAX,
@@ -352,6 +352,7 @@ function cleanMission(m: Mission): Mission | null {
   const checkpoints = checkpointKinds(raw.checkpoints);
   const checkpoint = cleanCheckpoint(raw.checkpoint);
   const checkpointLog = cleanCheckpointLog(raw.checkpointLog);
+  const plan = planFlag(m);
   return {
     id,
     kind: m.kind,
@@ -385,7 +386,18 @@ function cleanMission(m: Mission): Mission | null {
     ...(checkpoints.length > 0 && { checkpoints }),
     ...(checkpoint !== undefined && { checkpoint }),
     ...(checkpointLog.length > 0 && { checkpointLog }),
+    ...(plan !== undefined && { plan }),
   };
+}
+
+/**
+ * Whether the mission's plan came in with `mc plan queue` (docs/plans-spec.md, 7 and 9), by the engine's own test (a damaged
+ * `plan` counts as none). The page shows none of the plan: the card only words its plan stop differently, so only that there
+ * is one is kept, and every field of it is blank.
+ */
+function planFlag(m: Mission): PlanSource | undefined {
+  if (planOf(m) === undefined) return undefined;
+  return { spec: { appName: "", summary: "", features: [], assumptions: [], uiContract: "" }, sha256: "", at: "" };
 }
 
 // ───────────────────────────── Checkpoints (docs/checkpoints-spec.md, 4 and 10) ─────────────────────────────

@@ -500,6 +500,8 @@ export const CARD_TEXT = {
   checkpointTitle: (title: string, kind: CheckpointWords["kind"], featureTitle: string | null) =>
     `${quoted(title)}: please check ${kind === "feature" ? `${checkpointSubject(kind, featureTitle)} before it is added` : checkpointSubject(kind, featureTitle)}`,
   checkpointHappened: "The team stopped here because you asked to look at it first.",
+  // A plan the leader wrote stops by default, so "because you asked" would not be true (docs/plans-spec.md, 9).
+  checkpointHappenedLeaderPlan: "The team stopped here because the leader wrote this plan, and you look at it first.",
   checkpointIfNothing: "Nothing happens. This mission waits for you. Other work carries on.",
   checkpointWhatToDo: "Look at it as the report describes, then tell the leader to approve it or send it back.",
   decisionTitleConcerns: "Have someone check the app",
@@ -511,11 +513,15 @@ export const CARD_TEXT = {
 /**
  * The line under a checkpoint card's title. `branch` is the name the work is saved under (feature and final). `sentBack` is how
  * many times the owner has sent this check back: from the cap on, the card says what the next send-back does (checkpoints spec, 5.4).
+ * `leaderPlan` is true for the plan stop of a mission whose plan the leader wrote: the card holds twelve lines, so it points at the
+ * leader and at the owner's own command for all of it (docs/plans-spec.md, 9).
  */
-export function checkpointSummary(kind: CheckpointWords["kind"], branch: string | null, sentBack: number, cap: number): string {
+export function checkpointSummary(kind: CheckpointWords["kind"], branch: string | null, sentBack: number, cap: number, leaderPlan = false): string {
   const base =
     kind === "plan"
-      ? "Nothing is built yet. The report has the whole plan."
+      ? leaderPlan
+        ? "Nothing is built yet. Ask the leader to show you every check of the plan, word for word. The owner can also print all of it at the PC."
+        : "Nothing is built yet. The report has the whole plan."
       : branch === null
         ? "The report says how to open it."
         : `The work is saved under the name ${branch}. The report says how to open it.`;

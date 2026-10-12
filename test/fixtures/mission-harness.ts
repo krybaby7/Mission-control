@@ -9,6 +9,7 @@ import { Dispatcher, type DispatcherDeps } from "../../src/dispatcher.js";
 import { RoleExecutor } from "../../src/executor.js";
 import { Git } from "../../src/git.js";
 import type { Notifier, NotifyOptions } from "../../src/notify.js";
+import { parsePlan } from "../../src/plan.js";
 import { QuotaGovernor } from "../../src/quota.js";
 import { type MockBehavior, MockRunner } from "../../src/runners/mock.js";
 import { MissionStore } from "../../src/state.js";
@@ -25,6 +26,7 @@ import type {
   Mission,
   MissionKind,
   OnboardOutput,
+  PlanSource,
   ReviewOutput,
   Role,
   RoleOverride,
@@ -174,6 +176,13 @@ export function defaultAgents(features: SpecFeature[]): Required<AgentScript> {
   };
 }
 
+/** The plan source `mc plan queue` stores for `text` (a plan in the line format); throws if the plan cannot be used. */
+export function planSource(text: string): PlanSource {
+  const parsed = parsePlan(text);
+  if (!parsed.ok) throw new Error(`planSource: ${parsed.problems.join(" ")}`);
+  return { spec: parsed.spec, sha256: parsed.sha256, at: "2026-10-12T09:00:00.000Z" };
+}
+
 // ───────────── Harness ─────────────
 
 export interface Notification {
@@ -280,6 +289,8 @@ export class MissionHarness {
       roleOverrides?: RoleOverride[];
       /** Where the owner looks before the mission goes on; absent = a mission that runs straight through. */
       checkpoints?: CheckpointKind[];
+      /** A plan written outside the team (see `planSource`); the mission adopts it instead of asking the planner. */
+      plan?: PlanSource;
     } = {},
   ): Mission {
     return this.store.createMission({
@@ -291,6 +302,7 @@ export class MissionHarness {
       profile: init.profile ?? this.config.defaultProfile,
       roleOverrides: init.roleOverrides,
       checkpoints: init.checkpoints,
+      plan: init.plan,
       nowMs: this.clock.now(),
     });
   }

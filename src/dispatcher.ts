@@ -23,6 +23,7 @@ import { resolveFamily } from "./config.js";
 import { AuthUnavailableError, DeadlineError, type ExecResult, ProvidersFailingError, type RoleExecutor, StopRequestedError } from "./executor.js";
 import type { Git } from "./git.js";
 import type { Notifier } from "./notify.js";
+import { describePlan, reviewLines } from "./plan.js";
 import {
   buildPrompt,
   CAPS,
@@ -43,7 +44,7 @@ import {
 import type { QuotaGovernor } from "./quota.js";
 import { buildReportFacts, collectScreenshots, renderReport } from "./report.js";
 import { normalizeVerifyConfig, SCHEMAS } from "./schemas.js";
-import { type MissionStore, slugify } from "./state.js";
+import { type MissionStore, planOf, slugify } from "./state.js";
 import type {
   Access,
   Attempt,
@@ -70,6 +71,7 @@ import type {
   MissionStatus,
   OnboardOutput,
   PendingCheckpoint,
+  PlanReview,
   Profile,
   Provider,
   ReportProseOutput,
@@ -1173,6 +1175,14 @@ class MissionRun {
   // ───────────── Stage: spec ─────────────
 
   private async specStage(): Promise<void> {
+    const plan = planOf(this.m);
+    if (plan) {
+      // A plan written outside the team (mc plan queue): the team's planner is not asked. Safe to repeat after a stop,
+      // since adoptSpec replaces the features and none has started.
+      this.adoptSpec(structuredClone(plan.spec));
+      this.setStage("gate_a");
+      return;
+    }
     const { spec, problems, answered } = await this.writeSpec(SPEC_ATTEMPTS);
     if (!spec && !answered) throw new MissionFailedError(`The plan could not be made: ${problems.join(" ")}`, this.noAnswerDecision(problems.join(" ")));
     if (!spec) {
@@ -1246,15 +1256,36 @@ class MissionRun {
       access: "read-only",
       noTools: true,
     });
-    if (!answer.out) this.noteOnce("The plan review did not finish, so the plan was used as written.");
-    else if (answer.out.verdict === "revise" && answer.out.issues.length > 0) await this.reviseSpec(spec, answer.out.issues);
+    if (!answer.out) {
+      this.noteOnce("The plan review did not finish, so the plan was used as written.");
+      this.setPlanReview("unfinished", []);
+    } else if (answer.out.verdict === "revise" && answer.out.issues.length > 0) {
+      await this.reviseSpec(spec, answer.out.issues);
+    } else {
+      this.setPlanReview("approved", []);
+    }
     this.setStage(this.m.kind === "greenfield" ? "init" : "features");
   }
 
   private async reviseSpec(previous: SpecOutput, issues: string[]): Promise<void> {
     const { spec } = await this.writeSpec(1, { previous, issues });
-    if (spec) this.adoptSpec(spec);
-    else this.noteOnce(`The plan reviewer asked for changes that could not be applied: ${issues.join(" ")}`);
+    if (spec) {
+      this.setPlanReview("revised", issues); // saved together with the new plan
+      this.adoptSpec(spec);
+    } else {
+      this.setPlanReview("not_applied", issues);
+      this.noteOnce(`The plan reviewer asked for changes that could not be applied: ${issues.join(" ")}`);
+    }
+  }
+
+  /**
+   * A plan from outside (mc plan queue) keeps what its reviewer did with it, for the owner's look. Not saved here: the
+   * caller's next save does it. A revision made by an earlier, cut-off pass of gate A stays on record.
+   */
+  private setPlanReview(outcome: PlanReview["outcome"], issues: string[]): void {
+    const plan = planOf(this.m);
+    if (!plan || (outcome !== "revised" && plan.review?.outcome === "revised")) return;
+    this.m.plan = { ...plan, review: { outcome, issues } };
   }
 
   // ───────────── Stage: init (greenfield) ─────────────
@@ -2261,6 +2292,20 @@ class MissionRun {
     const title = shown(m.title);
     switch (kind) {
       case "plan": {
+        const plan = planOf(m);
+        if (plan) {
+          // The leader wrote this plan: the owner gets every fact of it, the reviewer's answer and who changed it.
+          return {
+            headline: `Check the plan for “${title}”`,
+            lines: [
+              ...(failed ? ["Your change could not be made, so this is the earlier plan."] : []),
+              "This plan was written by the leader, not by the team's planner.",
+              ...reviewLines(plan.review, sendBacks(m, "plan")),
+              ...describePlan(m.spec ?? plan.spec, { request: m.request, style: "look", newApp: m.kind === "greenfield" && m.repoPath === "" }),
+              ...warning,
+            ],
+          };
+        }
         const features = m.features;
         const choices = (m.spec?.assumptions ?? []).map((a) => shown(a)).join(" ");
         return {

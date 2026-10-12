@@ -5,8 +5,9 @@ import { type Dirent, readFileSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
-import { endState, isCheckpointShape, isWaitingForCheck, localClock, MAX_SEND_BACKS, sendBacks, shown, subjectOf, waitingWhat } from "./checkpoint.js";
+import { endState, isCheckpointShape, isWaitingForCheck, localClock, MAX_SEND_BACKS, planReviewShort, sendBacks, shown, subjectOf, waitingWhat, whyStopped } from "./checkpoint.js";
 import { inContainer } from "./config.js";
+import { planOf } from "./state.js";
 import type { Attempt, Feature, Finding, Mission, MissionStatus, PendingCheckpoint, Provider, ReportProseOutput, UsageRecord } from "./types.js";
 import { stripControlChars } from "./util/terminal.js";
 
@@ -269,7 +270,12 @@ export function renderReport(m: Mission, opts: RenderReportOptions): string {
 function headerSection(m: Mission, generatedAt: string): string {
   const { done, total } = countFeatures(m.features);
   const progress = total === 0 ? "no features planned yet" : `${done} of ${total} features done`;
-  return `# ${oneLine(m.title)}\n\n**${statusLabel(m.status, m)}** · ${progress} · report written ${formatLocalTime(generatedAt)}`;
+  const header = `# ${oneLine(m.title)}\n\n**${statusLabel(m.status, m)}** · ${progress} · report written ${formatLocalTime(generatedAt)}`;
+  const plan = planOf(m);
+  if (!plan) return header;
+  // A plan from outside: who wrote it, which one it is (the code `mc plan show` prints), and what the team's plan reviewer did with it.
+  const answer = plan.review ? `; ${planReviewShort(plan.review)}` : ".";
+  return `${header}\n\nPlan: written by the leader (plan code ${plan.sha256.slice(0, 8)})${answer}`;
 }
 
 /**
@@ -306,7 +312,7 @@ function waitingSection(m: Mission, cp: PendingCheckpoint, container: boolean, r
   const sent = sendBacks(m, cp.scope);
   // The two answers come before the look: a long plan must not push them out of the first lines `mc report` shows.
   const parts = [
-    `The team stopped here on purpose, because you asked to look at ${waitingWhat(m, cp)} first. Nothing else is waiting on this mission; other work carries on.`,
+    `The team stopped here on purpose, because ${whyStopped(m, cp, waitingWhat(m, cp))}. Nothing else is waiting on this mission; other work carries on.`,
     [
       "What your answer does:",
       `- **Approve** lets the team carry on from here: ${code(`mc approve ${m.id}`)}. You can add ${code('--note "..."')}; it is kept in this report.`,

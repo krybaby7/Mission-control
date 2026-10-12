@@ -1,0 +1,36 @@
+mc-plan 1
+name: Reading list
+request: I want a small web app to keep my reading list. I can add a book with its title and author, mark a book as read, and see how many books I have read.
+app-name: Reading list
+summary: A small web app with one page. A person adds books with a title and an author, marks them as read, and sees how many they have read.
+assumption: The list is kept for the person on the same device, so it is still there after a reload.
+assumption: A book with no title is not added.
+contract: The page title is Reading list.
+contract: The form has a title field labelled Title, an author field labelled Author and a button labelled Add book.
+contract: Each book shows its title and author, and a button labelled Mark as read.
+contract: The text Books read: followed by a number shows how many books are marked as read.
+
+feature: add-book
+title: Add a book to the list
+story: As a reader I can add a book with its title and author and see it in my list.
+check: The page shows an empty list and the text No books yet when there are no books.
+check: Adding a book with the title Dune and the author Frank Herbert shows Dune and Frank Herbert in the list.
+check: After a book is added, the Title and Author fields are empty again.
+check: Adding a book with an empty title adds nothing and shows the text A title is needed.
+check: After the page is reloaded, the added book is still in the list.
+
+feature: mark-read
+title: Mark a book as read
+story: As a reader I can mark a book as read, so I can tell it apart from the books I have not read.
+needs: add-book
+check: Pressing Mark as read on a book shows the text Read next to that book.
+check: A book that is marked as read is still marked as read after the page is reloaded.
+check: Marking one book as read does not change the other books.
+
+feature: read-count
+title: Count of books read
+story: As a reader I can see how many of my books I have read.
+needs: mark-read
+check: With no books the page shows Books read: 0.
+check: With three books of which one is marked as read, the page shows Books read: 1.
+check: After a second book is marked as read, the page shows Books read: 2 without a reload.

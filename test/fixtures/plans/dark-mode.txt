@@ -1,0 +1,19 @@
+mc-plan 1
+name: Dark mode
+request: On the settings page of the habit tracker, add a Dark mode switch. It should remember my choice.
+folder: habit-tracker
+base: main
+app-name: Habit tracker
+summary: Adds a Dark mode switch to the settings page. The page turns dark when it is on, and the choice is remembered.
+assumption: The switch is off until the person turns it on, and the choice is kept for that person on the same device.
+contract: The switch is on the settings page and its label is Dark mode.
+contract: The switch has the test id dark-mode-switch.
+
+feature: dark-mode
+title: Dark mode switch on the settings page
+story: As a user I can switch the app to dark colours on the settings page, and it stays that way when I come back.
+check: The settings page shows a switch labelled Dark mode, and it is off by default.
+check: Turning the switch on makes the page background dark.
+check: Turning the switch off makes the page background light again.
+check: After the switch is turned on and the page is reloaded, the switch is still on and the page is dark.
+check: After the switch is turned off and the page is reloaded, the switch is off and the page is light.

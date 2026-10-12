@@ -174,6 +174,8 @@ function checkpointCard(x: MissionFacts, names: LeaderNames): NeedsYouCard | nul
   // A feature check whose feature is not in the file has no sentence that names it, so it gets no answers (the page shows no buttons).
   const what: LeaderCheck | null = cp.kind === "plan" ? { kind: "plan" } : cp.kind === "final" ? { kind: "final" } : feature === undefined ? null : { kind: "feature", feature: { id: feature.id, title: feature.title } };
   const sentBack = (mission.checkpointLog ?? []).filter((r) => r.scope === cp.scope && r.decision === "send_back").length;
+  // A plan stop of a mission whose plan came in with `mc plan queue`: it stops by default, not because the owner asked to.
+  const leaderPlan = cp.kind === "plan" && mission.plan !== undefined;
   return {
     id: `checkpoint:${x.view.id}:0`,
     kind: "checkpoint",
@@ -183,8 +185,8 @@ function checkpointCard(x: MissionFacts, names: LeaderNames): NeedsYouCard | nul
     fromEarlier: false,
     featureId: cp.kind === "feature" && feature !== undefined ? feature.id : null,
     title: CARD_TEXT.checkpointTitle(x.view.title, cp.kind, facts.featureTitle),
-    happened: engineSays(CARD_TEXT.checkpointHappened),
-    summary: checkpointSummary(cp.kind, cp.look.branch ?? null, sentBack, CHECKPOINT_SEND_BACK_CAP),
+    happened: engineSays(leaderPlan ? CARD_TEXT.checkpointHappenedLeaderPlan : CARD_TEXT.checkpointHappened),
+    summary: checkpointSummary(cp.kind, cp.look.branch ?? null, sentBack, CHECKPOINT_SEND_BACK_CAP, leaderPlan),
     ifNothing: CARD_TEXT.checkpointIfNothing,
     whatToDo: engineSays(CARD_TEXT.checkpointWhatToDo),
     tellLeader: LEADER.checkpoint(names, ref),

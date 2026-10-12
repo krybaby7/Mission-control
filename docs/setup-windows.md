@@ -303,6 +303,20 @@ Some work is only right when you look at it yourself: how a page looks, whether 
 
 6. On the dashboard, a mission that waits has an amber card, **“<name>”: please check the plan** (or the feature, or the finished app), with an eye icon, the lines the team wrote about what to look at, and two buttons, **Tell the leader: approve** and **Tell the leader: send it back**. They only give you a sentence to paste into the chat with the leader. The dashboard never approves anything. The leader asks you one more question before it runs `approve` or `send-back`, and Claude Code asks you on top of that.
 
+### Plans the leader writes
+
+For a small, clear job the leader can write the plan itself instead of leaving it to the team's planner (see [Optional: start the leader](#optional-start-the-leader)). It shows you the plan in the chat, with every check word for word and a short plan code, and asks one question, "Queue this plan and start the team on it?", before anything is queued. The team still writes the tests first, builds, has a different AI review each feature, and checks the finished app. This part has not been tried on a real PC yet.
+
+- A mission queued this way stops at the plan for your look before anything is built, even though you did not ask for it with `--checkpoint`. You answer it as in the steps above. The leader skips this stop only if you tell it you do not want to look at its plans, it asks one more question ("Skip your look at this plan? ..."), and you say a clear yes.
+- The leader reads the whole plan to you again at the stop. You can also read it yourself, without the leader. In an Ubuntu window, this prints all of it, with the plan code, every check, the choices made for you, and whether the team's plan reviewer or you changed it:
+
+  ```
+  mc plan show <mission>
+  ```
+
+  `mc report <mission>` shows only the first 40 lines, which can cut a long plan. In Windows, `mc copy-reports` copies the reports to `~/mc-reports` (it prints the folder's Windows address), and the mission's `report.md` there holds the whole text.
+- The plan code is the same in the leader's message, in `mc plan show` and in the report. It always names the plan as the leader wrote it: if it differs from the one the leader quoted when it asked you, what was queued is not the plan you were shown. `mc plan show` also says whether the team's plan reviewer or your note changed the plan since.
+
 What this protects, and what it doesn't. A check is a place where you look, not a lock. The AI team runs as the same Ubuntu user as Mission Control, so a determined one could write an approval itself. That could only skip your look: every test and review still runs, and nothing that fails is added. Mission Control keeps a record of each answer, distrusts a waiting check that shows an answer with no record, and sends a notice to your iPad each time an answer is recorded, so one you didn't give shows up there.
 
 ## Step 10: In the morning
@@ -373,7 +387,7 @@ If the page doesn't open on the iPad, the leader (next section) can tell you how
 
 ## Optional: start the leader
 
-The leader is a Claude Code session that you talk to in plain words: "How is it going?", "Add a dark mode to the habit tracker", "Please stop the current run." It acts only through the same `mc` commands you use (status, logs, report, stop, new, feature, run, approve and send-back), and Claude Code asks you before the leader stops the run, starts the team working, queues a new app or a change, or answers a check you asked for (answer Yes once; never "Yes, and don't ask again", which would switch that question off for good). Before it answers a check, the leader also asks you in the chat; see [Checking things yourself](#checking-things-yourself-optional). It can't reopen a feature that got stuck or change a plan; for those it queues a follow-up request that starts on the next run. This part has not been tried on a real PC yet.
+The leader is a Claude Code session that you talk to in plain words: "How is it going?", "Add a dark mode to the habit tracker", "Please stop the current run." It acts only through the same `mc` commands you use (status, logs, report, stop, new, feature, plan, run, approve and send-back), and Claude Code asks you before the leader stops the run, starts the team working, queues a new app or a change, queues a plan it wrote, or answers a check (answer Yes once; never "Yes, and don't ask again": it saves a rule that nobody has reviewed, and for a plan the rule would be the text of that one plan, which is of no use). Before it answers a check, the leader also asks you in the chat; see [Checking things yourself](#checking-things-yourself-optional). It can't reopen a feature that got stuck or change a plan; for those it queues a follow-up request that starts on the next run. This part has not been tried on a real PC yet.
 
 1. Claude Code must be installed in Ubuntu itself, and logged in there. The copy inside Mission Control's container can't be used. Follow Anthropic's installation instructions for Claude Code on Linux. The leader's chat uses the same Claude plan as the team's runs.
 
@@ -466,7 +480,7 @@ Your logins, missions and apps are kept. If the project is private, `git pull` a
 | The Codex code is refused | Codes expire after 15 minutes: run `mc login-codex` again for a fresh one. If it's still refused, look for a device code option in ChatGPT > Settings > Security and turn it on. |
 | "You've hit your limit", or `mc status` shows a mission waiting | Nothing to do. Mission Control notices limits, switches to the other AI when allowed, or waits until the limit resets and carries on. If it happens every night, queue less work. |
 | "Waiting for the AIs to respond", or "paused, the AI isn't working" | The internet connection or an AI service had a problem, or an AI command line keeps failing. Nothing was lost and nothing counted against the work. Check that the PC is online, then run `mc doctor --live`. The next `mc run` carries on where it paused. |
-| `mc status` shows a mission `needs your check`, or the end of a run says `is waiting for your check` | You asked the team to stop there (`--checkpoint`). Look at it with `mc report <mission>`, then `mc approve <mission>` or `mc send-back <mission> --note "what to change"`. See [Checking things yourself](#checking-things-yourself-optional). |
+| `mc status` shows a mission `needs your check`, or the end of a run says `is waiting for your check` | You asked the team to stop there (`--checkpoint`), or the leader wrote the plan, which stops at the plan by default. Look at it with `mc report <mission>` (for a plan the leader wrote, `mc plan show <mission>` prints all of it), then `mc approve <mission>` or `mc send-back <mission> --note "what to change"`. See [Checking things yourself](#checking-things-yourself-optional). |
 | `A run is going right now, so the answer can't be recorded safely` | `mc approve` and `mc send-back` only work while no run is going. Wait until the run ends (`mc status`), then try again. |
 | `is not waiting for your check, so there is nothing to answer`, or `You already answered this check` | The check was answered already, or the mission isn't stopped for one. `mc status` shows what it is doing. After an answer, continue it with `mc run --mission <mission>`. |
 | You want to stop a run | In another Ubuntu window: `mc stop`. It stops after the current step and keeps its progress; the next `mc run` continues. If it hasn't stopped after a few minutes: `docker stop mission-control-run`. |

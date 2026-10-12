@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { buildHome, featureWith, FIN, fixtureSnapshot, HOUR, iso, MID, MINUTE, missionAt, snap } from "../../test/dashboard-kit.js";
 import { copyHome, hashTree, makeEvent } from "../../test/dashboard-helpers.js";
 import { fakeFacts } from "../../test/dashboard-facts-helpers.js";
-import type { CheckpointKind, CheckpointRecord, Mission, MissionEvent, PendingCheckpoint } from "../types.js";
+import type { CheckpointKind, CheckpointRecord, Mission, MissionEvent, PendingCheckpoint, PlanSource } from "../types.js";
 import { CHECKPOINT_LINES_MAX, CHECKPOINT_SEND_BACK_CAP } from "./constants.js";
 import { clearReadCache, readDetails, readHome } from "./read.js";
 import { buildTimeline } from "./timeline.js";
@@ -29,6 +29,13 @@ function pending(over: Partial<PendingCheckpoint> = {}): PendingCheckpoint {
     ...over,
   };
 }
+
+/** The plan of a mission queued with `mc plan queue`, as the engine saves it (docs/plans-spec.md, 7). */
+const PLAN: PlanSource = {
+  spec: { appName: "Habit tracker", summary: "SECRET-SUMMARY", features: [], assumptions: ["SECRET-CHOICE"], uiContract: "- SECRET-CONTRACT" },
+  sha256: "a4adaca5".repeat(8),
+  at: iso(MID - HOUR),
+};
 
 /** A stopped mission with a checkpoint, saved `age` ago. */
 function parked(over: Partial<Mission> = {}, o: { id?: string; age?: number } = {}): Mission {
@@ -100,6 +107,16 @@ describe("T-CHECK-2: reading the checkpoint fields (read.ts)", () => {
     const entry = read([{ mission: missionAt(MID, ID, { title: "Habit tracker" }) }])?.mission;
     expect(entry).toBeDefined();
     for (const key of ["checkpoints", "checkpoint", "checkpointLog"]) expect(key in (entry ?? {}), key).toBe(false);
+  });
+
+  it("keeps only that a mission has a leader plan: every field of it is blank, and a value that is not a plan is no plan", () => {
+    const entry = read([{ mission: parked({ plan: PLAN }) }])?.mission;
+    expect(entry?.plan).toEqual({ spec: { appName: "", summary: "", features: [], assumptions: [], uiContract: "" }, sha256: "", at: "" });
+    expect(JSON.stringify(entry)).not.toMatch(/SECRET|a4adaca5/);
+    expect("plan" in (read([{ mission: parked() }])?.mission ?? {})).toBe(false);
+    for (const odd of ["yes", 7, [], {}, { spec: {}, sha256: 7 }, { sha256: "x" }]) {
+      expect(read([{ mission: parked({ plan: odd as never }) }])?.mission?.plan, JSON.stringify(odd)).toBeUndefined();
+    }
   });
 
   it("drops what is not a checkpoint: an unknown kind or state, a missing id, a value that is not an object, a list that is not a list", () => {
@@ -212,6 +229,26 @@ describe("T-CHECK-4: the card (cards.ts)", () => {
     ]);
   });
 
+  it("plan of a mission the leader wrote: the two texts change, the rest of the card does not", () => {
+    const [c] = checkCard(snapOf([{ mission: parked({ plan: PLAN }) }]));
+    expect(c?.happened).toEqual({ text: "The team stopped here because the leader wrote this plan, and you look at it first.", author: "engine" });
+    expect(c?.summary).toBe("Nothing is built yet. Ask the leader to show you every check of the plan, word for word. The owner can also print all of it at the PC.");
+    const [old] = checkCard(snapOf([{ mission: parked() }]));
+    expect({ ...c, happened: old?.happened, summary: old?.summary }).toEqual(old);
+    // read on a phone: no command, no quote mark and no dash in the engine's two sentences
+    for (const text of [c?.happened.text, c?.summary]) expect(text, String(text)).not.toMatch(/["`\u2013\u2014]|\bmc\b/);
+  });
+
+  it("a leader plan changes only the plan stop: a feature or final check of the same mission keeps the old texts", () => {
+    const feature = parked({ plan: PLAN, stage: "features", checkpoint: pending({ id: "feature:add-habit#1", scope: "feature:add-habit", kind: "feature", featureId: "add-habit", look: { headline: "h", lines: [], branch: "mc/x--add-habit" } }) });
+    const final = parked({ plan: PLAN, stage: "finalize", checkpoint: pending({ id: "final#1", scope: "final", kind: "final" }) });
+    for (const mission of [feature, final]) {
+      const [c] = checkCard(snapOf([{ mission }]));
+      expect(c?.happened.text).toBe("The team stopped here because you asked to look at it first.");
+      expect(c?.summary).not.toContain("leader");
+    }
+  });
+
   it("feature: names the feature in the title and in both answers, and shows where the work is saved", () => {
     const m = parked({
       stage: "features",
@@ -284,6 +321,9 @@ describe("T-CHECK-4: the card (cards.ts)", () => {
     // earlier answers about another scope do not count
     const other = [{ id: "feature:x#1", scope: "feature:x", kind: "feature", round: 1, decision: "send_back", at: iso(MID) }, ...sent(1)] as CheckpointRecord[];
     expect(checkCard(snapOf([{ mission: parked({ checkpointLog: other }) }]))[0]?.summary).not.toContain("You have sent this back");
+    // the leader's plan keeps the warning too, after its own first sentences
+    const leaderSent = checkCard(snapOf([{ mission: parked({ plan: PLAN, checkpointLog: sent(2), checkpoint: pending({ round: 3 }) }) }]))[0]?.summary;
+    expect(leaderSent).toBe(`${checkpointSummary("plan", null, 0, 2, true)} You have sent this back 2 times. If you send it back again, the work stops here: nothing will be built. You can still approve.`);
     expect(checkpointSummary("feature", null, 2, 2)).toContain("this feature is set aside and the rest carries on");
     expect(checkpointSummary("final", null, 2, 2)).toContain("the finished result is kept as it is");
   });
