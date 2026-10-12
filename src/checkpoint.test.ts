@@ -358,10 +358,11 @@ describe("the report", () => {
   });
 
   it("does not send the owner to a main branch that has not moved yet", () => {
-    const final = { ...pending("final"), look: { headline: "Check", lines: ["a"], branch: "mc/2026-10-12-shout" } };
-    const report = render(parkedMission(final, { stage: "finalize", features: [shout("done")] }));
+    const final = { ...pending("final"), look: { headline: "Check", lines: ["a"], branch: "mc/some-branch" } };
+    const parked = parkedMission(final, { stage: "finalize", features: [shout("done")] });
+    const report = render(parked);
     const tryIt = report.slice(report.indexOf("## How to try it"));
-    expect(tryIt).toContain("`git checkout --detach mc/2026-10-12-shout`");
+    expect(tryIt).toContain(`\`git checkout --detach ${parked.integrationBranch}\``); // the id carries the local date, so don't spell it out
     // Once finished, main follows the work and no checkout is needed (as before).
     const finished = render(parkedMission(undefined, { stage: "complete", status: "done", features: [shout("done")] }));
     expect(finished.slice(finished.indexOf("## How to try it"))).not.toContain("git checkout --detach");

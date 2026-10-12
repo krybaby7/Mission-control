@@ -152,6 +152,17 @@ describe("mc approve", () => {
     expect(store().activeRun()).toBeUndefined(); // the lock was given back
   });
 
+  it("rewrites the report, so `mc report` shows the recorded answer and no longer says the check is waiting", async () => {
+    const m = parked();
+    writeFileSync(store().reportPath(m.id), renderReport(store().load(m.id), { usage: [], screenshots: [], generatedAt: new Date().toISOString(), inContainer: false }));
+    expect(readFileSync(store().reportPath(m.id), "utf8")).toContain("## Waiting for your check");
+    expect(await mc("approve", m.id, "--note", "plan is fine")).toBe(0);
+    const report = readFileSync(store().reportPath(m.id), "utf8");
+    expect(report).not.toContain("## Waiting for your check");
+    expect(report).toContain("Your answer is recorded");
+    expect(report).not.toContain("plan is fine"); // the note stays out of the report's text, as before
+  });
+
   it("names a feature and the finished app", async () => {
     const a = parked("Shout", pending("feature", 1, "add-shout"), { features: [{ id: "add-shout", title: "Add shout", story: "", acceptance: [], kind: "standard", deps: [], status: "reviewing", rung: 0, attempts: [], frozenTests: [], reviewRounds: 0, openFindings: [] }] });
     expect(await mc("approve", a.id)).toBe(0);

@@ -17,6 +17,7 @@ import { type DoctorCheck, runDoctor, unkeptFolderProblems } from "./doctor.js";
 import { Git } from "./git.js";
 import { createNotifier, type Notifier } from "./notify.js";
 import { packageRoot } from "./prompts.js";
+import { renderReport } from "./report.js";
 import { findMission, missionOutcome, runNight } from "./run.js";
 import { MissionStore } from "./state.js";
 import type { CheckpointKind, Config, Mission, MissionEvent, MissionStatus, RoleOverride } from "./types.js";
@@ -684,6 +685,7 @@ async function answerCommand(io: CliIO, decision: AnswerInput["decision"], id: s
   const { mission, answer } = result;
   const cp = mission.checkpoint;
   if (!cp) return 0;
+  refreshReport(store, mission);
   const notice = answerNotice(mission, cp, answer);
   await notifierFor().notify(notice.title, notice.message);
   if (decision === "approve") {
@@ -694,6 +696,20 @@ async function answerCommand(io: CliIO, decision: AnswerInput["decision"], id: s
     say(io.stdout, `Recorded: ${didWhat(mission, cp, decision)}.`, `${afterSendBack(cp.kind)} (change ${result.change} of ${MAX_SEND_BACKS}).`);
   }
   return 0;
+}
+
+/**
+ * Rewrites report.md so `mc report` shows that the answer is recorded, not the "waiting" block it had at the stop. The
+ * stop's report was written from the template (no scout prose), so nothing is lost. Best effort: the next run writes it again.
+ */
+function refreshReport(store: MissionStore, m: Mission): void {
+  try {
+    const dir = join(store.missionDir(m.id), "screenshots");
+    const screenshots = existsSync(dir) ? readdirSync(dir).filter((n) => /\.(png|jpe?g|gif|webp)$/i.test(n)).sort().map((n) => join(dir, n)) : [];
+    writeFileSync(store.reportPath(m.id), renderReport(m, { prose: null, usage: store.readUsage(), screenshots, generatedAt: new Date().toISOString() }));
+  } catch {
+    // the answer is recorded either way
+  }
 }
 
 function afterSendBack(kind: CheckpointKind): string {

@@ -39,9 +39,9 @@ The CEO can ask, when work is queued, for the team to stop at one of three place
 - The second guard is the prompt: `approve` and `send-back` are in the `ask` list, never in `allow`, so Claude Code shows the command to the owner (on the PC, or in the app with Remote Control) before it runs.
 - A run that is going holds the lock the commands need, so an answer cannot be recorded then. The leader tells the CEO to wait until the run ends. A mission that waits for a check does not hold the run up: the run moves on to other work and ends when nothing else is left.
 - A third send-back of the same check ends the work there (a plan: nothing will be built; a feature: it is set aside and the rest carries on; the finished app: the finished result is kept as it is). The leader says so before it asks, when `round` is 3.
-- The words after "What to change:" in the dashboard's sentence are the CEO's own and become the `--note`. No AI ever reads the note: the team gets it as one change request.
+- The words after "What to change:" in the dashboard's sentence are the CEO's own and become the `--note`. The note goes to the team only as the one change request the send-back makes (the planner's revision, the engineer's fix, or the new feature). An approve note is only kept in the report; no AI reads it.
 
-What this does not give: a secret that the AI team cannot read. The agents run as the same user as the engine, so a determined one could write an answer itself (docs/checkpoints-spec.md, section 8.3). A forged answer cannot make anything pass that the checks refuse; it only skips the owner's look, and every applied answer sends a notice to the owner's phone.
+What this does not give: a secret that the AI team cannot read. The agents run as the same user as the engine, so a determined one could write an answer itself (docs/checkpoints-spec.md, section 8.3). A forged answer cannot make anything pass that the checks refuse; it only skips the owner's look, and every answer the command records sends a notice to the owner's phone (an answer written by editing the files by hand is distrusted when the mission reaches its gate, but sends no notice of its own).
 
 ## Starting a run without blocking the chat
 

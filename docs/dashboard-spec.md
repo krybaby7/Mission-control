@@ -869,7 +869,7 @@ Class: **M** = milestone (always kept), **D** = detail (kept only as the newest 
 | 28 | `checkpoint.answered` (`src/checkpoint.ts`) | `kind`, `feature`, `decision` | M | good (`approve`) / info (`send_back`) | `approve`: You approved the plan. “T” carries on when the next run starts. (`feature`: You approved “F”. …; `final`: You approved the finished app. …) · `send_back`: You sent the plan back. It is revised and shown to you again. (`feature`: You sent “F” back. It is changed and shown to you again.; `final`: You sent the finished app back. Your change is added and shown to you again.) |
 | 29 | `checkpoint.reworked` | `kind`, `feature`, `ok` | M | info / warn | `plan`: The plan was revised after your note. · `feature`: “F” was changed after your note. · `final`: A new feature was added for your change. · `ok` is `false`: Your change could not be made. The earlier version is shown again. (warn) |
 | 30 | `checkpoint.passed` | — | H | — | The `mission.resume` that follows reads as the continuation. |
-| 31 | `checkpoint.limit` | `feature` | M | bad | You sent this back twice before, so “T” stops here. The report says what to do. |
+| 31 | `checkpoint.limit` | `feature` | M | bad | You sent this back twice before, so “T” stops here. The report says what to do. (For a feature check: You sent “F” back twice before, so it is set aside. The rest carries on. The report says what to do.) |
 | 32 | `checkpoint.rejected` | `reason` | M | warn (`no_record`: bad) | An answer to the check of “T” was ignored because it did not match. The check is still waiting. |
 | — | any other `type` | — | H | — | Unknown events are hidden, never shown raw (`describeEvent`'s fallback prints their data; the dashboard does not). |
 

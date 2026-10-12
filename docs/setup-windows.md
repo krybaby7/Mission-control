@@ -303,7 +303,7 @@ Some work is only right when you look at it yourself: how a page looks, whether 
 
 6. On the dashboard, a mission that waits has an amber card, **“<name>”: please check the plan** (or the feature, or the finished app), with an eye icon, the lines the team wrote about what to look at, and two buttons, **Tell the leader: approve** and **Tell the leader: send it back**. They only give you a sentence to paste into the chat with the leader. The dashboard never approves anything. The leader asks you one more question before it runs `approve` or `send-back`, and Claude Code asks you on top of that.
 
-What this protects, and what it doesn't. A check is a place where you look, not a lock. The AI team runs as the same Ubuntu user as Mission Control, so a determined one could write an approval itself. That could only skip your look: every test and review still runs, and nothing that fails is added. Mission Control has a record of each answer, ignores an answer with no record, and sends a notice to your iPad each time an answer is recorded, so one you didn't give shows up there.
+What this protects, and what it doesn't. A check is a place where you look, not a lock. The AI team runs as the same Ubuntu user as Mission Control, so a determined one could write an approval itself. That could only skip your look: every test and review still runs, and nothing that fails is added. Mission Control keeps a record of each answer, distrusts a waiting check that shows an answer with no record, and sends a notice to your iPad each time an answer is recorded, so one you didn't give shows up there.
 
 ## Step 10: In the morning
 

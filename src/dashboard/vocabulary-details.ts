@@ -522,6 +522,7 @@ export const TL = {
     if (!ok) return { text: "Your change could not be made. The earlier version is shown again.", tone: "warn" };
     return { text: kind === "plan" ? "The plan was revised after your note." : kind === "final" ? "A new feature was added for your change." : `${f === null ? "A feature" : name(f)} was changed after your note.`, tone: "info" };
   },
-  checkpointLimit: (t: string) => `You sent this back twice before, so ${name(t)} stops here. The report says what to do.`,
+  checkpointLimit: (t: string, kind?: string, f?: string | null) =>
+    kind === "feature" && f != null ? `You sent ${name(f)} back twice before, so it is set aside. The rest carries on. The report says what to do.` : `You sent this back twice before, so ${name(t)} stops here. The report says what to do.`,
   checkpointRejected: (t: string) => `An answer to the check of ${name(t)} was ignored because it did not match. The check is still waiting.`,
 } as const;

@@ -346,7 +346,7 @@ describe("a feature or the finished app sent back once too often", () => {
     expect(s.needsYou[0]?.happened).toEqual({ text: "You asked for changes twice and it still was not right, so it was set aside.", author: "engine" });
     expect(reasonCodes(s)).not.toContain("checkpoint_waiting");
     expect(s.missions[0]).toMatchObject({ state: "partly_done", pausedWhy: null });
-    expect(timelineTexts(s)).toContain("You sent this back twice before, so “Fixture app” stops here. The report says what to do.");
+    expect(timelineTexts(s)).toContain("You sent “Feature greet” back twice before, so it is set aside. The rest carries on. The report says what to do.");
   });
 
   it("shows the finished app that was kept as it is as a partly done mission with its one question", async () => {

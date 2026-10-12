@@ -2257,7 +2257,7 @@ class MissionRun {
     const key = f?.id ?? `_${kind}`;
     const failed = this.scratch.unit(key).reworkFailed === true;
     if (failed) this.scratch.updateUnit(key, { reworkFailed: undefined });
-    const warning = sendBacks(m, scope) >= MAX_SEND_BACKS ? [`You have sent this back ${MAX_SEND_BACKS} times. If you send it back again, the work stops here: ${endState(kind)}. You can still approve.`] : [];
+    const warning = sendBacks(m, scope) >= MAX_SEND_BACKS ? [`You have sent this back ${sendBacks(m, scope)} times. If you send it back again, the work stops here: ${endState(kind)}. You can still approve.`] : [];
     const title = shown(m.title);
     switch (kind) {
       case "plan": {

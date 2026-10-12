@@ -159,7 +159,7 @@ function translate(type: string, data: Record<string, unknown>, at: number, ctx:
     }
     case "checkpoint.limit": {
       const feature = featureOf(data, ctx);
-      return row(at, "M", "bad", TL.checkpointLimit(t), feature === null ? null : feature.id);
+      return row(at, "M", "bad", TL.checkpointLimit(t, text(data.kind) ?? undefined, feature === null ? null : feature.title), feature === null ? null : feature.id);
     }
     case "checkpoint.rejected":
       return row(at, "M", data.reason === "no_record" ? "bad" : "warn", TL.checkpointRejected(t));
