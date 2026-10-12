@@ -14,7 +14,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { isAbsolute, join } from "node:path";
-import type { Mission, MissionEvent, MissionKind, RoleOverride, UsageRecord } from "./types.js";
+import type { CheckpointKind, Mission, MissionEvent, MissionKind, RoleOverride, UsageRecord } from "./types.js";
 import { appendJsonl, ensureDir, readJson, readJsonl, sha256, writeJsonAtomic } from "./util/fs.js";
 
 const DEFAULT_SLUG_MAX = 40;
@@ -43,6 +43,8 @@ export interface CreateMissionInit {
   baseBranch: string;
   profile: string;
   roleOverrides?: RoleOverride[];
+  /** Where the owner wants to look before the mission goes on; absent or empty = nowhere. */
+  checkpoints?: CheckpointKind[];
   nowMs: number;
 }
 
@@ -112,6 +114,7 @@ export class MissionStore {
       gateCRounds: 0,
       agentRuns: 0,
       notes: [],
+      ...(init.checkpoints?.length ? { checkpoints: [...init.checkpoints] } : {}),
     };
     try {
       this.save(mission, init.nowMs);

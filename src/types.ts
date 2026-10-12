@@ -413,6 +413,66 @@ export interface Mission {
    * outside Mission Control). Absent on missions saved before it existed, and on missions that never failed.
    */
   failure?: MissionFailure;
+  /** Where the owner asked to look before the mission goes on (chosen when queued). Absent = none: the mission runs straight through. */
+  checkpoints?: CheckpointKind[];
+  /** Present only while the mission is parked for the owner's look (`status` is "stopped") or answered and not yet continued. */
+  checkpoint?: PendingCheckpoint;
+  /** Finished checkpoints, newest last, at most 50. A scope is passed when this holds an "approve" entry for it. */
+  checkpointLog?: CheckpointRecord[];
+}
+
+/** Where the owner looks: before building (plan), before one feature is added (feature), before finishing (final). */
+export type CheckpointKind = "plan" | "feature" | "final";
+
+/** What the owner is shown. Plain text; lines that come from AI output are cleaned by whoever displays them. */
+export interface CheckpointLook {
+  headline: string;
+  lines: string[];
+  /** feature/final: the branch to open. */
+  branch?: string;
+  /** feature: the checked commit (short sha). */
+  commit?: string;
+  /** feature/final: changed files, at most 10. */
+  files?: string[];
+  /** final: paths under the mission folder, for example "screenshots/home.png". */
+  screenshots?: string[];
+}
+
+export interface CheckpointAnswer {
+  decision: "approve" | "send_back";
+  /** Owner text, at most 2000 characters, control characters removed. Required for send_back. No AI reads it. */
+  note?: string;
+  at: string; // ISO
+}
+
+export interface PendingCheckpoint {
+  /** "<scope>#<round>", for example "feature:add-shout#2". */
+  id: string;
+  /** "plan" | "feature:<feature id>" | "final". */
+  scope: string;
+  kind: CheckpointKind;
+  featureId?: string;
+  /** 1-based: how many times this scope has been shown. */
+  round: number;
+  state: "pending" | "answered";
+  parkedAt: string; // ISO
+  /** Set once the phone notice went out. */
+  notifiedAt?: string;
+  look: CheckpointLook;
+  answer?: CheckpointAnswer;
+  /** Fingerprint of what a send-back changes (spec hash, passing commit, or owner-change feature id): a resume skips rework that already happened. */
+  reworkFrom?: string;
+}
+
+export interface CheckpointRecord {
+  id: string;
+  scope: string;
+  kind: CheckpointKind;
+  featureId?: string;
+  round: number;
+  decision: "approve" | "send_back";
+  note?: string;
+  at: string; // ISO
 }
 
 export interface MissionFailure {
