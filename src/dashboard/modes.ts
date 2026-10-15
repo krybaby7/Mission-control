@@ -29,6 +29,8 @@ export function noTestsDone(m: Pick<Mission, "features">): boolean {
 
 /** Features the engine added by itself (`gate-c-fix-N` after the final check, `owner-change-N` after a send-back at the final stop). They never stop for the owner. */
 const DERIVED = /^(?:gate-c-fix|owner-change)-/;
+/** The repair the final review adds. The change a send-back at the final stop adds is not one: the owner asked for it. */
+const FINAL_REPAIR = /^gate-c-fix-/;
 
 // ───────────────────────────── The checkpoint log ─────────────────────────────
 
@@ -56,8 +58,10 @@ export interface CheckedFacts {
   unmet: number;
   unjudged: number;
   approved: boolean;
-  /** Rows 4 to 7, not approved, `ownerStops` is false and the feature is an "owner" one or has checks not judged (or its review did not finish). */
+  /** Rows 4 to 7, not approved, `ownerStops` is false and the feature is an "owner" one or has checks not judged (or its review did not finish, or no picture was shown). */
   queuedWithoutLook: boolean;
+  /** A page was expected and the second AI was shown no picture of it (rows 5 to 7). Absent when it is not so. */
+  noPicture?: boolean;
 }
 
 /**
@@ -78,8 +82,9 @@ export function checkedFacts(m: ModeMission, f: Feature): CheckedFacts {
   const unmet = results.filter((r) => r.result === "fail").length;
   const unjudged = unfinished ? 0 : checked.unjudged;
   const row: CheckedRow = unfinished ? 4 : unmet > 0 ? 5 : unjudged > 0 ? 6 : 7;
-  const queuedWithoutLook = !approved && m.ownerStops === false && (f.mode === "owner" || unjudged > 0 || unfinished);
-  return { row, unmet, unjudged, approved, queuedWithoutLook };
+  const noPicture = !unfinished && checked.pictures?.why !== undefined;
+  const queuedWithoutLook = !approved && m.ownerStops === false && (f.mode === "owner" || unjudged > 0 || unfinished || noPicture);
+  return { row, unmet, unjudged, approved, queuedWithoutLook, ...(noPicture && { noPicture }) };
 }
 
 /** A finished feature has no test that checked it: rows 2 and 4 to 7 (the caveat "N features have no tests"). */
@@ -100,14 +105,21 @@ export function approvedTitles(m: ModeMission): string[] {
 // ───────────────────────────── Why a feature stop happened (spec 5.2 step 8, 10.2, 11.3) ─────────────────────────────
 
 /** Why the team stops at a feature, when the owner did not ask for it with `--checkpoint feature`. */
-export type LookWhy = "owner" | "not_judged" | "unfinished" | "sent_back";
+export type LookWhy = "owner" | "not_judged" | "unfinished" | "sent_back" | "repair" | "no_pictures";
 
 /**
  * The reason for the stop at feature `f`, or undefined when the old words fit: the owner asked for it (`--checkpoint feature`), the
  * feature has no mode, or no rule of the spec applies. `sentBack` is how many times the owner sent this stop back. When several rules
- * apply: sent back first, then "owner", then the review that did not finish, then the checks not judged (the engine's order too).
+ * apply: sent back first, then "owner", then the review that did not finish, then the checks not judged, then no picture shown (the engine's order too).
  */
 export function lookWhy(m: ModeMission, f: Feature, sentBack: number): LookWhy | undefined {
+  // The final review's repair stops when it changed a file of work the owner approved (the engine's rule (d), `changesApproved`).
+  // `--checkpoint feature` does not cover it, and neither does the flag that turns the other stops off.
+  if (FINAL_REPAIR.test(f.id)) {
+    if (isModeFeature(f) && sentBack > 0) return "sent_back";
+    const changed = new Set(Array.isArray(f.changesApproved) ? f.changesApproved : []);
+    if (m.features.some((x) => x.id !== f.id && changed.has(x.id) && (isModeFeature(x) || DERIVED.test(x.id)) && isApproved(m, x))) return "repair";
+  }
   if (m.checkpoints?.includes("feature") === true) return undefined;
   if (!isModeFeature(f) || DERIVED.test(f.id)) return undefined;
   if (sentBack > 0) return "sent_back";
@@ -115,5 +127,6 @@ export function lookWhy(m: ModeMission, f: Feature, sentBack: number): LookWhy |
   if (f.mode === "owner") return "owner";
   const checked = f.checked;
   if (checked === undefined || checked.unfinished === true) return "unfinished";
-  return checked.unjudged > 0 ? "not_judged" : undefined;
+  if (checked.unjudged > 0) return "not_judged";
+  return checked.pictures?.why !== undefined ? "no_pictures" : undefined;
 }

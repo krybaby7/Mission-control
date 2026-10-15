@@ -16,9 +16,13 @@ export type CheckedMission = Pick<Mission, "features" | "ownerStops" | "checkpoi
 
 // ───────────────────────────── Mode features ─────────────────────────────
 
-/** A mode feature is one that is not checked by tests: `f.mode !== undefined` (spec 16, "The interface between them", item 2). */
+/**
+ * A mode feature is one that is not checked by tests: its `mode` is `review` or `owner` (spec 16, "The interface between them", item 2).
+ * Any other value is not a mode: a mission file that holds one is refused when it is loaded (`MissionStore.load`), so it never gets here,
+ * and a value that did would be read as "checked by tests", which keeps the test author and the frozen tests, never as a quiet pass.
+ */
 export function isModeFeature(f: Pick<SpecFeature, "mode">): boolean {
-  return f.mode !== undefined;
+  return f.mode === "review" || f.mode === "owner";
 }
 
 /** Whether any feature has a mode. Every change of wording or behaviour in this step is guarded by this. */
@@ -45,14 +49,16 @@ function logHas(m: Pick<CheckedMission, "checkpointLog">, f: Pick<Feature, "id">
 }
 
 /** How the second AI's answer came out, counted from the stored results. Nothing is trusted that is not there: a check with no result is a check nobody judged. */
-function resultCounts(f: Feature): { total: number; passed: number; failed: number; unjudged: number; unfinished: boolean } {
+function resultCounts(f: Feature): { total: number; passed: number; failed: number; unjudged: number; unfinished: boolean; noPicture: boolean } {
   const total = Array.isArray(f.acceptance) ? f.acceptance.length : 0;
   const checked = f.checked;
-  if (checked === undefined || checked.unfinished === true) return { total, passed: 0, failed: 0, unjudged: total, unfinished: true };
+  if (checked === undefined || checked.unfinished === true) return { total, passed: 0, failed: 0, unjudged: total, unfinished: true, noPicture: false };
   const results = Array.isArray(checked.results) ? checked.results : [];
   const passed = results.filter((r) => r?.result === "pass").length;
   const failed = results.filter((r) => r?.result === "fail").length;
-  return { total, passed, failed, unjudged: Math.max(0, total - passed - failed), unfinished: false };
+  // `pictures.why` is stored only when a page was expected and the second AI was shown no picture of it (it could not be taken, or it could not be given).
+  const noPicture = typeof checked.pictures?.why === "string";
+  return { total, passed, failed, unjudged: Math.max(0, total - passed - failed), unfinished: false, noPicture };
 }
 
 function plural(n: number, one: string, many: string): string {
@@ -86,6 +92,11 @@ export interface HowChecked {
   unjudged: number;
   /** A mode feature with no `checked`, or with `checked.unfinished`: the second AI's check did not finish. */
   unfinished: boolean;
+  /**
+   * A page was expected and the second AI was shown no picture of it. The engine cannot tell which checks need a picture, so it cannot count
+   * them: a second AI that judged a layout check from the text alone would otherwise pass it unseen (docs/modes-spec.md, M11 and 7.3).
+   */
+  noPicture: boolean;
 }
 
 /**
@@ -98,18 +109,24 @@ export interface HowChecked {
 export function howChecked(m: CheckedMission, f: Feature): HowChecked {
   const approved = logHas(m, f, "approve") > 0;
   const sentBack = logHas(m, f, "send_back");
-  if (f.mode === undefined) {
+  if (!isModeFeature(f)) {
     const noTests = !Array.isArray(f.frozenTests) || f.frozenTests.length === 0;
     const row: CheckedRow = noTests ? 2 : approved ? 1 : 3;
-    return { row, approved, sentBack, queuedWithoutLook: false, total: 0, passed: 0, failed: 0, unjudged: 0, unfinished: false };
+    return { row, approved, sentBack, queuedWithoutLook: false, total: 0, passed: 0, failed: 0, unjudged: 0, unfinished: false, noPicture: false };
   }
   const c = resultCounts(f);
   const row: CheckedRow = c.unfinished ? 4 : c.failed > 0 ? 5 : c.unjudged > 0 ? 6 : 7;
-  const queuedWithoutLook = !approved && m.ownerStops === false && (f.mode === "owner" || c.unjudged > 0 || c.unfinished);
+  const queuedWithoutLook = !approved && m.ownerStops === false && (f.mode === "owner" || c.unjudged > 0 || c.unfinished || c.noPicture);
   return { row, approved, sentBack, queuedWithoutLook, ...c };
 }
 
 const QUEUED_WITHOUT_LOOK = "it was queued without a stop for your look";
+const NO_PICTURE_SHOWN = "no picture was shown to the second AI";
+
+/** The words for a feature that was not shown to the owner: when the second AI saw no picture of a page, that is said too, since nobody saw one. */
+function queuedText(h: HowChecked): string {
+  return h.noPicture ? `${QUEUED_WITHOUT_LOOK}; ${NO_PICTURE_SHOWN}` : QUEUED_WITHOUT_LOOK;
+}
 
 /**
  * The words the `Checked:` line uses for one feature (spec 10.1, middle column, with the endings), always starting with
@@ -117,7 +134,7 @@ const QUEUED_WITHOUT_LOOK = "it was queued without a stop for your look";
  * `by a second AI against your list (2 checks not met)`, `by a second AI against your list (it was queued without a stop for your look)`.
  */
 export function checkedWords(h: HowChecked): string {
-  const ending = h.approved ? " and approved by you" : h.queuedWithoutLook ? ` (${QUEUED_WITHOUT_LOOK})` : "";
+  const ending = h.approved ? " and approved by you" : h.queuedWithoutLook ? ` (${queuedText(h)})` : "";
   switch (h.row) {
     case 1:
       return "by tests, and approved by you";
@@ -141,7 +158,7 @@ export function checkedWords(h: HowChecked): string {
  * `Built; a second AI checked it against your list (3 of 3 passed); approved by you`, and so on.
  */
 export function tableWords(h: HowChecked): string {
-  const ending = h.approved ? "; approved by you" : h.queuedWithoutLook ? `; ${QUEUED_WITHOUT_LOOK}` : "";
+  const ending = h.approved ? "; approved by you" : h.queuedWithoutLook ? `; ${queuedText(h)}` : "";
   switch (h.row) {
     case 1:
       return "Built and checked by tests; approved by you";
@@ -203,6 +220,7 @@ export function ownerSentences(h: HowChecked): string[] {
   }
   if (h.row >= 4 && h.unfinished) out.push("The second AI's check did not finish.");
   if (h.queuedWithoutLook) out.push("It was queued without a stop for your look.");
+  if (h.queuedWithoutLook && h.noPicture) out.push("No picture was shown to the second AI.");
   return out;
 }
 
@@ -231,21 +249,40 @@ export function pictureReason(why: PictureWhy | undefined): string {
 // ───────────────────────────── Why the owner is asked (spec 5.2 step 8, and 10.2 line 8) ─────────────────────────────
 
 /** Why the team stops at a feature when the stop is not one `--checkpoint feature` asked for. */
-export type LookReason = "owner" | "not_judged" | "unfinished" | "sent_back";
+export type LookReason = "owner" | "not_judged" | "unfinished" | "sent_back" | "repair" | "no_pictures";
+
+/** The repair feature that the final review's findings add (`gate-c-fix-N`). The change a send-back at the final stop adds is not one: the owner asked for it. */
+const FINAL_REPAIR = /^gate-c-fix-/;
+
+/**
+ * The features whose work the owner approved at their own stop, other than `f`: a feature checked by reading with an "approve" in the
+ * checkpoint log, or a repair that the owner approved the same way. A feature checked by tests that the owner approved because they
+ * asked to look at every feature is not one of them: this rule is about the words "approved by you" on work that no test checked.
+ */
+export function approvedWork(m: Pick<CheckedMission, "features" | "checkpointLog">, f: Pick<Feature, "id">): Feature[] {
+  return (Array.isArray(m.features) ? m.features : []).filter((x) => x.id !== f.id && (isModeFeature(x) || isDerivedFeature(x.id)) && logHas(m, x, "approve") > 0);
+}
+
+/** The approved work that the final repair `f` changed a file of (`Feature.changesApproved`), as features of `m`. Empty for any other feature. */
+export function changedApprovedWork(m: Pick<CheckedMission, "features" | "checkpointLog">, f: Pick<Feature, "id" | "changesApproved">): Feature[] {
+  const ids = Array.isArray(f.changesApproved) ? f.changesApproved : [];
+  return approvedWork(m, f).filter((x) => ids.includes(x.id));
+}
 
 /** Rule (b) of `asksForLook`, and the reason it gives. */
-function ownerReason(m: CheckedMission, f: Feature): "owner" | "not_judged" | "unfinished" | undefined {
-  if (m.ownerStops === false || f.mode === undefined || isDerivedFeature(f.id)) return undefined;
+function ownerReason(m: CheckedMission, f: Feature): "owner" | "not_judged" | "unfinished" | "no_pictures" | undefined {
+  if (m.ownerStops === false || !isModeFeature(f) || isDerivedFeature(f.id)) return undefined;
   if (f.mode === "owner") return "owner";
   const c = resultCounts(f);
-  return c.unfinished ? "unfinished" : c.unjudged > 0 ? "not_judged" : undefined;
+  return c.unfinished ? "unfinished" : c.unjudged > 0 ? "not_judged" : c.noPicture ? "no_pictures" : undefined;
 }
 
 /**
  * The rule `asked(f)` of spec 5.2, step 8. True when ANY of these holds: (a) `m.checkpoints` lists "feature" and `f` is not
  * a feature the engine added itself (`gate-c-fix-N`, `owner-change-N`); (b) `m.ownerStops` is not false, `f` has a mode
- * and is not a derived feature, and either it is "owner", or it is "review" and a check was not judged or its review did
- * not finish; (c) `f` has a mode and the checkpoint log already holds a send-back for its scope. The flag
+ * and is not a derived feature, and either it is "owner", or it is "review" and a check was not judged, its review did
+ * not finish, or the second AI was shown no picture of a page it was expected to look at; (c) `f` has a mode (or is the final review's repair) and the checkpoint log already holds a send-back for its scope; (d) `f` is the repair that the
+ * final review added (`gate-c-fix-N`) and it changed a file of work the owner approved (`f.changesApproved`; work that no test checked). The flag
  * `--no-owner-checkpoint` removes (b) and nothing else. The dispatcher's `checkpointGate`, `looksAt` and `reviewSettled`
  * and `nextCheckpointState`'s fifth parameter all use this one function.
  *
@@ -260,11 +297,15 @@ export function asksForLook(m: CheckedMission, f: Feature): boolean {
 /**
  * The reason to say for a stop by rules (b) or (c) of `asksForLook`; undefined when neither applies (a stop that only
  * `--checkpoint feature` asked for keeps the old words, which `whyStopped` decides by looking at `m.checkpoints`). When
- * several apply: `sent_back` first, then `owner`, then `unfinished`, then `not_judged` (an unfinished review has every
- * check unjudged, so `unfinished` is the more exact word).
+ * several apply: `sent_back` first, then `repair`, then `owner`, then `unfinished`, then `not_judged` (an unfinished review has every
+ * check unjudged, so `unfinished` is the more exact word), then `no_pictures`.
  */
 export function lookReason(m: CheckedMission, f: Feature): LookReason | undefined {
-  if (f.mode !== undefined && logHas(m, f, "send_back") > 0) return "sent_back";
+  if ((isModeFeature(f) || FINAL_REPAIR.test(f.id)) && logHas(m, f, "send_back") > 0) return "sent_back";
+  // The final review's repair changed a file of work that the owner approved. Nothing ties the new text to the approval, so the owner looks
+  // at the repair too. The flag `--no-owner-checkpoint` does not remove this: it removes the stops the plan asks for, and an approval is
+  // in the log only because the owner was asked.
+  if (FINAL_REPAIR.test(f.id) && changedApprovedWork(m, f).length > 0) return "repair";
   return ownerReason(m, f);
 }
 
@@ -273,8 +314,12 @@ export function lookReason(m: CheckedMission, f: Feature): LookReason | undefine
  * `You are asked because the second AI could not judge <u> of the checks.`, `You are asked because the second AI's check did not
  * finish.`, `You are asked again because you sent it back.` `unjudged` is used only for "not_judged".
  */
-export function askedBecause(reason: LookReason, unjudged: number): string {
+export function askedBecause(reason: LookReason, unjudged: number, approvedTitles: readonly string[] = []): string {
   switch (reason) {
+    case "repair":
+      return `You are asked because this repair changes work you approved earlier${approvedTitles.length > 0 ? `: ${approvedTitles.map((t) => `“${t}”`).join(", ")}` : ""}.`;
+    case "no_pictures":
+      return "You are asked because the second AI was shown no picture of the page.";
     case "owner":
       return "You are asked because the plan marks this feature for your look.";
     case "not_judged":
@@ -289,10 +334,14 @@ export function askedBecause(reason: LookReason, unjudged: number): string {
 /**
  * The clause `whyStopped` puts after "The team stopped because " (spec 10.2, line 8): `the plan marks “<title>” for your look`,
  * `the second AI could not judge every check of “<title>”`, `the second AI's check of “<title>” did not finish`,
- * `you sent “<title>” back and it is shown again`. `title` must already be cleaned by the caller (`shown()`); the function adds the curly marks.
+ * `you sent “<title>” back and it is shown again`, `the repair “<title>” changes work you approved earlier`. `title` must already be cleaned by the caller (`shown()`); the function adds the curly marks.
  */
 export function stoppedBecause(reason: LookReason, title: string): string {
   switch (reason) {
+    case "repair":
+      return `the repair “${title}” changes work you approved earlier`;
+    case "no_pictures":
+      return `the second AI was shown no picture of “${title}”`;
     case "owner":
       return `the plan marks “${title}” for your look`;
     case "not_judged":

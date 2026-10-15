@@ -8,7 +8,7 @@
 import { closeSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync, type Stats } from "node:fs";
 import { join, resolve } from "node:path";
 import { MissionStore, planOf } from "../state.js";
-import type { Attempt, CheckedResult, CheckpointKind, CheckpointRecord, Feature, FeatureChecked, Mission, MissionEvent, PendingCheckpoint, PlanSource } from "../types.js";
+import type { Attempt, CheckedResult, CheckpointKind, CheckpointRecord, Feature, FeatureChecked, Mission, MissionEvent, PendingCheckpoint, PictureWhy, PlanSource } from "../types.js";
 import {
   CHECKPOINT_LINES_MAX,
   CHECKPOINT_LOG_MAX,
@@ -87,7 +87,7 @@ export interface MissionData {
 /** The only values taken from dispatch.json (the rest holds absolute paths and a copy of the app's git settings). */
 export interface DispatchPicks {
   /** null: the file has none (the final check did not complete). */
-  finalVerify: { ok: boolean; reviewed: boolean | null; blocking: number | null } | null;
+  finalVerify: { ok: boolean; reviewed: boolean | null; blocking: number | null; judged?: false } | null;
   inflight: { label: string; feature: string | null; at: number | null } | null;
 }
 
@@ -487,11 +487,15 @@ function cleanFeature(f: Record<string, unknown>): Feature {
   }
   const blocked = isString(f.blockedReason) ? clean(f.blockedReason, REASON_MAX_CHARS) : "";
   const checked = cleanChecked(f.checked);
+  const mode = f.mode === "review" || f.mode === "owner" ? f.mode : undefined;
+  const changesApproved = Array.isArray(f.changesApproved) ? f.changesApproved.filter(isString).slice(0, CHECKED_RESULTS_MAX).map(cleanId) : [];
   return {
     id,
     title: clean(f.title, TITLE_MAX_CHARS) || id,
     story: isString(f.story) ? clean(f.story, REASON_MAX_CHARS) : "",
-    acceptance: [],
+    // The check texts are never read. A feature checked by a second AI keeps one empty placeholder per check, so the page can say how many
+    // checks are on its list (docs/modes-spec.md, 11.1); every other feature has none, as before.
+    acceptance: mode !== undefined && Array.isArray(f.acceptance) ? f.acceptance.slice(0, CHECKED_RESULTS_MAX).map(() => "") : [],
     kind: f.kind === "mechanical" ? "mechanical" : "standard",
     deps: [],
     status: cleanId(f.status) as Feature["status"],
@@ -502,23 +506,28 @@ function cleanFeature(f: Record<string, unknown>): Feature {
     openFindings: [],
     ...(blocked !== "" && { blockedReason: blocked }),
     // How the feature is checked (docs/modes-spec.md, 11.1). Only the two words each of them can have are kept; `expect` is plan text and stays out.
-    ...((f.mode === "review" || f.mode === "owner") && { mode: f.mode }),
+    ...(mode !== undefined && { mode }),
+    // Only the ids of the approved work that the final repair changed (docs/modes-spec.md, M23 and the review of Wave 2), so the card can say why the repair stops.
+    ...(changesApproved.length > 0 && { changesApproved }),
     ...((f.effort === "light" || f.effort === "deep") && { effort: f.effort }),
     ...(checked !== undefined && { checked }),
   };
 }
 
 const CHECK_RESULTS = new Set<string>(["pass", "fail", "cannot_judge"]);
+const PICTURE_WHYS = new Set<string>(["no_tool", "no_browser", "start_failed", "too_slow", "reviewer", "not_plain_file"]);
 /** A feature has a handful of written checks; the page needs only how many of them failed, so a damaged list cannot grow the snapshot. */
 const CHECKED_RESULTS_MAX = 200;
 
 /**
  * The record of the second AI's last answer, cut down to what the page needs (docs/modes-spec.md, 11.1): how many checks nobody
  * judged, whether the review did not finish, and which result each check got, as the code `pass`, `fail` or `cannot_judge` only.
- * The check text, the evidence, the pictures and Mission Control's own findings are never read. undefined when the value is not a record.
+ * The check text, the evidence, the pictures and Mission Control's own findings are never read; of the pictures only the code of why the second AI was
+ * shown none is kept (it decides whether the owner is asked). undefined when the value is not a record.
  */
 function cleanChecked(v: unknown): FeatureChecked | undefined {
   if (!isRecord(v)) return undefined;
+  const pictures = isRecord(v.pictures) ? v.pictures : {};
   const results: CheckedResult[] = [];
   if (Array.isArray(v.results)) {
     for (const r of v.results.slice(0, CHECKED_RESULTS_MAX)) {
@@ -534,7 +543,8 @@ function cleanChecked(v: unknown): FeatureChecked | undefined {
     unjudged: isNumber(v.unjudged) && v.unjudged > 0 ? Math.min(Math.floor(v.unjudged), CHECKED_RESULTS_MAX) : 0,
     ...(v.unfinished === true && { unfinished: true as const }),
     scripted: { problems: [], facts: [] },
-    pictures: { taken: 0 },
+    // Only whether a page was expected and the second AI was shown no picture of it (the code, not a sentence): the words are the dashboard's own.
+    pictures: { taken: 0, ...(isString(pictures.why) && PICTURE_WHYS.has(pictures.why) && { why: pictures.why as PictureWhy }) },
   };
 }
 
@@ -667,7 +677,7 @@ function pickDispatch(parsed: unknown): DispatchPicks | "unavailable" {
   return {
     finalVerify:
       isRecord(fv) && typeof fv.ok === "boolean"
-        ? { ok: fv.ok, reviewed: typeof fv.reviewed === "boolean" ? fv.reviewed : null, blocking: isNumber(fv.blocking) ? fv.blocking : null }
+        ? { ok: fv.ok, reviewed: typeof fv.reviewed === "boolean" ? fv.reviewed : null, blocking: isNumber(fv.blocking) ? fv.blocking : null, ...(fv.judged === false && { judged: false as const }) }
         : null,
     inflight:
       isRecord(inflight) && isString(inflight.label)

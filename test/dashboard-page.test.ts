@@ -234,6 +234,10 @@ describe("T-PAGE the page's words (docs/dashboard-spec.md 17.1)", () => {
     "1 check written for this feature",
     " checks written for this feature",
     "No checks written for this feature",
+    // a feature checked by a second AI has no test files: its tile says how many checks are on the list (docs/modes-spec.md, 11.5)
+    "1 check on your list",
+    " checks on your list",
+    "Built on the first try.",
     "repair round",
     "Allowance (how much of your plans is used)",
     "work pauses here",
@@ -425,6 +429,18 @@ describe("T-PAGE what the review round asked for (page parts of M5, M6, M7, m8 t
     const rank = functionSource("groupRank");
     expect(rank.indexOf("needs_you")).toBeLessThan(rank.indexOf("stuck"));
     expect(rank.indexOf("stuck")).toBeLessThan(rank.indexOf("var order"));
+  });
+
+  it("a feature checked by a second AI never gets the words that claim tests: its own first-try line, its own checks line", () => {
+    expect(functionSource("byReading")).toContain("typeof f.modeChecks === \"number\"");
+    const checks = functionSource("checksLine");
+    expect(checks.indexOf("byReading(f)")).toBeLessThan(checks.indexOf("W.checkNone"));
+    expect(checks).toContain("f.checkedBy");
+    expect(checks).toContain("W.listOne");
+    expect(checks).toContain("W.listMany");
+    expect(functionSource("tile")).toContain("byReading(f) ? W.firstTryRead : W.firstTry");
+    // the page never writes "checked" for such a feature by itself: those words are only in the first-try line of the other features
+    expect(lexed.strings.filter((x) => /on your list/.test(x))).toEqual(["1 check on your list", " checks on your list"]);
   });
 
   it("M7: a folded mission is a native details element, so Enter and Space work, and it keeps its state across redraws", () => {

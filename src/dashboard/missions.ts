@@ -2,9 +2,10 @@
 // Pure: it gets the data read by read.ts, the run facts and the clock. It never touches the disk.
 import type { CheckpointKind, Feature, Mission, MissionEvent } from "../types.js";
 import { MAX_FEATURES_SHOWN, RECENT_WINDOW_MS, RUN_GONE_GRACE_MS, STALE_BUSY_AFTER_MS, WAIT_OVER_GRACE_MS } from "./constants.js";
-import { hasModeFeature, isModeFeature, noTestsDone } from "./modes.js";
+import { checkedFacts, hasModeFeature, isModeFeature, noTestsDone } from "./modes.js";
 import type { DispatchPicks, HomeData, MissionData } from "./read.js";
 import type { DashboardSettings } from "./snapshot.js";
+import { checkedByWords } from "./vocabulary-details.js";
 import {
   agentRunText,
   type AgentLabelKind,
@@ -27,6 +28,7 @@ import {
   REASON_PAUSED,
   REASON_PAUSED_FOR_CHECK,
   REASON_RECOVERED,
+  REASON_RECOVERED_BUILT,
   REASON_STUCK_FALLBACK,
   reasonOnHold,
   SENTENCE_UNREADABLE,
@@ -313,7 +315,13 @@ export function ladderTotal(f: Feature, settings: DashboardSettings): number {
   return Math.max(1, length - diagnose);
 }
 
-function featureView(f: Feature, state: FeatureStateId, mission: { state: MissionStateId; wait: WaitInfo | null; checkpoint: CheckpointFacts | null }, settings: DashboardSettings): FeatureView {
+function featureView(
+  f: Feature,
+  state: FeatureStateId,
+  mission: { state: MissionStateId; wait: WaitInfo | null; checkpoint: CheckpointFacts | null },
+  settings: DashboardSettings,
+  whole: Pick<Mission, "features" | "ownerStops" | "checkpoints" | "checkpointLog">,
+): FeatureView {
   const builds = f.attempts.filter((a) => a.action === "build").length;
   const diagnoses = f.attempts.filter((a) => a.action === "diagnose").length;
   const fixes = f.attempts.filter((a) => a.action === "fix").length;
@@ -326,7 +334,12 @@ function featureView(f: Feature, state: FeatureStateId, mission: { state: Missio
   else if (state === "paused") reason = { text: mission.checkpoint?.state === "pending" ? REASON_PAUSED_FOR_CHECK : REASON_PAUSED, author: "engine" };
   else if ((state === "being_built" || state === "being_reviewed") && mission.state === "waiting") {
     reason = { text: reasonOnHold(mission.wait?.cause ?? "unknown", mission.wait?.untilText ?? ""), author: "engine" };
-  } else if (state === "done" && recovered) reason = { text: REASON_RECOVERED, author: "engine" };
+  } else if (state === "done" && recovered) reason = { text: isModeFeature(f) ? REASON_RECOVERED_BUILT : REASON_RECOVERED, author: "engine" };
+  // A feature checked by a second AI has no test files: the tile says how many checks are on its list and, once it is done, how they came out
+  // (docs/modes-spec.md, 11.5). Every other feature keeps the keys it always had.
+  const byReading = isModeFeature(f)
+    ? { modeChecks: f.acceptance.length, ...(state === "done" && { checkedBy: checkedByWords(checkedFacts(whole, f)) }) }
+    : {};
   return {
     id: f.id,
     title: f.title,
@@ -337,6 +350,7 @@ function featureView(f: Feature, state: FeatureStateId, mission: { state: Missio
     reinforcements: Math.max(0, used - 1),
     recovered,
     acceptanceTests: f.frozenTests.length,
+    ...byReading,
     isRepair: f.id.startsWith("gate-c-fix-"),
     cardId: null,
     tellLeader: "",
@@ -459,7 +473,7 @@ function factsFor(data: MissionData, scope: Scope, cx: Context): MissionFacts {
 
   const checkpoint = checkpointOf(m);
   const { progress, progressWord } = progressOf(m.stage, state);
-  const features = pickFeatures(m.features, cx.featureCap).map((f) => featureView(f, featureState(f.status, state), { state, wait: waitingNow, checkpoint }, cx.settings));
+  const features = pickFeatures(m.features, cx.featureCap).map((f) => featureView(f, featureState(f.status, state), { state, wait: waitingNow, checkpoint }, cx.settings, m));
   const view: MissionView = {
     id: m.id,
     title: m.title,

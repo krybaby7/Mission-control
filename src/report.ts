@@ -5,7 +5,7 @@ import { type Dirent, readFileSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
-import { checkedLine, checkedWords, hasModeFeature, howChecked, tableWords } from "./checked-by.js";
+import { checkedLine, checkedWords, hasModeFeature, howChecked, isModeFeature, tableWords } from "./checked-by.js";
 import { endState, isCheckpointShape, isWaitingForCheck, localClock, MAX_SEND_BACKS, planReviewShort, sendBacks, shown, subjectOf, waitingWhat, whyStopped } from "./checkpoint.js";
 import { inContainer } from "./config.js";
 import { planOf } from "./state.js";
@@ -205,7 +205,7 @@ function featureFact(m: Mission, f: Feature): string {
   switch (f.status) {
     case "done":
       // A feature no test checked says how it was checked, so the writer of the summary cannot call it tested (docs/modes-spec.md 8.5).
-      return f.mode === undefined ? `${head}: ${f.story}` : `${head}: ${sentence(f.story)} ${checkedByFact(m, f)}`;
+      return !isModeFeature(f) ? `${head}: ${f.story}` : `${head}: ${sentence(f.story)} ${checkedByFact(m, f)}`;
     case "blocked": {
       const tries = f.attempts.length > 0 ? ` (after ${plural(f.attempts.length, "attempt")})` : "";
       return `${head}: ${f.blockedReason ?? "no reason recorded"}${tries}`;
@@ -437,7 +437,7 @@ function templateNarrative(m: Mission, container: boolean): string {
   ];
   if (m.spec?.summary) sentences.push(`The plan: ${sentence(m.spec.summary)}`);
   const counts = countFeatures(m.features);
-  const byReading = m.features.some((f) => f.status === "done" && f.mode !== undefined);
+  const byReading = m.features.some((f) => f.status === "done" && isModeFeature(f));
   sentences.push(...progressSentences(counts, byReading), ...(isWaitingForCheck(m) ? ["I stopped here on purpose, so you can look at it before I go on."] : statusSentence(m.status, counts, byReading)));
   const decisions = decisionItems(m, container).length;
   if (decisions > 0) {
@@ -604,13 +604,25 @@ function decisionsSection(m: Mission, container: boolean): string {
   return section("Needs your decision", bulletList(decisionItems(m, container), "Nothing. You don't need to do anything."));
 }
 
+/**
+ * What the red project checks meant for this mission, as the report says it. A mission with no feature checked by a second AI keeps the
+ * words it always had. Where a feature has no tests, saying that only the new tests were used would be false: nothing was tested
+ * (docs/modes-spec.md, 10.3). The pull request text says the same three things in the same order.
+ */
+export function baselineBrokenSentence(m: Pick<Mission, "features">): string {
+  if (!hasModeFeature(m.features)) {
+    return "Your project's own checks were already failing before I started, so I only used the new tests to check my work.";
+  }
+  const lead = "Your project's own checks were already failing before I started, so they could not be used to check my work.";
+  return m.features.some((f) => !isModeFeature(f))
+    ? `${lead} The features checked by tests were judged by tests alone, and the others by Mission Control's own checks and a second AI.`
+    : `${lead} Mission Control's own checks and a second AI checked it instead.`;
+}
+
 function decisionItems(m: Mission, container: boolean): string[] {
   const items = [...m.decisionsNeeded];
   if (m.baselineBroken) {
-    items.push(
-      "Your project's own checks were already failing before I started, so I only used the new tests to check " +
-        "my work. You may want someone to look at those older failures (listed under “Technical details”).",
-    );
+    items.push(`${baselineBrokenSentence(m)} You may want someone to look at those older failures (listed under “Technical details”).`);
   }
   const retry = retryItem(m, container);
   if (retry) items.push(retry);

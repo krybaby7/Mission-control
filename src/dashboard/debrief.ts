@@ -178,6 +178,10 @@ function finalReviewTick(facts: MissionFacts, done: number, total: number): Tick
   } else if ((finalVerify.blocking ?? 0) > 0) {
     state = "no";
     why = { kind: "blocking", count: finalVerify.blocking ?? 0 };
+  } else if (finalVerify.judged === false) {
+    // The project's own checks were already failing and no test could stand in for them: nothing judged the final result (docs/modes-spec.md, 10.3).
+    state = "no";
+    why = { kind: "nothing_judged" };
   } else {
     state = "yes";
     why = { kind: "passed" };

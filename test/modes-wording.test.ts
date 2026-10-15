@@ -257,6 +257,47 @@ describe("a mixed mission (example C: one feature checked by tests, one by a sec
   });
 });
 
+describe("a mission whose project's own checks were already failing (a red baseline)", () => {
+  /** The words that say the new tests were what judged the work: false for a feature that no test checked. */
+  const NEW_TESTS = /only used the new tests|judged by their new tests\.|checked by its own new tests only/;
+
+  it("example A: the report, the run notes and every other surface say the work was not judged by tests", async () => {
+    w = await openWorld({ broken: true });
+    const c = await collect(EXAMPLE_A, "habit-tracker", "Setup guide");
+    const report = lineOf(c, "report").join("\n");
+    expect(report).toContain("Your project's own checks were already failing before I started, so they could not be used to check my work. Mission Control's own checks and a second AI checked it instead.");
+    expect(w.h.load(c.id).notes).toContain("The project's own checks were already failing before this mission started, so they could not be used to judge the new work. Mission Control's own checks and a second AI judged it instead.");
+    for (const s of c.surfaces) expect(s.lines.filter((l) => NEW_TESTS.test(l)), s.name).toEqual([]);
+    expect(c.surfaces.flatMap((s) => commonProblems(s, c.titles))).toEqual([]);
+    // the rule of 10.3 holds here too: not one line of any surface claims a test (the pull request text is looked at in the other test)
+    const claims = c.surfaces.filter((s) => s.name !== "pull request text").flatMap((s) => s.lines.filter((l) => claimsATest(l)).map((l) => `${s.name}: ${l.slice(0, 160)}`));
+    expect(claims).toEqual([]);
+    expect(c.surfaces.find((s) => s.name === "dashboard")?.lines).toContain("The project's own checks were already failing before this mission started, so they could not be used to judge the new work.");
+  });
+
+  it("example C, with one feature checked by tests: the tests are named only for that feature", async () => {
+    w = await openWorld({ broken: true });
+    const c = await collect(EXAMPLE_C, "sales-data", "Sales totals");
+    const report = lineOf(c, "report").join("\n");
+    expect(report).toContain("so they could not be used to check my work. The features checked by tests were judged by tests alone, and the others by Mission Control's own checks and a second AI.");
+    expect(report).not.toContain("so I only used the new tests");
+    expect(w.h.load(c.id).notes.join("\n")).toContain("The features checked by tests were judged by tests alone, and the others by Mission Control's own checks and a second AI.");
+    expect(c.surfaces.flatMap((s) => commonProblems(s, c.titles))).toEqual([]);
+    const names = (line: string): boolean => line.includes(TITLE.notes) || line.includes("column-notes") || /second AI/i.test(line);
+    expect(c.surfaces.flatMap((s) => s.lines.filter((l) => names(l) && claimsATest(l, true)).map((l) => `${s.name}: ${l.slice(0, 160)}`))).toEqual([]);
+  });
+
+  it("a plan with no mode keeps the words it always had", async () => {
+    w = await openWorld({ broken: true });
+    const dark = readFileSync(join(fileURLToPath(new URL(".", import.meta.url)), "fixtures", "plans", "dark-mode.txt"), "utf8");
+    const { id } = await w.queue(dark);
+    await w.run(id);
+    const report = w.report(id);
+    expect(report).toContain("Your project's own checks were already failing before I started, so I only used the new tests to check my work.");
+    expect(w.h.load(id).notes).toContain("The project's own checks were already failing before this mission started, so features were judged by their new tests.");
+  });
+});
+
 describe("the rule itself", () => {
   it("finds a claim, and lets the allowed phrases through", () => {
     expect(claimsATest("All 3 features were tested.")).toBe(true);

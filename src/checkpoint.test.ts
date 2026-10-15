@@ -574,6 +574,21 @@ describe("a stop at a feature that the plan marks for the owner's look", () => {
     expect(nextCheckpointState({}, "feature", "gate-c-fix-1", false, true)).toEqual({ step: "go" });
   });
 
+  it("the sixth parameter lets the final repair that changed approved work through the machine, and nothing else changes", () => {
+    // by default a feature the engine added itself still carries on, even when the gate says it asks
+    expect(nextCheckpointState({}, "feature", "gate-c-fix-1", false, true, false)).toEqual({ step: "go" });
+    expect(nextCheckpointState({}, "feature", "owner-change-1", false, true, false)).toEqual({ step: "go" });
+    // with it, the repair is asked about like any other feature
+    expect(nextCheckpointState({}, "feature", "gate-c-fix-1", false, true, true)).toEqual({ step: "ask", round: 1 });
+    expect(nextCheckpointState({ checkpoint: pending("feature", 1, "gate-c-fix-1") }, "feature", "gate-c-fix-1", false, true, true)).toEqual({ step: "stay" });
+    expect(nextCheckpointState({ checkpoint: answered(pending("feature", 1, "gate-c-fix-1")) }, "feature", "gate-c-fix-1", true, true, true)).toEqual({ step: "pass" });
+    expect(nextCheckpointState({ checkpointLog: [record("feature:gate-c-fix-1", "approve")] }, "feature", "gate-c-fix-1", false, true, true)).toEqual({ step: "go" });
+    expect(nextCheckpointState({ checkpoint: answered(pending("feature", 1, "gate-c-fix-1"), "send_back", "x") }, "feature", "gate-c-fix-1", true, true, true)).toEqual({ step: "rework", change: 1 });
+    // it never makes a gate that does not ask stop, and never lets a missing feature id through
+    expect(nextCheckpointState({}, "feature", "gate-c-fix-1", false, false, true)).toEqual({ step: "go" });
+    expect(nextCheckpointState({}, "feature", undefined, false, true, true)).toEqual({ step: "go" });
+  });
+
   it("says why the team stopped in the words of that stop, for the plan's mark, a check not judged, a review that did not finish, and a send-back", () => {
     const base = { id: "2026-10-12-guide", plan: undefined };
     const stop = (f: Feature, fields: Partial<Mission> = {}): string => whyStopped({ ...base, features: [f], ...fields }, pending("feature", 1, f.id));

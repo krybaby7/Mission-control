@@ -20,7 +20,11 @@ The leader uses the way that fits the job. Code, a script and numbers that a scr
 
 **What “approved by you” means.** Mission Control records your approval in its log. It cannot know that you opened a file or looked at a picture, and it never says so. The leader may say “look at it”, because that is what the stop is for.
 
-**If the second AI cannot judge a check.** For example, a check about how a page looks, when no picture could be taken. Then that check is listed as “not judged”, it is never counted as passed, and the team stops for your look at that feature, even if the plan did not mark it for your look. Only the command line can switch that stop off (see “Switching the stops off”).
+**If the second AI cannot judge a check.** For example, a check about how a page looks, when no picture could be taken. A check it says it cannot judge is listed as “not judged”, it is never counted as passed, and the team stops for your look at that feature, even if the plan did not mark it for your look. Only the command line can switch that stop off (see “Switching the stops off”).
+
+**If the second AI was shown no picture of a page.** Mission Control cannot tell which checks need a picture, so it relies on the second AI to say so. A second AI could still judge a layout check from the text alone and pass it. So the team stops for your look at every feature with a page where the second AI was shown no picture, whatever the second AI answered. The look says why no picture was taken. If you queued the plan without that stop, the report says “no picture was shown to the second AI”.
+
+**If the final repair changes work you approved.** When the final review finds a serious problem, the team adds a repair feature. If the repair changes a file of a feature that you approved, it stops for your look before it is added, because the report would otherwise still say “approved by you” of text you never saw. A repair that leaves your approved files alone does not stop.
 
 ## How hard the team thinks
 
@@ -54,15 +58,15 @@ A problem that a file already had before the feature is not blamed on the featur
 For a web page that is a plain file inside the app (an .html file), Mission Control opens it in a browser in the container, at phone width and at desktop width, and takes a picture of each. The browser is cut off from the internet and from files outside the app. The second AI is given the pictures to look at, and you are shown where they are.
 
 - A picture is the page as it first loads, in the container's fonts. It does not show a click, a hover, other screen sizes, or your own browser.
-- A page that needs a running server (an app built with a framework) gets no pictures, and a route of such an app is never drawn. The checks that need a picture are then “not judged”, and the team stops for your look. If a feature changes the plain .html file of such an app, that file is drawn as it is, and without its server it may be blank, which counts as a problem for the feature. This was not tried.
+- A page that needs a running server (an app built with a framework) gets no pictures, and a route of such an app is never drawn. The team then stops for your look at that feature, because the second AI was shown no picture. If a feature changes the plain .html file of such an app, that file is drawn as it is, and without its server it may be blank, which counts as a problem for the feature. This was not tried.
 - To see the pictures in Windows, run `mc copy-reports` in the Ubuntu window. It prints the address of the `mc-reports` folder. The pictures are in `missions\<mission>\screenshots` inside it. The report lists them as images too. The dashboard shows no picture.
-- The second AI only looks at pictures when it runs on Claude. In the default setup, if it would run on Codex, a feature with pictures is checked by Claude instead. In the setup that uses only Codex there is no Claude to use, so the checks that need a picture are not judged. Whether Codex can look at a picture was never tried.
+- The second AI only looks at pictures when it runs on Claude. In the default setup, if it would run on Codex, a feature with pictures is checked by Claude instead. In the setup that uses only Codex there is no Claude to use, so the second AI is shown no picture and the team stops for your look. Whether Codex can look at a picture was never tried.
 
 ## Where you see how a feature was checked
 
 - **The report** has a line `Checked:` in its header, for example “Checked: 2 features by tests; 1 feature by a second AI against your list and approved by you.”, and the Features table says it for each feature.
 - **`mc plan show <mission>`** lists, after the plan, how each feature was checked: the second AI's answer on every check with its reason, Mission Control's own checks, and the pictures.
-- **The dashboard** says “Built” and not “Built and checked” for such a mission. On the Results page each finished feature has a line that says how it was checked. When you approved a feature, the note at the bottom says you were asked to look at it and approved it.
+- **The dashboard** says “Built” and not “Built and checked” for such a feature: on its tile (“Built on the first try.” and, under it, how it was checked), and in the mission sentence and the timeline when no finished feature of the mission was checked by tests. A tile that is not finished says how many checks are on your list, never that no checks were written. On the Results page each finished feature has a line that says how it was checked. When you approved a feature, the note at the bottom says you were asked to look at it and approved it.
 - **The draft pull request** copies the report's `Checked:` line. It never says that a feature without tests was tested.
 
 ## What it costs
@@ -82,7 +86,7 @@ A fix round adds two calls in every way of checking. Being checked by a second A
 
 A feature marked for your look stops every time. The plan file cannot turn that off, and neither can the AI that revises a plan. Only the command line can, with `mc plan queue - --no-owner-checkpoint`. The leader adds it only after it asked “Skip your look at these features? The team will add them without stopping for you. Yes or no?” and you said a clear yes. If you never want the leader to do that, the owner can add a deny rule (see [docs/leader.md](leader.md)). Mission Control then records “it was queued without a stop for your look”. It does not say that you chose not to look.
 
-If you used `--checkpoint feature` as well, you still stop at every feature.
+If you used `--checkpoint feature` as well, you still stop at every feature. The flag does not switch off the stop at a repair that changes work you approved: you only approved anything because you were asked, and the repair must not change it without you.
 
 ## Privacy
 

@@ -320,7 +320,8 @@ export type FinalReviewWhy =
   | { kind: "unreadable" }
   | { kind: "review_unfinished" }
   | { kind: "tests_failed"; baselineBroken: boolean }
-  | { kind: "blocking"; count: number };
+  | { kind: "blocking"; count: number }
+  | { kind: "nothing_judged" };
 
 /** `noTests`: no finished feature of the mission is checked by tests, so the final check is not told as one of tests (docs/modes-spec.md, 10.3). */
 export function finalReviewWhy(w: FinalReviewWhy, noTests = false): string {
@@ -339,6 +340,8 @@ export function finalReviewWhy(w: FinalReviewWhy, noTests = false): string {
       return w.baselineBroken ? "The new features' tests did not all pass together on the final result." : "The final tests of the whole app did not all pass.";
     case "blocking":
       return `The final review found ${w.count} serious ${w.count === 1 ? "problem that was" : "problems that were"} not fixed.`;
+    case "nothing_judged":
+      return "No final check could judge the result, because the project's own checks were already failing.";
   }
 }
 
@@ -392,10 +395,16 @@ export function agentTimeLine(ms: number): string {
 // "a second AI", never "a different AI"; "Mission Control's own checks" for the scripts and "the project's own checks" for the app's.
 
 const QUEUED_WITHOUT_LOOK = "queued without a stop for your look";
+const NO_PICTURE_SHOWN = "no picture was shown to the second AI";
+
+/** `queued without a stop for your look`, and, when the second AI saw no picture of a page, that too: with no stop, nobody saw one. */
+function queuedText(h: CheckedFacts): string {
+  return h.noPicture ? `${QUEUED_WITHOUT_LOOK}; ${NO_PICTURE_SHOWN}` : QUEUED_WITHOUT_LOOK;
+}
 
 /** The line under a finished feature in "What you got". */
 export function checkedByWords(h: CheckedFacts): string {
-  const ending = h.approved ? "; approved by you" : h.queuedWithoutLook ? `; ${QUEUED_WITHOUT_LOOK}` : "";
+  const ending = h.approved ? "; approved by you" : h.queuedWithoutLook ? `; ${queuedText(h)}` : "";
   switch (h.row) {
     case 1:
       return "Checked by tests; approved by you";
@@ -420,7 +429,7 @@ export function checkedByWords(h: CheckedFacts): string {
  */
 export function checkedGroupWords(h: CheckedFacts): string {
   const approved = h.approved ? " and approved by you" : "";
-  const queued = !h.approved && h.queuedWithoutLook ? QUEUED_WITHOUT_LOOK : null;
+  const queued = !h.approved && h.queuedWithoutLook ? queuedText(h) : null;
   const inBrackets = (...parts: (string | null)[]): string => {
     const kept = parts.filter((p): p is string => p !== null);
     return kept.length === 0 ? "" : ` (${kept.join("; ")})`;

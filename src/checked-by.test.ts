@@ -63,6 +63,8 @@ describe("the small predicates", () => {
     expect(isModeFeature({})).toBe(false);
     expect(isModeFeature({ mode: "review" })).toBe(true);
     expect(isModeFeature({ mode: "owner" })).toBe(true);
+    // a word that is not one of the two is not a mode: it is never read as "checked by reading with no stop"
+    for (const odd of [null, 5, true, "", "Owner", "OWNER", "owner ", "tests", ["owner"], {}]) expect(isModeFeature({ mode: odd as never })).toBe(false);
     expect(hasModeFeature([{}, {}])).toBe(false);
     expect(hasModeFeature([{}, { mode: "owner" }])).toBe(true);
     expect(hasModeFeature([])).toBe(false);
@@ -325,6 +327,60 @@ describe("asksForLook: the one rule for whether a feature stops (5.2, step 8)", 
     const derived = feature("gate-c-fix-2", { mode: "review" });
     expect(asksForLook(mission([derived]), derived)).toBe(false);
   });
+
+  describe("(d) the final repair that changed work the owner approved", () => {
+    const approved = [log("feature:o", "approve")];
+    const repair = (fields: Partial<Feature> = {}) => feature("gate-c-fix-1", { mode: "review", checked: ALL_PASS, ...fields });
+    const m = (f: Feature, fields: Partial<CheckedMission> = {}) => mission([owner, f], { checkpointLog: approved, ...fields });
+
+    it("stops when its record names approved work, for a repair checked by reading and for one checked by tests", () => {
+      const r = repair({ changesApproved: ["o"] });
+      expect(asksForLook(m(r), r)).toBe(true);
+      expect(lookReason(m(r), r)).toBe("repair");
+      const tests = feature("gate-c-fix-1", { changesApproved: ["o"] });
+      expect(asksForLook(m(tests), tests)).toBe(true);
+      expect(lookReason(m(tests), tests)).toBe("repair");
+    });
+
+    it("does not stop when the repair changed none of it, when nothing was approved, or when the record names work that was not approved", () => {
+      const untouched = repair();
+      expect(asksForLook(m(untouched), untouched)).toBe(false);
+      const named = repair({ changesApproved: ["o"] });
+      expect(asksForLook(mission([owner, named]), named)).toBe(false); // no approval in the log
+      expect(asksForLook(mission([owner, named], { checkpointLog: [log("feature:o", "send_back")] }), named)).toBe(false);
+      const other = repair({ changesApproved: ["c"] });
+      expect(asksForLook(mission([owner, clean, other], { checkpointLog: approved }), other)).toBe(false); // "c" was not approved
+    });
+
+    it("is not removed by the flag, and not an old-way mission's concern (a feature checked by tests that the owner approved)", () => {
+      const r = repair({ changesApproved: ["o"] });
+      expect(asksForLook(m(r, { ownerStops: false }), r)).toBe(true);
+      const a = feature("a");
+      const fix = feature("gate-c-fix-1", { changesApproved: ["a"] });
+      expect(asksForLook(mission([a, fix], { checkpointLog: [log("feature:a", "approve")] }), fix)).toBe(false);
+    });
+
+    it("is only the repair of the final review: a change the owner asked for at the final stop is not asked about", () => {
+      const change = feature("owner-change-1", { mode: "review", checked: ALL_PASS, changesApproved: ["o"] });
+      expect(asksForLook(m(change), change)).toBe(false);
+    });
+
+    it("keeps stopping after a send-back, with or without a mode, and after the owner approved the repair itself", () => {
+      const r = repair({ changesApproved: ["o"] });
+      const sentBack = { checkpointLog: [...approved, log("feature:gate-c-fix-1", "send_back")] };
+      expect(lookReason(m(r, sentBack), r)).toBe("sent_back");
+      const tests = feature("gate-c-fix-1", { changesApproved: ["o"] });
+      expect(lookReason(m(tests, sentBack), tests)).toBe("sent_back");
+      const both = { checkpointLog: [...approved, log("feature:gate-c-fix-1", "approve")] };
+      expect(asksForLook(m(r, both), r)).toBe(true); // the gate then finds it passed, as for any other stop
+    });
+
+    it("a second repair is asked about too when it changed a first repair that the owner approved", () => {
+      const first = repair();
+      const second = feature("gate-c-fix-2", { mode: "review", checked: ALL_PASS, changesApproved: ["gate-c-fix-1"] });
+      expect(asksForLook(mission([owner, first, second], { checkpointLog: [...approved, log("feature:gate-c-fix-1", "approve")] }), second)).toBe(true);
+    });
+  });
 });
 
 describe("lookReason: why the team stops, when it is not the --checkpoint feature stop", () => {
@@ -353,12 +409,65 @@ describe("lookReason: why the team stops, when it is not the --checkpoint featur
   });
 });
 
+describe("a page whose second AI was shown no picture", () => {
+  const noPicture = (extra: Partial<FeatureChecked> = {}) => checked(["pass", "pass", "pass"], { pictures: { taken: 0, why: "no_browser" }, ...extra });
+  const review = (fields: Partial<Feature> = {}) => feature("p", { mode: "review", checked: noPicture(), ...fields });
+
+  it("is a reason to stop for a feature checked by a second AI, behind the others, and the flag removes it like the others", () => {
+    const f = review();
+    expect(asksForLook(mission([f]), f)).toBe(true);
+    expect(lookReason(mission([f]), f)).toBe("no_pictures");
+    expect(asksForLook(mission([f], { ownerStops: false }), f)).toBe(false);
+    // the pictures were taken and given: nothing to ask
+    const seen = review({ checked: checked(["pass", "pass", "pass"], { pictures: { taken: 2 } }) });
+    expect(asksForLook(mission([seen]), seen)).toBe(false);
+    // behind an owner feature, a review that did not finish, and checks not judged
+    expect(lookReason(mission([review({ mode: "owner" })]), review({ mode: "owner" }))).toBe("owner");
+    const notJudged = review({ checked: checked(["pass", "cannot_judge", "pass"], { pictures: { taken: 0, why: "no_browser" } }) });
+    expect(lookReason(mission([notJudged]), notJudged)).toBe("not_judged");
+    const unfinished = review({ checked: checked([], { unfinished: true, unjudged: 3, pictures: { taken: 0, why: "no_browser" } }) });
+    expect(lookReason(mission([unfinished]), unfinished)).toBe("unfinished");
+    // a feature checked by tests has none of this, and a repair is not asked through it
+    expect(asksForLook(mission([feature("t", { checked: noPicture() })]), feature("t", { checked: noPicture() }))).toBe(false);
+    const repair = feature("gate-c-fix-1", { mode: "review", checked: noPicture() });
+    expect(asksForLook(mission([repair]), repair)).toBe(false);
+  });
+
+  it("is said where the owner is not asked, and only there", () => {
+    const f = review();
+    const queued = howChecked(mission([f], { ownerStops: false }), f);
+    expect(queued).toMatchObject({ row: 7, noPicture: true, queuedWithoutLook: true });
+    expect(checkedWords(queued)).toBe("by a second AI against your list (it was queued without a stop for your look; no picture was shown to the second AI)");
+    expect(tableWords(queued)).toBe("Built; a second AI checked it against your list (3 of 3 passed); it was queued without a stop for your look; no picture was shown to the second AI");
+    expect(ownerSentences(queued)).toEqual(["It was queued without a stop for your look.", "No picture was shown to the second AI."]);
+    // the owner was asked and approved: the words are the approval's, as before
+    const approved = howChecked(mission([f], { checkpointLog: [log("feature:p", "approve")] }), f);
+    expect(approved).toMatchObject({ noPicture: true, queuedWithoutLook: false });
+    expect(checkedWords(approved)).toBe("by a second AI against your list and approved by you");
+    expect(ownerSentences(approved)).toEqual(["You were asked to look at it, and you approved it."]);
+    // a stop that is still to come says nothing of being queued without one
+    expect(howChecked(mission([f]), f).queuedWithoutLook).toBe(false);
+  });
+
+  it("is told for the rows with checks left unmet or not judged too, and never for a review that did not finish or a feature checked by tests", () => {
+    const unmet = review({ checked: checked(["fail", "pass", "pass"], { pictures: { taken: 0, why: "no_browser" } }) });
+    expect(checkedWords(howChecked(mission([unmet], { ownerStops: false }), unmet))).toBe("by a second AI against your list (1 check not met) (it was queued without a stop for your look; no picture was shown to the second AI)");
+    const unfinished = review({ checked: checked([], { unfinished: true, unjudged: 3, pictures: { taken: 0, why: "no_browser" } }) });
+    expect(howChecked(mission([unfinished], { ownerStops: false }), unfinished)).toMatchObject({ row: 4, noPicture: false });
+    const tests = feature("t", { checked: noPicture() });
+    expect(howChecked(mission([tests], { ownerStops: false }), tests).noPicture).toBe(false);
+  });
+});
+
 describe("the sentences about why the owner is asked", () => {
   it("the look's line 8", () => {
     expect(askedBecause("owner", 0)).toBe("You are asked because the plan marks this feature for your look.");
     expect(askedBecause("not_judged", 2)).toBe("You are asked because the second AI could not judge 2 of the checks.");
     expect(askedBecause("unfinished", 3)).toBe("You are asked because the second AI's check did not finish.");
     expect(askedBecause("sent_back", 0)).toBe("You are asked again because you sent it back.");
+    expect(askedBecause("repair", 0, ["Setup guide", "Landing page"])).toBe("You are asked because this repair changes work you approved earlier: “Setup guide”, “Landing page”.");
+    expect(askedBecause("repair", 0)).toBe("You are asked because this repair changes work you approved earlier.");
+    expect(askedBecause("no_pictures", 0)).toBe("You are asked because the second AI was shown no picture of the page.");
   });
 
   it("the clause after The team stopped because", () => {
@@ -366,10 +475,12 @@ describe("the sentences about why the owner is asked", () => {
     expect(stoppedBecause("not_judged", "Setup guide")).toBe("the second AI could not judge every check of “Setup guide”");
     expect(stoppedBecause("unfinished", "Setup guide")).toBe("the second AI's check of “Setup guide” did not finish");
     expect(stoppedBecause("sent_back", "Setup guide")).toBe("you sent “Setup guide” back and it is shown again");
+    expect(stoppedBecause("repair", "Fix problems found in the final review")).toBe("the repair “Fix problems found in the final review” changes work you approved earlier");
+    expect(stoppedBecause("no_pictures", "Landing page")).toBe("the second AI was shown no picture of “Landing page”");
   });
 
   it("has no word of tests, and never says the owner looked", () => {
-    for (const reason of ["owner", "not_judged", "unfinished", "sent_back"] as const) {
+    for (const reason of ["owner", "not_judged", "unfinished", "sent_back", "repair", "no_pictures"] as const) {
       for (const text of [askedBecause(reason, 2), stoppedBecause(reason, "T")]) expect(text).not.toMatch(/\btest|looked at|you looked/i);
     }
   });

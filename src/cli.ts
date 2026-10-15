@@ -8,7 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError } from "commander";
 import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
-import { hasModeFeature, howChecked, ownerSentences, pictureReason } from "./checked-by.js";
+import { hasModeFeature, howChecked, isModeFeature, ownerSentences, pictureReason } from "./checked-by.js";
 import { type AnswerInput, type AnswerProblem, answerNotice, answerProblem, applyAnswer, CHECKPOINT_KINDS, cleanNote, didWhat, endState, isCheckpointShape, isWaitingForCheck, localClock, lookCommand, MAX_NOTE_CHARS, MAX_SEND_BACKS, sendBacks, shown, waitingWhat } from "./checkpoint.js";
 import { parsePort, runDashboard } from "./dashboard/command.js";
 import { DEFAULT_PORT } from "./dashboard/constants.js";
@@ -684,7 +684,8 @@ async function planIntakeCommand(io: CliIO, mode: "preview" | "queue", file: str
   const quoted = `“${envelope.name}”`;
   const subject = target ? `a change to ~/mc-apps/${envelope.folder}, starting from branch ${target.baseBranch}` : "a new app";
   const stop = planStopLines(checkpoints, spec.features, opts.ownerCheckpoint);
-  const block = describePlan(spec, { request: envelope.request, style: "text", newApp: target === undefined });
+  const noOwnerLook = opts.ownerCheckpoint === false && !checkpoints.includes("feature");
+  const block = describePlan(spec, { request: envelope.request, style: "text", newApp: target === undefined, ...(noOwnerLook && { ownerStops: false as const }) });
   if (!queue) {
     say(
       io.stdout,
@@ -699,7 +700,7 @@ async function planIntakeCommand(io: CliIO, mode: "preview" | "queue", file: str
       "- The team's planner is skipped. This plan is used as written.",
       "- A second AI reads the plan first and may ask for changes.",
       ...stop.map((line) => `- ${line}`),
-      ...checkingLines(spec.features, opts.ownerCheckpoint === false && !checkpoints.includes("feature")).map((line) => `- ${line}`),
+      ...checkingLines(spec.features, noOwnerLook).map((line) => `- ${line}`),
       "",
       'To queue it, run the same command with "plan queue" instead of "plan preview".',
     );
@@ -927,10 +928,15 @@ function planShowCommand(io: CliIO, id: string): number {
     plan ? `Written by the leader. Plan code ${plan.sha256.slice(0, 8)} (of the plan as the leader wrote it).` : "Written by the team's planner.",
     ...reviewLines(plan?.review, sendBacks(m, "plan")),
     "",
-    ...describePlan(spec, { request: m.request, style: "text", newApp: m.kind === "greenfield" && m.repoPath === "" }),
+    ...describePlan(spec, { request: m.request, style: "text", newApp: m.kind === "greenfield" && m.repoPath === "", ...(noOwnerLookIn(m) && { ownerStops: false as const }) }),
     ...howEachWasChecked(m, spec.features, store),
   );
   return 0;
+}
+
+/** The mission was queued without the stops for the owner's look, and the owner did not ask for a stop at every feature (which would stop them anyway). */
+function noOwnerLookIn(m: Pick<Mission, "ownerStops" | "checkpoints">): boolean {
+  return m.ownerStops === false && m.checkpoints?.includes("feature") !== true;
 }
 
 /** Whether a check of the project's own was run for the feature, from its last `deliverable.checked` event: "passed", "failed" or nothing. */
@@ -965,7 +971,7 @@ function howEachWasChecked(m: Mission, planned: readonly SpecFeature[], store: M
 function featureCheckLines(m: Mission, f: Feature, events: MissionEvent[]): string[] {
   const title = `“${shown(typeof f.title === "string" ? f.title : String(f.id))}”`;
   const notDone = f.status === "blocked" || f.status === "skipped" ? "not finished, so it was not checked." : "not checked yet.";
-  if (f.mode === undefined) {
+  if (!isModeFeature(f)) {
     if (f.status !== "done") return [`- ${title}: ${notDone}`];
     const h = howChecked(m, f);
     const words = h.row === 2 ? "checked by the project's own checks only; no tests were written for it." : "checked by tests.";
@@ -1194,7 +1200,9 @@ function statusCommand(io: CliIO, json: boolean): void {
     say(io.stdout, JSON.stringify(rows, null, 2));
     return;
   }
-  if (rows.length === 0) {
+  // A mission whose file cannot be used is left out of the table; it is named below, so a mission that will not run is never a mystery.
+  const damaged = store.damaged();
+  if (rows.length === 0 && damaged.length === 0) {
     say(io.stdout, 'No missions yet. Queue one with: mc new "<your idea>"');
     return;
   }
@@ -1210,7 +1218,10 @@ function statusCommand(io: CliIO, json: boolean): void {
       r.waitingUntil ? localDateTime(Date.parse(r.waitingUntil)) : "-",
     ]),
   ];
-  say(io.stdout, ...formatTable(table));
+  if (rows.length > 0) say(io.stdout, ...formatTable(table));
+  damaged.forEach((d, i) =>
+    say(io.stdout, ...(rows.length > 0 || i > 0 ? [""] : []), `${d.id} was left out of this list and will not run: ${d.reason}. Fix its file or remove its folder.`),
+  );
   if (rows.some((r) => r.interrupted)) {
     say(
       io.stdout,

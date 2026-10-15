@@ -191,7 +191,7 @@ function checkpointCard(x: MissionFacts, names: LeaderNames): NeedsYouCard | nul
     featureId: cp.kind === "feature" && feature !== undefined ? feature.id : null,
     title: CARD_TEXT.checkpointTitle(x.view.title, cp.kind, facts.featureTitle),
     happened: engineSays(why !== undefined ? CARD_TEXT.checkpointHappenedLook[why] : leaderPlan ? CARD_TEXT.checkpointHappenedLeaderPlan : CARD_TEXT.checkpointHappened),
-    summary: checkpointSummary(cp.kind, cp.look.branch ?? null, sentBack, CHECKPOINT_SEND_BACK_CAP, leaderPlan, why !== undefined),
+    summary: checkpointSummary(cp.kind, cp.look.branch ?? null, sentBack, CHECKPOINT_SEND_BACK_CAP, leaderPlan, why !== undefined && why !== "repair"),
     ifNothing: CARD_TEXT.checkpointIfNothing,
     whatToDo: engineSays(CARD_TEXT.checkpointWhatToDo),
     tellLeader: LEADER.checkpoint(names, ref),

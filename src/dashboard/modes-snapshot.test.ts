@@ -101,7 +101,8 @@ describe("T-MODES-SNAP-1: what read.ts keeps of a feature checked by a second AI
       ],
       unjudged: 1,
       scripted: { problems: [], facts: [] },
-      pictures: { taken: 0 },
+      // only the code of why the second AI was shown no picture (it decides whether the owner is asked); the number taken is not read
+      pictures: { taken: 0, why: "no_browser" },
     });
     const unfinished = read([{ mission: missionAt(MID, ID, { features: [reading("a", "done", [], { checked: checkedOf([], { unfinished: true }) })] }) }])?.mission?.features[0]?.checked;
     expect(unfinished).toMatchObject({ unfinished: true, unjudged: 0, results: [] });
@@ -115,10 +116,11 @@ describe("T-MODES-SNAP-1: what read.ts keeps of a feature checked by a second AI
 
   it("drops what is not a mode, an effort, an ownerStops or a checked record, and cleans damaged numbers", () => {
     const odd = (over: Record<string, unknown>) => read([{ mission: missionAt(MID, ID, { features: [featureWith("a", "done", over as Partial<Feature>)] }) }])?.mission?.features[0];
-    expect(odd({ mode: "banana", effort: "huge" })).not.toHaveProperty("mode");
-    expect(odd({ mode: "tests" })).not.toHaveProperty("mode");
-    expect(odd({ mode: "review", effort: "standard" })).not.toHaveProperty("effort");
-    expect(odd({ mode: ["owner"], effort: 7 })).not.toHaveProperty("mode");
+    // A mode or an effort that is not one of the known words makes the whole file unreadable, as it does for the engine: the page must not
+    // show such a feature as one checked by tests (docs/modes-spec.md, M4, and the review of Wave 2). It is counted with the unreadable missions.
+    for (const over of [{ mode: "banana", effort: "huge" }, { mode: "tests" }, { mode: "review", effort: "standard" }, { mode: ["owner"], effort: 7 }, { mode: null }]) {
+      expect(read([{ mission: missionAt(MID, ID, { features: [featureWith("a", "done", over as Partial<Feature>)] }) }])?.mission, JSON.stringify(over)).toBeNull();
+    }
     expect(odd({ checked: "yes" })).not.toHaveProperty("checked");
     expect(odd({ checked: [1] })).not.toHaveProperty("checked");
     expect(odd({ checked: { unjudged: -3 } })?.checked?.unjudged).toBe(0);

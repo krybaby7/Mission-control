@@ -456,6 +456,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     stepsUsed: " steps used)",
     recovered: "Recovered after a retry",
     firstTry: "Built and checked on the first try.",
+    firstTryRead: "Built on the first try.",
     repairFeature: "Repair feature",
     repairRound: "repair round",
     stoppedHere: "Stopped here",
@@ -465,6 +466,8 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     checkOne: "1 check written for this feature",
     checkMany: " checks written for this feature",
     checkNone: "No checks written for this feature",
+    listOne: "1 check on your list",
+    listMany: " checks on your list",
     allowance: "Allowance (how much of your plans is used)",
     pauseHere: "work pauses here",
     earlierOpen: "Earlier work still open (",
@@ -912,7 +915,17 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     return f.reinforcements > 0 || f.state === "stuck" || f.state === "being_built" || f.state === "being_reviewed" || f.state === "paused";
   }
 
+  // A feature checked by a second AI has no test files, so the number of test files says nothing about it. It carries the count of the
+  // checks on its list instead, and, once it is done, the words for how it was checked (docs/modes-spec.md, 11.5): never "checked" alone.
+  function byReading(f) { return typeof f.modeChecks === "number"; }
+
   function checksLine(f) {
+    if (byReading(f)) {
+      if (f.checkedBy) return el("p", "small muted", f.checkedBy);
+      var k = f.modeChecks;
+      if (k === 0) return null;
+      return el("p", "small muted", k === 1 ? W.listOne : k + W.listMany);
+    }
     var n = f.acceptanceTests;
     if (n === 0 && (f.state === "waiting_turn" || f.state === "left_out")) return null;
     var text = n === 0 ? W.checkNone : n === 1 ? W.checkOne : n + W.checkMany;
@@ -935,8 +948,9 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     if (firstTryDone(f)) {
       t.className += " compact";
       var calm = el("p", "firsttry");
-      add(calm, ic("check"), el("span", "", W.firstTry));
+      add(calm, ic("check"), el("span", "", byReading(f) ? W.firstTryRead : W.firstTry));
       t.appendChild(calm);
+      if (byReading(f) && f.checkedBy) t.appendChild(el("p", "small muted", f.checkedBy));
       return t;
     }
     if (showTries(f)) {

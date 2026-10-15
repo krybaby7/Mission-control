@@ -128,9 +128,9 @@ export interface World {
  * A mock team whose builders of documents write the documents above, and whose second AI quotes them. `pictureText` is the
  * visible text the fake picture tool reports for a page.
  */
-export async function openWorld(opts: HarnessOptions & { pictureText?: string } = {}): Promise<World> {
+export async function openWorld(opts: HarnessOptions & { pictureText?: string; broken?: boolean } = {}): Promise<World> {
   const renderer = fakeRenderer({ text: () => opts.pictureText ?? "Habit tracker. Keep your habits going. Get started." });
-  const { pictureText: _text, ...harnessOptions } = opts;
+  const { pictureText: _text, broken: _broken, ...harnessOptions } = opts;
   const h: MissionHarness = new MissionHarness({
     renderer,
     ...harnessOptions,
@@ -156,7 +156,8 @@ export async function openWorld(opts: HarnessOptions & { pictureText?: string } 
   vi.stubEnv("MC_CONFIG", "");
   vi.stubEnv("MC_IN_CONTAINER", "");
   vi.stubEnv("CLAUDE_CONFIG_DIR", join(h.root, "claude-config"));
-  for (const app of ["habit-tracker", "sales-data"]) await createFixtureRepo(h.git, join(userHome, "mc-apps", app));
+  // `broken`: the apps' own checks already fail before the mission starts (a red baseline).
+  for (const app of ["habit-tracker", "sales-data"]) await createFixtureRepo(h.git, join(userHome, "mc-apps", app), { broken: opts.broken === true });
 
   const mc = async (args: string[], stdin?: string): Promise<Said> => {
     const said: Said = { code: 0, out: "", err: "" };

@@ -206,6 +206,25 @@ describe("the three examples of the design", () => {
     expect(describePlan(three.spec, { request: "x", style: "look" })[3]).toBe("How the features are checked: 1 by tests, 1 by a second AI, 1 by a second AI and then by you.");
   });
 
+  it("does not say the owner looks at a feature marked “owner” when the plan is queued without the stop for the owner's look", () => {
+    const landing = accepted(LANDING);
+    for (const style of ["text", "look"] as const) {
+      const words = describePlan(landing.spec, { request: landing.envelope.request, style, ownerStops: false });
+      const joined = words.join("\n");
+      expect(joined, style).toContain("a second AI, against its list of checks. It was queued without a stop for your look. No tests are written for it.");
+      expect(joined, style).not.toContain("and then by you");
+    }
+    const look = describePlan(landing.spec, { request: landing.envelope.request, style: "look", ownerStops: false });
+    expect(look[3]).toBe("How the features are checked: 1 by a second AI, queued without a stop for your look.");
+    const three = accepted(plan(SALES.split("\n").slice(0, -1), "", "feature: third", "title: Third", "story: The third.", "mode: owner", "check: It reads well."));
+    expect(describePlan(three.spec, { request: "x", style: "look", ownerStops: false })[3]).toBe("How the features are checked: 1 by tests, 1 by a second AI, 1 by a second AI, queued without a stop for your look.");
+    // a plan with no feature marked “owner” has nothing to change, and the option leaves the plan as it was
+    const guide = accepted(GUIDE);
+    expect(describePlan(guide.spec, { request: guide.envelope.request, style: "text", ownerStops: false })).toEqual(describePlan(guide.spec, { request: guide.envelope.request, style: "text" }));
+    // the option is only ever the word false: leaving it out says what it always said
+    expect(describePlan(landing.spec, { request: landing.envelope.request, style: "look" })[3]).toBe("How the features are checked: 1 by a second AI and then by you.");
+  });
+
   it("says nothing of tests for a plan whose features no test checks, and keeps to the wording rules", () => {
     for (const text of [GUIDE, LANDING]) {
       const parsed = accepted(text);

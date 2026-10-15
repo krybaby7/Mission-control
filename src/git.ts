@@ -245,6 +245,15 @@ export class Git {
   }
 
   /**
+   * The files that `commit` changed compared with its first parent: for a merge commit made with `--no-ff`, the files the merged work
+   * brought in. Repo-relative, sorted, unique (both sides of a rename). Throws when `commit` has no parent.
+   */
+  async filesChangedBy(cwd: string, commit: string): Promise<string[]> {
+    const out = await this.git(cwd, ["diff", "--name-only", "-z", "--no-renames", `${refArg(commit)}^1`, refArg(commit), "--"]);
+    return [...new Set(splitNul(out))].sort();
+  }
+
+  /**
    * Unified diff from `fromRef` to `toRef`, or to the working tree (tracked files only: commit first to include new
    * files), byte for byte as git prints it. With `maxChars`, the head is kept and a "[diff truncated: N chars omitted]"
    * line is appended.

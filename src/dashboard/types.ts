@@ -387,6 +387,18 @@ export interface FeatureView {
   recovered: boolean;
   /** features[].frozenTests.length: acceptance test FILES, not test cases. */
   acceptanceTests: number;
+  /**
+   * Only for a feature checked by a second AI (docs/modes-spec.md, 11.1): how many checks are on its list (features[].acceptance.length).
+   * Such a feature has no test files, so `acceptanceTests` is 0 for it and says nothing; the page says "N checks on your list" instead of
+   * "No checks written for this feature". The key is absent for every other feature, so an older snapshot reads as before. Engine.
+   */
+  modeChecks?: number;
+  /**
+   * Only for a DONE feature checked by a second AI: how it was checked, in the same short words as the Results page
+   * (`DebriefFeature.checkedBy`): "Checked by a second AI against your list; approved by you". The tile shows it instead of "Built and
+   * checked", which would claim tests. Absent for every other feature. Engine.
+   */
+  checkedBy?: string;
   /** Derived: id starts with "gate-c-fix-" (added by the final check's repair lap, src/dispatcher.ts:1935). */
   isRepair: boolean;
   /** The id of the NeedsYouCard about this feature, or null. */

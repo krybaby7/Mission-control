@@ -275,6 +275,8 @@ export const REASON_PAUSED = "Paused. It continues on the next run.";
 /** A feature of a mission that waits for the owner's check. */
 export const REASON_PAUSED_FOR_CHECK = "Paused while the mission waits for your check.";
 export const REASON_RECOVERED = "Built and checked after a retry.";
+/** The same reason for a feature checked by a second AI: no test checked it, so the line only says it was built (docs/modes-spec.md, 11.5). */
+export const REASON_RECOVERED_BUILT = "Built after a retry.";
 export const REASON_STUCK_FALLBACK = "It could not be finished.";
 export const REASON_LEFT_OUT_FALLBACK = "It was left out.";
 
@@ -517,6 +519,8 @@ export const CARD_TEXT = {
     not_judged: "The team stopped here because the second AI could not judge every check of this feature, so you look at it first.",
     unfinished: "The team stopped here because the second AI's check of this feature did not finish, so you look at it first.",
     sent_back: "The team stopped here again because you sent this feature back, so you look at the changed work.",
+    repair: "The team stopped here because this repair changes work you approved earlier, so you look at it first.",
+    no_pictures: "The team stopped here because the second AI was shown no picture of this page, so you look at it first.",
   } satisfies Record<LookWhy, string>,
   // A plan the leader wrote stops by default, so "because you asked" would not be true (docs/plans-spec.md, 9).
   checkpointHappenedLeaderPlan: "The team stopped here because the leader wrote this plan, and you look at it first.",

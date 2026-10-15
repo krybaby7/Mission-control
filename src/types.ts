@@ -382,6 +382,12 @@ export interface Feature extends SpecFeature {
   passingCommit?: string;
   /** Only a "review" or "owner" feature: what the second AI and Mission Control's own script found at the last check. Saved after every answer of the second AI. */
   checked?: FeatureChecked;
+  /**
+   * Only the repair that the final review adds (`gate-c-fix-N`), and only when it changed a file of work the owner approved: the ids of those
+   * features. The owner then looks at the repair before it is added, because nothing else ties the new text to the approval they gave.
+   * Absent when the repair touched no approved file. Set at the repair's own review, again after every change of it.
+   */
+  changesApproved?: string[];
 }
 
 /** One verdict of the second AI on one written check. "cannot_judge" is never a pass. */

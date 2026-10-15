@@ -55,6 +55,8 @@ const CHECKED_BY = {
   tests: "tests, written first.",
   review: "a second AI, against its list of checks. No tests are written for it.",
   owner: "a second AI, against its list of checks, and then by you. No tests are written for it.",
+  // A feature marked “owner” in a plan queued without the stops for the owner's look: nothing makes the team stop for it, so it is not said to be looked at.
+  ownerNoStop: "a second AI, against its list of checks. It was queued without a stop for your look. No tests are written for it.",
 };
 const EFFORT_WORDS = {
   light: "light. The team's lightest AI builds it first and a lighter AI checks it.",
@@ -540,6 +542,11 @@ export interface DescribeOptions {
   style: "text" | "look";
   /** A new app whose folder is not made yet: the app name line says where it will go. */
   newApp?: boolean;
+  /**
+   * `false`: the plan is queued without the stop for the owner's look at features marked “owner”, and the owner did not ask for a stop
+   * at every feature. Then no line may say that the owner looks at such a feature, since nothing makes the team stop for it.
+   */
+  ownerStops?: false;
 }
 
 /** The parts of a plan that `describePlan` reads; `Spec` (the planner's, after adoption) has the same shape. */
@@ -572,7 +579,8 @@ export function describePlan(spec: Describable, opts: DescribeOptions): string[]
   // The names a plan fixes are for the builder and for whatever checks the work. When no feature is checked by tests, the heading must not talk of tests.
   const noTests = features.length > 0 && features.every((f) => f.mode !== undefined);
   const contractWho = noTests ? "the work and its checks" : "the tests and the code";
-  const howChecked = (f: { mode: "review" | "owner" | undefined }): keyof typeof CHECKED_BY => f.mode ?? "tests";
+  const noStop = opts.ownerStops === false;
+  const howChecked = (f: { mode: "review" | "owner" | undefined }): keyof typeof CHECKED_BY => (f.mode === "owner" && noStop ? "ownerNoStop" : (f.mode ?? "tests"));
   const titleOf = (id: string): string => features.find((f) => f.id === id)?.title || id;
   const needs = (deps: string[]): string => deps.map((d) => `“${titleOf(d)}”`).join(", ");
   const choices = texts(spec.assumptions);
@@ -644,12 +652,13 @@ export function describePlan(spec: Describable, opts: DescribeOptions): string[]
 }
 
 /** "1 by tests, 1 by a second AI, 1 by a second AI and then by you": the features counted by how they are checked (a count of 0 is left out). */
-function checkedCounts(ways: ("tests" | "review" | "owner")[]): string {
+function checkedCounts(ways: (keyof typeof CHECKED_BY)[]): string {
   const n = (way: string): number => ways.filter((w) => w === way).length;
   return [
     [n("tests"), "by tests"],
     [n("review"), "by a second AI"],
     [n("owner"), "by a second AI and then by you"],
+    [n("ownerNoStop"), "by a second AI, queued without a stop for your look"],
   ]
     .filter(([count]) => (count as number) > 0)
     .map(([count, words]) => `${count} ${words}`)

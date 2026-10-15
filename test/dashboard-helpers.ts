@@ -276,20 +276,24 @@ const lampReason = obj({ code: lit(LAMP_REASON_CODES), severity: lit(LAMP_SEVERI
 const lamp = obj({ state: lit(LAMP_STATES), word: text, sentence: text, reasons: arr(lampReason) });
 const waitInfo = obj({ until: num, untilText: str, cause: lit(["limits", "trouble", "login", "unknown"]), text: text });
 const progressStep = obj({ id: lit(PROGRESS_STEPS), word: text, state: lit(["done", "current", "todo"]) });
-const feature = obj({
-  id: text,
-  title: text,
-  state: lit(FEATURE_STATES),
-  word: text,
-  reason: nullable(said),
-  steps: obj({ used: count, total: count, caption: text }),
-  reinforcements: count,
-  recovered: bool,
-  acceptanceTests: count,
-  isRepair: bool,
-  cardId: nullable(text),
-  tellLeader: text,
-});
+const feature = obj(
+  {
+    id: text,
+    title: text,
+    state: lit(FEATURE_STATES),
+    word: text,
+    reason: nullable(said),
+    steps: obj({ used: count, total: count, caption: text }),
+    reinforcements: count,
+    recovered: bool,
+    acceptanceTests: count,
+    isRepair: bool,
+    cardId: nullable(text),
+    tellLeader: text,
+  },
+  // Only for a feature checked by a second AI (docs/modes-spec.md, 11.5): the checks on its list, and, once done, how it was checked.
+  { modeChecks: count, checkedBy: text },
+);
 const mission = obj({
   id: text,
   title: text,

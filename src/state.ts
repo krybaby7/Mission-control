@@ -161,6 +161,26 @@ export class MissionStore {
     return missions.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || compareStrings(a.id, b.id));
   }
 
+  /**
+   * The mission folders whose file is there but cannot be used (damaged, edited by hand into something the engine does not know, or
+   * written by another version), with a short plain reason. `list()` leaves them out, so nothing else shows them. A folder with no file
+   * at all is half-made and is not named.
+   */
+  damaged(): { id: string; reason: string }[] {
+    const found: { id: string; reason: string }[] = [];
+    for (const id of this.missionDirNames()) {
+      const file = this.missionFile(id);
+      if (!existsSync(file)) continue;
+      try {
+        this.load(id);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        found.push({ id, reason: message.split(file).join("its file") });
+      }
+    }
+    return found;
+  }
+
   missionDir(id: string): string {
     return join(this.missionsRoot(), assertSafeId(id));
   }
@@ -338,7 +358,33 @@ const MISSION_FIELD_CHECKS = {
  */
 function invalidMissionField(data: unknown): string | undefined {
   if (!isRecord(data)) return "object";
-  return Object.entries(MISSION_FIELD_CHECKS).find(([field, check]) => !check(data[field]))?.[0];
+  return Object.entries(MISSION_FIELD_CHECKS).find(([field, check]) => !check(data[field]))?.[0] ?? invalidHowChecked(data);
+}
+
+/** The only words a feature's `mode` and `effort` can hold (docs/modes-spec.md, 4.1). A feature with no `mode` is checked by tests. */
+const MODE_WORDS: readonly unknown[] = ["review", "owner"];
+const EFFORT_WORDS: readonly unknown[] = ["light", "deep"];
+
+/**
+ * How a feature is checked decides what is built for it and whether the owner is asked, so a value that is neither absent nor one of
+ * the words above is never read as "checked by reading, no stop" (that would turn the owner's stop off by accident). The first such
+ * value in the features, in the spec the planner wrote and in the plan the mission was queued with, as a path: `features[0].mode`.
+ */
+function invalidHowChecked(data: Record<string, unknown>): string | undefined {
+  const inList = (list: unknown, path: string): string | undefined => {
+    if (!Array.isArray(list)) return undefined;
+    for (let i = 0; i < list.length; i++) {
+      const f: unknown = list[i];
+      if (!isRecord(f)) continue;
+      if (f.mode !== undefined && !MODE_WORDS.includes(f.mode)) return `${path}[${i}].mode`;
+      if (f.effort !== undefined && !EFFORT_WORDS.includes(f.effort)) return `${path}[${i}].effort`;
+    }
+    return undefined;
+  };
+  const spec = data.spec;
+  const plan = data.plan;
+  const planSpec = isRecord(plan) ? plan.spec : undefined;
+  return inList(data.features, "features") ?? (isRecord(spec) ? inList(spec.features, "spec.features") : undefined) ?? (isRecord(planSpec) ? inList(planSpec.features, "plan.spec.features") : undefined);
 }
 
 const PLAN_OUTCOMES: readonly unknown[] = ["approved", "revised", "not_applied", "unfinished"];
@@ -367,7 +413,9 @@ function isSpecShape(x: unknown): boolean {
       isString(f.story) &&
       isStringList(f.acceptance) &&
       (f.kind === "standard" || f.kind === "mechanical") &&
-      isStringList(f.deps),
+      isStringList(f.deps) &&
+      (f.mode === undefined || MODE_WORDS.includes(f.mode)) &&
+      (f.effort === undefined || EFFORT_WORDS.includes(f.effort)),
   );
 }
 

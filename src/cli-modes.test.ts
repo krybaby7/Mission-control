@@ -152,6 +152,27 @@ describe("--no-owner-checkpoint", () => {
     expect(err).toBe("");
   });
 
+  it("is said by the plan lines too: queue, preview and plan show never say that the owner looks at the feature", async () => {
+    // the plan lines of the preview and of the queue
+    expect(await mc(["plan", "queue", "-", "--no-owner-checkpoint"], LANDING)).toBe(0);
+    expect(out).toContain("Checked by: a second AI, against its list of checks. It was queued without a stop for your look. No tests are written for it.");
+    expect(out).toContain("It will not stop for your look at features marked “owner”");
+    expect(out).not.toContain("and then by you");
+    const id = store().list()[0]?.id as string;
+    // plan show of the queued mission
+    expect(await mc(["plan", "show", id])).toBe(0);
+    expect(out).toContain("Checked by: a second AI, against its list of checks. It was queued without a stop for your look. No tests are written for it.");
+    expect(out).not.toContain("and then by you");
+    // without the flag the same plan says what it always said
+    rmSync(join(home, "missions", id), { recursive: true });
+    expect(await mc(["plan", "queue", "-"], LANDING)).toBe(0);
+    expect(out).toContain("Checked by: a second AI, against its list of checks, and then by you. No tests are written for it.");
+    // the owner who also asked for a stop at every feature is stopped at it, so the plan may say so
+    rmSync(join(home, "missions", store().list()[0]?.id as string), { recursive: true });
+    expect(await mc(["plan", "queue", "-", "--no-owner-checkpoint", "--checkpoint", "feature"], LANDING)).toBe(0);
+    expect(out).toContain("Checked by: a second AI, against its list of checks, and then by you. No tests are written for it.");
+  });
+
   it("is accepted by plan preview, which queues nothing", async () => {
     expect(await mc(["plan", "preview", "-", "--no-owner-checkpoint"], LANDING)).toBe(0);
     expect(store().list()).toEqual([]);

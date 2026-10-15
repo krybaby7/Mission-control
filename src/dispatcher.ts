@@ -4,7 +4,7 @@
 // passing verify tail, unit installs, init attempts, the final verify result) live next to it in <missionDir>/dispatch.json.
 import { type Dirent, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { askedBecause, asksForLook, isModeFeature, lookReason, pictureReason } from "./checked-by.js";
+import { approvedWork, askedBecause, asksForLook, changedApprovedWork, hasModeFeature, isModeFeature, lookReason, pictureReason } from "./checked-by.js";
 import {
   type Deliverables,
   type DeliverableSource,
@@ -1215,9 +1215,21 @@ class MissionRun {
     m.baselineBroken = !result.ok;
     m.baselineFailures = result.ok ? [] : lastLines(result.outputTail, BASELINE_LINES);
     this.save();
-    if (!result.ok) {
-      this.noteOnce("The project's own checks were already failing before this mission started, so features were judged by their new tests.");
-    }
+    if (!result.ok) this.noteOnce(this.baselineNote());
+  }
+
+  /**
+   * The note that the project's own checks were already red. A mission with no feature checked by a second AI keeps the words it always
+   * had; for the others, saying that features were judged by their new tests would be false where no test exists. The plan is read, not
+   * the features: the baseline is checked before the plan is turned into features.
+   */
+  private baselineNote(): string {
+    const features = planOf(this.m)?.spec.features ?? this.m.features;
+    const lead = "The project's own checks were already failing before this mission started";
+    if (!features.some(isModeFeature)) return `${lead}, so features were judged by their new tests.`;
+    return features.every(isModeFeature)
+      ? `${lead}, so they could not be used to judge the new work. Mission Control's own checks and a second AI judged it instead.`
+      : `${lead}, so they could not be used to judge the new work. The features checked by tests were judged by tests alone, and the others by Mission Control's own checks and a second AI.`;
   }
 
   /**
@@ -1526,7 +1538,7 @@ class MissionRun {
   private async startUnit(f: Feature): Promise<void> {
     const wt = await this.ensureUnitWorktree(f);
     f.testsCommit = await this.deps.git.headSha(wt);
-    if (f.mode === undefined) return this.setStatus(f, "testing");
+    if (!isModeFeature(f)) return this.setStatus(f, "testing");
     // A feature that is checked by reading has no test author and no frozen tests: the guard of the project's own tests and
     // check scripts is recorded now, and the work starts at once.
     await this.recordGuard(f, wt);
@@ -1710,7 +1722,7 @@ class MissionRun {
   private ladderFor(f: Feature): Rung[] {
     const { ladders } = this.deps.config;
     const rungs = f.effort === "deep" ? liftRungs(ladders.standard) : ladders[f.effort === "light" || f.kind === "mechanical" ? "mechanical" : "standard"];
-    return f.mode === undefined ? rungs : rungs.filter(isBuildRung);
+    return !isModeFeature(f) ? rungs : rungs.filter(isBuildRung);
   }
 
   /**
@@ -1726,7 +1738,7 @@ class MissionRun {
   }
 
   private async buildStep(f: Feature): Promise<void> {
-    if (f.mode !== undefined) return this.makeStep(f);
+    if (isModeFeature(f)) return this.makeStep(f);
     if (this.scratch.unit(f.id).pendingDiagnosis) {
       // A disputed test is diagnosed before anything else, even when a stop came between the dispute and its diagnosis.
       await this.ensureUnitWorktree(f);
@@ -1942,7 +1954,8 @@ class MissionRun {
     for (;;) {
       // The work the owner is about to look at was reviewed once already; a resume must not ask the reviewer again.
       if (!this.reviewSettled(f)) {
-        const finished = f.mode === undefined ? await this.reviewAndFix(f, wt) : await this.rubricAndFix(f, wt);
+        const finished = !isModeFeature(f) ? await this.reviewAndFix(f, wt) : await this.rubricAndFix(f, wt);
+        await this.noteApprovedChanges(f, wt); // before `looksAt`: the answer decides whether the owner looks, and it must be saved with the commit
         if (this.looksAt(f)) this.scratch.updateUnit(f.id, { reviewedCommit: f.passingCommit, reviewSkipped: !finished });
       }
       const gate = await this.checkpointGate("feature", f);
@@ -1951,6 +1964,34 @@ class MissionRun {
       // "again": the engineer changed the work after the owner's note; it is reviewed again and shown again
     }
     await this.merge(f);
+  }
+
+  /**
+   * The final review's repair is not asked about, unless it changes a file of work the owner approved (docs/modes-spec.md, M23 and the
+   * review of Wave 2): then the report would still say "approved by you" for text the owner never saw in its new form. The files of each
+   * approved feature are what its merge brought in; the repair's are what it changed against the mission branch. When git cannot say, the
+   * repair counts as touching all of them, so the owner is asked rather than left unaware.
+   */
+  private async noteApprovedChanges(f: Feature, wt: string): Promise<void> {
+    if (!/^gate-c-fix-/.test(f.id)) return;
+    const approved = approvedWork(this.m, f);
+    let touched: string[] = [];
+    if (approved.length > 0) {
+      try {
+        const mine = new Set(await this.deps.git.changedFiles(wt, this.m.integrationBranch));
+        const target = await this.ensureIntegrationWorktree();
+        for (const x of approved) {
+          const theirs = await this.deps.git.filesChangedBy(target, need(x.commit, "the merge commit"));
+          if (theirs.some((p) => mine.has(p))) touched.push(x.id);
+        }
+      } catch {
+        touched = approved.map((x) => x.id);
+      }
+    }
+    if (touched.length === 0 ? f.changesApproved === undefined : JSON.stringify(f.changesApproved) === JSON.stringify(touched)) return;
+    if (touched.length === 0) delete f.changesApproved;
+    else f.changesApproved = touched;
+    this.save();
   }
 
   /** How many fix rounds a feature may have: the configured number, and one more when the team thinks `deep`. */
@@ -2007,7 +2048,7 @@ class MissionRun {
 
   /** A fix round by the engineer that passed; true when it is green again (new passingCommit), else rolled back. */
   private async fixFindings(f: Feature, wt: string, findings: Finding[]): Promise<boolean> {
-    if (f.mode !== undefined) return this.fixDeliverable(f, wt, findings);
+    if (isModeFeature(f)) return this.fixDeliverable(f, wt, findings);
     const assignment = this.passingAssignment(f);
     const answer = await this.agent<BuildOutput>({
       role: "engineer",
@@ -2541,6 +2582,9 @@ class MissionRun {
     // acceptance tests, run together on the merged result, are what must pass then.
     const regression = m.baselineBroken ? await this.regressionCheck(wt) : null;
     const ok = m.baselineBroken ? regression?.ok !== false : full.ok;
+    // A red baseline with no test to run together judges nothing. A mission with a feature checked by a second AI says so; a mission queued
+    // the old way keeps what it always did (the final check counted as passed). `ok` stays as it is: nothing failed, so nothing is repaired.
+    const nothingJudged = m.baselineBroken && regression === null && hasModeFeature(m.features);
     const tail =
       regression && !regression.ok
         ? `The finished features' acceptance tests, run together on the merged result, FAILED:\n${regression.outputTail}\n\nThe project's own full check (already failing before this mission):\n${full.outputTail}`
@@ -2548,7 +2592,7 @@ class MissionRun {
     const findings = await this.finalReview(wt, tail);
     const blocking = (findings ?? []).filter(isBlocking);
     // Only once the review ran: a mission stopped before it (by the run cap) must not count as checked.
-    this.scratch.setFinalVerify({ ok, head: await this.deps.git.headSha(wt), reviewed: findings !== null, blocking: blocking.length });
+    this.scratch.setFinalVerify({ ok, head: await this.deps.git.headSha(wt), reviewed: findings !== null, blocking: blocking.length, ...(nothingJudged && { judged: false as const }) });
     const verifyRed = !ok;
     for (const finding of (findings ?? []).filter((x) => !isBlocking(x))) this.noteFinding(finding);
     if ((blocking.length > 0 || verifyRed) && m.gateCRounds < this.deps.config.limits.maxGateCRounds) {
@@ -2806,10 +2850,12 @@ class MissionRun {
     const { m } = this;
     const asked = kind === "feature" && f !== undefined ? asksForLook(m, f) : m.checkpoints?.includes(kind) === true;
     if (!asked) return "go";
+    // `asked` is true for a derived feature only through the rule for the final repair (or its send-back): the owner looks at it.
+    const repairLook = kind === "feature" && f !== undefined && isDerivedFeature(f.id);
     const cp = m.checkpoint;
     // An answer is believed only if the event that records it exists (see answerIsRecorded).
     const recorded = cp?.state === "answered" && isCheckpointShape(cp) && answerIsRecorded(cp, this.deps.store.readEvents(m.id));
-    const step = nextCheckpointState(m, kind, f?.id, recorded, asked);
+    const step = nextCheckpointState(m, kind, f?.id, recorded, asked, repairLook);
     switch (step.step) {
       case "go":
         return "go";
@@ -2887,7 +2933,12 @@ class MissionRun {
               ...(failed ? ["Your change could not be made, so this is the earlier plan."] : []),
               "This plan was written by the leader, not by the team's planner.",
               ...reviewLines(plan.review, sendBacks(m, "plan")),
-              ...describePlan(m.spec ?? plan.spec, { request: m.request, style: "look", newApp: m.kind === "greenfield" && m.repoPath === "" }),
+              ...describePlan(m.spec ?? plan.spec, {
+                request: m.request,
+                style: "look",
+                newApp: m.kind === "greenfield" && m.repoPath === "",
+                ...(m.ownerStops === false && m.checkpoints?.includes("feature") !== true && { ownerStops: false as const }),
+              }),
               ...warning,
             ],
           };
@@ -2908,11 +2959,14 @@ class MissionRun {
       }
       case "feature": {
         const feature = need(f, "the feature");
-        if (feature.mode !== undefined) return this.modeLook(feature, failed, warning);
+        if (isModeFeature(feature)) return this.modeLook(feature, failed, warning);
         const built = feature.attempts.filter((a) => a.outcome === "pass" && a.action !== "diagnose").at(-1)?.summary;
         const unreviewed = this.scratch.unit(feature.id).reviewSkipped === true;
         const notes = feature.openFindings;
         const files = await this.changedFilesOf(feature.worktree, m.integrationBranch);
+        // Only the final repair of a mixed mission gets a reason here (it changed work the owner approved); every other stop of a
+        // feature checked by tests keeps the lines it always had.
+        const reason = lookReason(m, feature);
         return {
           headline: `Check “${shown(feature.title)}” before it is added`,
           lines: [
@@ -2920,6 +2974,7 @@ class MissionRun {
             `“${shown(feature.title)}” is built and passed its checks${unreviewed ? ", but its review did not finish" : ", and was reviewed"}.`,
             ...(built ? [`What was built: ${shown(built)}`] : []),
             ...(notes.length > 0 ? [`The reviewer left ${plural(notes.length, notes.every((n) => n.severity === "minor") ? "small note" : "note")}: ${notes.slice(0, 3).map((n) => shown(n.description)).join("; ")}${notes.length > 3 ? ` and ${notes.length - 3} more` : ""}.`] : []),
+            ...(reason === "repair" ? [askedBecause(reason, 0, approvedTitles(m, feature))] : []),
             ...warning,
           ],
           ...(feature.branch !== undefined && { branch: feature.branch }),
@@ -2942,7 +2997,13 @@ class MissionRun {
             ...(byReading.length > 0
               ? [`${byReading.length} ${byReading.length === 1 ? "feature is" : "features are"} not checked by tests: ${listTitles(byReading.map((x) => shown(x.title)))}. The report says how each was checked.`]
               : []),
-            verify === undefined ? "The final checks did not run." : verify.ok ? "The final checks passed." : "The final checks did not pass.",
+            verify === undefined
+              ? "The final checks did not run."
+              : verify.judged === false
+                ? "The project's own checks were already failing, so no final check could judge the result."
+                : verify.ok
+                  ? "The final checks passed."
+                  : "The final checks did not pass.",
             ...(verify?.reviewed === false ? ["The final review did not finish."] : []),
             ...((verify?.blocking ?? 0) > 0 ? [`The final review found ${plural(verify?.blocking ?? 0, "serious problem")} that ${verify?.blocking === 1 ? "was" : "were"} not fixed.`] : []),
             ...(stuck.length > 0 ? [`${plural(stuck.length, "feature")} got stuck: ${stuck.map((x) => shown(x.title)).join(", ")}.`] : []),
@@ -3004,7 +3065,7 @@ class MissionRun {
       if (why === "reviewer") lines.push("The second AI could not look at the pictures (it runs on a different tool). Please look at them yourself.");
     }
     const reason = lookReason(m, feature);
-    if (reason !== undefined) lines.push(askedBecause(reason, c?.unjudged ?? feature.acceptance.length));
+    if (reason !== undefined) lines.push(askedBecause(reason, c?.unjudged ?? feature.acceptance.length, approvedTitles(m, feature)));
     lines.push(...warning);
     const pictures = this.lookPictures(feature.id).map((p) => relative(this.missionDir(), p).split(/[\\/]/).join("/"));
     return {
@@ -3231,6 +3292,8 @@ interface FinalCheck {
   reviewed?: boolean;
   /** Blocker/major findings of that review. */
   blocking?: number;
+  /** `false`: the project's own checks were already failing and no test could stand in for them, so no final check judged the result. Absent otherwise. */
+  judged?: false;
 }
 
 interface ScratchData {
@@ -3336,9 +3399,9 @@ export type CarriedModes = { ok: true; spec: SpecOutput } | { ok: false };
  * renaming, splitting, merging or dropping it, is refused: `{ ok: false }`, and the plan as it was is kept.
  */
 export function carryModes(previous: SpecOutput, next: SpecOutput): CarriedModes {
-  if (!previous.features.some((f) => f.mode !== undefined || f.effort !== undefined || f.expect !== undefined)) return { ok: true, spec: next };
+  if (!previous.features.some((f) => isModeFeature(f) || f.effort !== undefined || f.expect !== undefined)) return { ok: true, spec: next };
   const now = new Set(next.features.map((f) => f.id));
-  if (previous.features.some((f) => f.mode !== undefined && !now.has(f.id))) return { ok: false };
+  if (previous.features.some((f) => isModeFeature(f) && !now.has(f.id))) return { ok: false };
   const before = new Map(previous.features.map((f) => [f.id, f]));
   const features = next.features.map((nf): SpecFeature => {
     const { mode: _mode, effort: _effort, expect: _expect, ...rest } = nf;
@@ -3352,6 +3415,11 @@ export function carryModes(previous: SpecOutput, next: SpecOutput): CarriedModes
 
 const PLAN_LOST_A_MODE = "The plan reviewer's changed plan dropped a feature that is checked by a second AI, so the plan was used as written.";
 const PLAN_LOST_A_MODE_BY_OWNER = "The changed plan dropped a feature that is checked by a second AI, so the plan you sent back was kept as it was.";
+
+/** The titles (cleaned for the owner to read) of the approved work whose files the final repair `f` changed, at most three. */
+function approvedTitles(m: Mission, f: Feature): string[] {
+  return changedApprovedWork(m, f).slice(0, 3).map((x) => shown(x.title));
+}
 
 /** What the second AI is told when it gets no picture (docs/modes-spec.md 7.3). */
 const PICTURES_NONE: Record<PictureWhy, string> = {

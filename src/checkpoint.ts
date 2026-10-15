@@ -151,9 +151,12 @@ export function nextCheckpointState(
   featureId: string | undefined,
   recorded: boolean,
   asked: boolean = m.checkpoints?.includes(kind) === true,
+  repairLook: boolean = false,
 ): GateStep {
   if (!asked) return { step: "go" };
-  if (kind === "feature" && (featureId === undefined || isDerivedFeature(featureId))) return { step: "go" };
+  // A feature the engine added itself is not asked about, except the final repair that changed work the owner approved (`repairLook`:
+  // the caller says so when `asked` came from that rule or from a send-back of the repair).
+  if (kind === "feature" && (featureId === undefined || (isDerivedFeature(featureId) && !repairLook))) return { step: "go" };
   const scope = scopeOf(kind, featureId);
   if (isPassed(m, scope)) return { step: "go" };
   const sent = sendBacks(m, scope);
@@ -285,10 +288,11 @@ export function whyStopped(
 ): string {
   if (isLeaderPlanStop(m, cp)) return `the leader wrote this plan, and you look at such a plan first. Read all of it with: mc plan show ${m.id}`;
   // A feature stop the owner did not ask for with `--checkpoint feature` says why it stops: the plan marks the feature, the second AI could not judge it, ...
-  if (cp.kind === "feature" && m.checkpoints?.includes("feature") !== true) {
+  // The repair of the final review is never covered by `--checkpoint feature`, so it always says its own reason.
+  if (cp.kind === "feature") {
     const f = m.features.find((x) => x.id === cp.featureId);
     const reason = f ? lookReason(m, f) : undefined;
-    if (reason !== undefined) return stoppedBecause(reason, featureTitle(m, cp.featureId));
+    if (reason !== undefined && (reason === "repair" || m.checkpoints?.includes("feature") !== true)) return stoppedBecause(reason, featureTitle(m, cp.featureId));
   }
   return `you asked to look at ${what} first`;
 }
