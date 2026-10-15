@@ -422,6 +422,11 @@ describe("T-TL-AUTHOR: who wrote the note of a line", () => {
     const item = only([ev("feature.status", { feature: "beta", to: "blocked", reason: 'waiting on "Alpha page", which was skipped' })]);
     expect(item.note).toEqual({ text: "It needed “Alpha page”, which was left out.", author: "engine" });
   });
+
+  it("a feature waiting on a stuck one reads the same when the engine's reason has curly marks around the title", () => {
+    const item = only([ev("feature.status", { feature: "beta", to: "blocked", reason: 'waiting on “Alpha page”, which was skipped' })]);
+    expect(item.note).toEqual({ text: "It needed “Alpha page”, which was left out.", author: "engine" });
+  });
 });
 
 describe("the timeline of real snapshots (authentic fixtures)", () => {

@@ -361,7 +361,7 @@ describe("the feature checkpoint", () => {
     const greet = featureOf(next, "greet");
     expect(greet).toMatchObject({ status: "blocked", blockedReason: "you asked for changes twice and it still was not right" });
     expect(greet?.branch).toBeDefined(); // the branch keeps the work
-    expect(next.decisionsNeeded).toContain('"Feature greet": you asked for changes twice and it still was not right');
+    expect(next.decisionsNeeded).toContain('“Feature greet”: you asked for changes twice and it still was not right');
     expect(events(hh, id, "checkpoint.limit").map((e) => e.data)).toEqual([{ kind: "feature", feature: "greet" }]);
     expect(next.checkpoint).toMatchObject({ id: "feature:solo#1" }); // the other feature still gets its turn
 

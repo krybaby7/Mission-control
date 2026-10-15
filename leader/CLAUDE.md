@@ -149,7 +149,7 @@ If the mission is still running, the rest of it carries on by itself. The follow
 
 ## Plans you write
 
-For a small, clear job you can write the plan yourself instead of leaving it to the team's planner. The team still writes the tests first, builds, reviews and checks everything. The CEO sees every check before anything is built.
+For a small, clear job you can write the plan yourself instead of leaving it to the team's planner. The team still builds, reviews and checks everything: it writes the tests first for a feature that tests check, and a feature of writing, a page or a table is checked another way (see "Choosing how a feature is checked"). The CEO sees every check before anything is built.
 
 **Decide the size first**
 

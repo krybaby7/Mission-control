@@ -1,0 +1,15 @@
+# Failure digest
+
+## Your task
+
+Summarize this failing verification output for the engineer who will fix it.
+
+- `summary`: what failed, in one or two sentences.
+- `likelyCause`: the most likely root cause, as specific as the output allows (file, line, message), or "unclear from the output".
+- `failingTests`: the names or files of the failing tests, copied from the output.
+
+## Output (end)
+
+```
+1 failed: expected 2, got 1
+```

@@ -3,7 +3,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ContextPackOutput, FailureDigestOutput, Feature, Finding, Mission, Role, Spec, SpecFeature, SpecOutput, VerifyConfig } from "./types.js";
+import { checkedWords, hasModeFeature, howChecked, isModeFeature } from "./checked-by.js";
+import type { ContextPackOutput, FailureDigestOutput, Feature, FeatureExpect, Finding, Mission, Role, Spec, SpecFeature, SpecOutput, VerifyConfig } from "./types.js";
 
 export const CAPS = {
   diff: 60_000,
@@ -34,6 +35,14 @@ export function packageRoot(): string {
 /** The provider-neutral system prompt for a role (prompts/<role>.md). */
 export function loadRolePrompt(role: Role): string {
   return readAsset(join(packageRoot(), "prompts", `${role}.md`), `role prompt "${role}"`);
+}
+
+/** The two prompt files for features that are not checked by tests: the maker builds a document, a page or a data file, the checker judges it (docs/modes-spec.md 8.1, 8.2, 8.4). */
+export type VariantPrompt = "maker" | "checker";
+
+export function loadVariantPrompt(name: VariantPrompt): string {
+  if (name !== "maker" && name !== "checker") throw new Error(`Unknown prompt "${String(name)}": use "maker" or "checker"`);
+  return readAsset(join(packageRoot(), "prompts", `${name}.md`), `prompt "${name}"`);
 }
 
 /** A house stack document (stacks/<name>.md). */
@@ -122,8 +131,11 @@ function existingRepoFacts(m: Mission): string[] {
 }
 
 function revisionSection(revise: { previous: SpecOutput; issues: string[] }): string {
+  const modeIds = revise.previous.features.filter(isModeFeature).map((f) => f.id);
   return section("Revise your previous spec", [
     "A reviewer asked for changes. Address every issue below and keep what was fine.",
+    modeIds.length > 0 &&
+      `Some features are judged by reading the result and not by tests. Their ids are: ${modeIds.map(code).join(", ")}. Keep every one of these ids, do not split, merge or drop these features, and write their checks as statements a reader can judge from the files, not as tests.`,
     bullets(revise.issues),
     "Previous spec:",
     fence(JSON.stringify(revise.previous, null, 2), "json"),
@@ -132,6 +144,10 @@ function revisionSection(revise: { previous: SpecOutput; issues: string[] }): st
 
 export function gateAPrompt(m: Mission): string {
   const spec = requireSpec(m);
+  // With a feature that is judged by reading, the check bullet says how each kind of feature is judged (spec 8.5).
+  const checkable = hasModeFeature(spec.features)
+    ? "each feature fits one focused build session, and its checks can be judged: by an automated test for a feature marked as checked by tests, and by reading the result for a feature marked as checked by a second AI (it opens the files and, for a page, pictures);"
+    : "each feature fits one focused build session and its acceptance criteria can be checked by an automated test;";
   return brief(
     missionHeader(m),
     section("Your task", [
@@ -139,7 +155,7 @@ export function gateAPrompt(m: Mission): string {
       "Approve unless a problem would lead to a wrong or unbuildable app. Check that:",
       bullets([
         "it delivers what the user asked for, without costly extras nobody requested;",
-        "each feature fits one focused build session and its acceptance criteria can be checked by an automated test;",
+        checkable,
         "the UI contract names every route, label and test id the criteria rely on, so tests and code written separately will agree;",
         "deps are correct and the first feature delivers the core user flow;",
         "nothing needs paid services, API keys or accounts the request didn't provide.",
@@ -151,7 +167,8 @@ export function gateAPrompt(m: Mission): string {
 }
 
 function renderSpec(spec: Spec): string {
-  const features = spec.features.map((f, i) => `### ${i + 1}. ${featureTitle(f)} (${f.kind})\n\n${featureBody(f)}`);
+  const modes = hasModeFeature(spec.features);
+  const features = spec.features.map((f, i) => `### ${i + 1}. ${featureTitle(f)} (${f.kind})\n\n${featureBody(f)}${modes ? modeLines(f) : ""}`);
   return [
     `**App:** ${spec.appName}`,
     `**Summary:** ${spec.summary}`,
@@ -391,20 +408,161 @@ function describeAttempt(a: Feature["attempts"][number]): string {
   return `${a.action} with ${a.model} (${a.effort}): ${a.outcome}${signature}. ${a.summary}`.trim();
 }
 
+// ───────────────────────────── Features that are not checked by tests (docs/modes-spec.md 8.4) ─────────────────────────────
+
+/** What the maker is given besides the feature. */
+export interface MakeContext {
+  /** The step of the ladder this attempt is on, from 0. */
+  rung: number;
+  fileList: string[];
+  contextPack?: ContextPackOutput | null;
+  /** A fix round: the checks that are not met (with what the second AI found), or the owner's note. */
+  fixes?: Finding[] | null;
+  /** What the script found wrong in the last attempt that failed, one problem each. */
+  lastProblems?: string[] | null;
+}
+
+/** The brief for the builder of a document, a page or a data file: an attempt, or a fix round. It names no frozen test and no verify command. */
+export function makePrompt(m: Mission, f: Feature, ctx: MakeContext): string {
+  const fixes = ctx.fixes ?? [];
+  const problems = ctx.lastProblems ?? [];
+  return brief(
+    missionHeader(m),
+    section("Your task", [
+      `Make the deliverable for feature ${code(f.id)}. A script, and then a second AI, will check it against the numbered checks below. No tests are written for it.`,
+      fixes.length > 0 && "It was checked, and the problems listed below were found. Fix each one. The checks that passed must stay true.",
+      ctx.rung > 0 &&
+        `Earlier attempts failed the engine's checks (this is escalation step ${ctx.rung + 1}). Earlier work may already be committed on this branch, so open the files before you change them.`,
+      "Answer with JSON: `summary`, `filesChanged`, `testDispute` (always null) and `notes`.",
+    ]),
+    modeFeatureSection(f),
+    section("What the script also checks", [
+      expectSentences(f.expect).length > 0 && `The plan asks for this:\n${bullets(expectSentences(f.expect))}`,
+      "Whatever you make, the script checks that some file changed, that no file is empty or very large, that nothing is left as a placeholder, that no key or password is in a file, that no table cell starts like a formula, and that links to files in the project work.",
+      "If you make a web page, it also checks a title, a viewport line, a description for each picture, no sideways scrolling at phone width, and nothing loaded from the internet.",
+      "If you change anything but documents, pages, images and data files, it also checks that the project's own checks pass.",
+    ]),
+    modeContractSection(m),
+    fixes.length > 0 && section("Problems to fix", [renderFindings(fixes)]),
+    problems.length > 0 &&
+      section("The previous attempt failed", [
+        "The script found these problems. The files of that attempt are probably still in the working tree, so open them first and fix each problem.",
+        bullets(problems),
+      ]),
+    ctx.contextPack && contextPackSection(ctx.contextPack),
+    fileListSection(ctx.fileList),
+  );
+}
+
+/** What the checker is given besides the feature. */
+export interface RubricContext {
+  /** Mission Control's own facts (docs/modes-spec.md 6.2, "Facts"), one each. */
+  facts: string[];
+  /** The pictures it is offered: the absolute path of each and what it shows. */
+  pictures: { path: string; label: string }[];
+  /** Why no picture is given (spec 7.3, "The checker is told"). Absent when pictures are given or the feature has no page. */
+  noPictures?: string;
+  /** The files the feature changed that can be read; the first 20 are listed. */
+  files: string[];
+  /** The condensed diff, or "" when only binary files changed. */
+  diff: string;
+  /** From the second round: the numbers of the checks that failed last time. */
+  lastFailed?: number[];
+}
+
+/** The brief for the second AI that judges every written check of a feature that no test checked. */
+export function rubricPrompt(m: Mission, f: Feature, ctx: RubricContext): string {
+  const listed = ctx.files.slice(0, 20);
+  const left = ctx.files.length - listed.length;
+  const engine = expectSentences(f.expect);
+  return brief(
+    missionHeader(m),
+    section("Your task", [
+      `Judge the finished feature ${code(f.id)} against the numbered checks below. No tests were written for it. The changed files are checked out in your working folder: open them. Answer for every check with \`pass\`, \`fail\` or \`cannot_judge\` and evidence, as your instructions say. Answer with JSON: \`verdict\`, \`results\`, \`seen\` and \`notes\`.`,
+    ]),
+    section("Feature", [featureTitle(f), f.story]),
+    section("Checks", [numbered(f.acceptance)]),
+    section("What the engine's script found", [
+      "All the script's checks passed.",
+      engine.length > 0 && `They included what the plan asked for:\n${bullets(engine)}`,
+      ctx.facts.length > 0 && bullets(ctx.facts),
+    ]),
+    ctx.pictures.length > 0
+      ? section("Pictures", [bullets(ctx.pictures.map((p) => `${p.path}: ${p.label}`)), "Open each one with the Read tool."])
+      : ctx.noPictures !== undefined && section("Pictures", [ctx.noPictures]),
+    section("Changed files", [listed.length > 0 ? `${pathList(listed)}${left > 0 ? `\n… (${left} more files changed)` : ""}` : "(none that can be read)"]),
+    ctx.diff !== "" && section("Diff", [fence(truncateMiddle(ctx.diff, CAPS.diff), "diff")]),
+    ctx.lastFailed &&
+      ctx.lastFailed.length > 0 &&
+      section("The last round", [
+        `Last time ${ctx.lastFailed.length === 1 ? "check" : "checks"} ${ctx.lastFailed.join(", ")} failed. The files have changed since then. Judge every check again from the files, and not from this note.`,
+      ]),
+  );
+}
+
+/** The feature as the maker reads it: the checks are a list that the second AI will judge one by one. */
+function modeFeatureSection(f: SpecFeature): string {
+  const deps = f.deps.length > 0 ? `\n\nBuilds on: ${f.deps.map(code).join(", ")}` : "";
+  return `## Feature ${featureTitle(f)}\n\n${f.story}\n\nChecks the second AI will judge, one by one:\n${numbered(f.acceptance)}${deps}`;
+}
+
+/** The plan's names, when it gives any (the same text as the UI contract of the other briefs). */
+function modeContractSection(m: Mission): string | false {
+  const contract = m.spec?.uiContract.trim();
+  return !!contract && section("UI contract", ["Shared by the work and its checks: names, labels and file names must match exactly.", contract]);
+}
+
+/** How the plan's own checks read, in the words of `mc plan show` (docs/modes-spec.md 4.4). A damaged value is read as far as it can be. */
+function expectSentences(expect: FeatureExpect | undefined): string[] {
+  if (typeof expect !== "object" || expect === null) return [];
+  const e = expect as Record<string, unknown>;
+  const values = (x: unknown): string[] => (Array.isArray(x) ? x.filter((v): v is string => typeof v === "string" && v.trim() !== "").map((v) => v.replace(/\s+/g, " ").trim().replace(/[“”]/g, '"')) : []);
+  const range = (x: unknown): [number, number] | undefined =>
+    Array.isArray(x) && x.length === 2 && x.every((v) => typeof v === "number" && Number.isFinite(v)) ? [x[0] as number, x[1] as number] : undefined;
+  const quoted = (xs: string[]): string => xs.map((x) => `“${x}”`).join(", ");
+  const headings = values(e.headings);
+  const mentions = values(e.mentions);
+  const columns = values(e.columns);
+  const words = range(e.words);
+  const rows = range(e.rows);
+  return [
+    ...(headings.length > 0 ? [`It has the headings ${quoted(headings)}.`] : []),
+    ...(mentions.length > 0 ? [`Its visible text contains the words ${quoted(mentions)}, written exactly like that.`] : []),
+    ...(words ? [`Its new text is ${words[0]} to ${words[1]} words long.`] : []),
+    ...(columns.length > 0 ? [`The table has the columns ${columns.join(", ")}.`] : []),
+    ...(rows ? [`The table has ${rows[0]} to ${rows[1]} rows.`] : []),
+  ];
+}
+
+/** Under a feature's criteria in the brief for gate A: how it is checked and how hard the team thinks (docs/modes-spec.md 8.5). Only called when the plan has a mode feature. */
+function modeLines(f: SpecFeature): string {
+  const how =
+    f.mode === "owner"
+      ? "Checked by: a second AI against its list of checks, and then by the owner, no tests."
+      : f.mode === "review"
+        ? "Checked by: a second AI against its list of checks, no tests."
+        : "Checked by: tests, written first.";
+  const effort = f.effort === "light" || f.effort === "deep" ? `\nEffort: ${f.effort}.` : "";
+  return `\n\n${how}${effort}`;
+}
+
 // ───────────────────────────── Gate C ─────────────────────────────
 
 export function gateCPrompt(m: Mission, ctx: { diff: string; verifyTail: string; features: Feature[] }): string {
   const verifyFailures = m.baselineBroken ? "new failures in the full verification below" : "anything the full verification below reports as failing";
+  const read = ctx.features.some((f) => f.status === "done" && isModeFeature(f));
   return brief(
     missionHeader(m),
     section("Your task", [
       "Do the final review of everything built in this mission before the owner sees it. Features were built and merged one at a time; check that together they deliver the request.",
       `Look for broken flows between features, regressions, security holes, data loss, and ${verifyFailures}. Blocked or skipped features are known gaps, not findings.`,
+      read &&
+        "Some features here are documents, pages or data files that no test judged. The feature list says how each was checked: by a second AI against the owner's list, or by Mission Control's own checks only. Read them as a reader would. Look for false statements, broken links, pages that cannot be used, and numbers that do not add up.",
       "Blocker and major findings become fix-up work right away, so report only real problems, each with a file and a suggested test. The integrated code is in your working directory; read it as needed, especially if the diff is truncated.",
       'Answer with JSON: `verdict` ("approve" when there is no blocker or major finding, otherwise "changes") and `findings`.',
     ]),
     m.spec && section("The app", [m.spec.summary]),
-    section("Features", [ctx.features.length > 0 ? ctx.features.map(describeFeatureStatus).join("\n\n") : "(none)"]),
+    section("Features", [ctx.features.length > 0 ? ctx.features.map((f) => describeFeatureStatus(m, f)).join("\n\n") : "(none)"]),
     uiContractSection(m),
     baselineSection(m),
     section("Full verification output (end)", [fence(truncateMiddle(ctx.verifyTail, CAPS.outputTail))]),
@@ -412,9 +570,12 @@ export function gateCPrompt(m: Mission, ctx: { diff: string; verifyTail: string;
   );
 }
 
-function describeFeatureStatus(f: Feature): string {
+function describeFeatureStatus(m: Mission, f: Feature): string {
   const head = `**${featureTitle(f)}**: ${f.status}`;
-  if (f.status === "done") return `${head}\n${numbered(f.acceptance)}`;
+  if (f.status === "done") {
+    const how = isModeFeature(f) ? `\nChecked ${checkedWords(howChecked(m, f))}. No tests were written for it.` : "";
+    return `${head}\n${numbered(f.acceptance)}${how}`;
+  }
   return f.blockedReason ? `${head} (${f.blockedReason})` : head;
 }
 
@@ -453,6 +614,7 @@ export function failureDigestPrompt(outputTail: string): string {
 }
 
 export function reportProsePrompt(m: Mission, facts: string): string {
+  const modes = m.features.some((f) => f.status === "done" && isModeFeature(f));
   return scoutBrief(
     missionHeader(m, CAPS.scoutRequest),
     section("Your task", [
@@ -462,6 +624,7 @@ export function reportProsePrompt(m: Mission, facts: string): string {
         '`whatYouCanDo`: short items, each something the owner can now do in the app (for example "Add a habit and tick it off each day"). Include only features the facts show as done.',
       ]),
       "Don't invent features or outcomes the facts don't show.",
+      modes && "Say how each feature was checked exactly as the facts say. Never say that tests passed for a feature whose line says it was checked another way.",
     ]),
     section("Facts", [fence(truncateMiddle(facts, CAPS.reportFacts))]),
   );

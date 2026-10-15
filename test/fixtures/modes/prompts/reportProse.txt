@@ -1,0 +1,24 @@
+# Mission: Habit tracker
+
+This mission builds a new app. The user's request, verbatim:
+
+```
+Build me a habit tracker where I can tick off habits every day.
+```
+
+## Your task
+
+Write the summary of this mission for its owner, who is not a programmer, using only the facts below.
+
+- `narrative`: 3 to 8 plain sentences covering what was built, what works, what didn't get done and why, and anything the owner needs to decide. No jargon, file names or model names.
+- `whatYouCanDo`: short items, each something the owner can now do in the app (for example "Add a habit and tick it off each day"). Include only features the facts show as done.
+
+Don't invent features or outcomes the facts don't show.
+
+## Facts
+
+```
+Status: 2 of 2 features done
+Feature: Track a habit, done
+Feature: About page, done
+```

@@ -181,7 +181,7 @@ describe("Dispatcher: what judges the engineer's work stays as it was", () => {
 
     expect(m.status).toBe("done");
     expect(m.features[1]?.frozenTests.map((t) => t.path)).toEqual([featureTestPath("farewell")]);
-    expect(m.notes).toContain('The test author for "Feature farewell" also changed the tests of features already finished (tests/greet.test.mjs); those changes were undone.');
+    expect(m.notes).toContain('The test author for “Feature farewell” also changed the tests of features already finished (tests/greet.test.mjs); those changes were undone.');
     expect(read(join(m.repoPath, featureTestPath("greet")))).toContain('assert.equal(answer(), "greet")');
   });
 
@@ -317,7 +317,7 @@ describe("Dispatcher: test disputes and open review problems", () => {
     expect(m.decisionsNeeded).toEqual([
       "Have someone check the app before you rely on it: the final review of the whole app did not finish, so nobody reviewed it as a whole. “Review notes” and “Technical details” list what the reviewers found.",
     ]);
-    expect(h?.notifications.at(-1)?.title).toBe("Fixture app: partly done (1/1 features)");
+    expect(h?.notifications.at(-1)?.title).toBe("Fixture app: partly done (1/1 feature)");
   });
 });
 

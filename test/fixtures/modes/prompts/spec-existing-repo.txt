@@ -1,0 +1,19 @@
+# Mission: Habit tracker
+
+This mission changes an existing codebase. The user's request, verbatim:
+
+```
+Build me a habit tracker where I can tick off habits every day.
+```
+
+## Your task
+
+Write the spec for this change to an existing codebase: the features to build, in build order.
+
+The repository is checked out in your working directory. Explore it with your read-only tools before planning, follow its conventions, and plan only what the request asks for. The UI contract must cover both the existing UI the tests will touch and the new UI.
+
+Its full verification runs `npm run verify`, and test files match `tests/**`.
+
+Plan between 1 and 25 features with unique kebab-case ids. `deps` may name only ids from this spec, with no cycles.
+
+Answer with JSON matching the output schema.

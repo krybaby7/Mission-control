@@ -804,7 +804,7 @@ describe("publish: the pull request", () => {
     setup({ features: [testedFeature, readFeature] });
     fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), header(CHECKED));
     const block = checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!);
-    expect(block).toContain("- Tests: the team wrote tests before the code for 1 of 2 finished features. The features on the Checked line below were not checked by tests.");
+    expect(block).toContain("- Tests: the team wrote tests before the code for 1 of 2 finished features. The rest were not checked by tests. The Checked line below says how each was checked.");
     expect(block).toContain("\n- Checked: 1 feature by tests; 1 feature by a second AI against your list.\n");
     // the old claim is gone: a feature counts as finished only when its tests pass
     expect(block).not.toContain("A feature counts as finished only when its tests");
@@ -913,7 +913,7 @@ describe("publish: the pull request", () => {
     const block = checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!);
     // every sentence that talks about tests is about the features that have them
     for (const line of block.split("\n").filter((l) => /\btests?\b/i.test(l))) {
-      expect(line, line).toMatch(/^- (Tests: the team wrote tests before the code for \d+ of \d+ finished features\. The features on the Checked line below were not checked by tests\.|Checked: .*by tests.*|The app's own checks were already failing .*their new tests only\.)$/);
+      expect(line, line).toMatch(/^- (Tests: the team wrote tests before the code for \d+ of \d+ finished features\. The rest were not checked by tests\. The Checked line below says how each was checked\.|Checked: .*by tests.*|The app's own checks were already failing .*their new tests only\.)$/);
     }
   });
 

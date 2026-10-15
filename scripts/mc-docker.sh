@@ -970,7 +970,7 @@ write_pull_request_body() {
       # Some finished features were checked by a second AI and not by tests: no sentence may claim a test for them (spec 10.3).
       local checked_text
       checked_text="$(body_safe "${F_CHECKED#Checked: }")"
-      printf '%s\n' "- Tests: the team wrote tests before the code for $F_TESTED of $F_DONE finished features. The features on the Checked line below were not checked by tests."
+      printf '%s\n' "- Tests: the team wrote tests before the code for $F_TESTED of $F_DONE finished features. The rest were not checked by tests. The Checked line below says how each was checked."
       if [ "${F_CHECKED:0:9}" = "Checked: " ] && [ -n "$checked_text" ]; then
         printf '%s\n' "- Checked: $checked_text"
       else

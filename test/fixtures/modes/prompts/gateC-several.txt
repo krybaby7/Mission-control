@@ -1,0 +1,50 @@
+# Mission: Habit tracker
+
+This mission builds a new app. The user's request, verbatim:
+
+```
+Build me a habit tracker where I can tick off habits every day.
+```
+
+## Your task
+
+Do the final review of everything built in this mission before the owner sees it. Features were built and merged one at a time; check that together they deliver the request.
+
+Look for broken flows between features, regressions, security holes, data loss, and anything the full verification below reports as failing. Blocked or skipped features are known gaps, not findings.
+
+Blocker and major findings become fix-up work right away, so report only real problems, each with a file and a suggested test. The integrated code is in your working directory; read it as needed, especially if the diff is truncated.
+
+Answer with JSON: `verdict` ("approve" when there is no blocker or major finding, otherwise "changes") and `findings`.
+
+## The app
+
+Track daily habits and streaks.
+
+## Features
+
+**`track-habit` Track a habit**: done
+1. Adding 'Read' shows it in the habit list
+2. Ticking it shows 'Streak: 1'
+
+**`about-page` About page**: blocked (tried every escalation step, but its checks still failed)
+
+**`about-page` About page**: done
+1. /about shows 'About'
+
+## UI contract
+
+Shared by the tests and the implementation: routes, labels and test ids must match exactly.
+
+UI-CONTRACT-MARKER: route `/`, input labelled 'Habit name', button 'Add habit', list data-testid=habit-list
+
+## Full verification output (end)
+
+```
+ok
+```
+
+## Diff of the whole mission
+
+```diff
+diff
+```

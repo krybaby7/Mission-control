@@ -8,6 +8,7 @@ import {
   buildOutput,
   createFixtureRepo,
   diagnosis,
+  type FakeRenderer,
   feature,
   featureTestPath,
   finding,
@@ -23,6 +24,7 @@ import {
   writeScaffold,
 } from "../test/fixtures/mission-harness.js";
 import { defaultConfig } from "./config.js";
+import { loadRolePrompt as defaultRolePrompt } from "./prompts.js";
 import { assign, roleFamily, validateSpec } from "./dispatcher.js";
 import type { AgentJob, Attempt, Mission, MissionEvent, Role, SpecFeature } from "./types.js";
 import { FakeClock } from "./util/clock.js";
@@ -533,7 +535,7 @@ describe("Dispatcher: escalation", () => {
     expect(alpha?.worktree).toBeUndefined();
     expect(existsSync(join(hh.store.worktreesDir(m.id), "alpha"))).toBe(false);
     expect(await hh.git.branchExists(m.repoPath, `mc/${m.id}--alpha`)).toBe(true); // the work so far is kept
-    expect(beta).toMatchObject({ status: "skipped", blockedReason: 'waiting on "Feature alpha", which was blocked' });
+    expect(beta).toMatchObject({ status: "skipped", blockedReason: 'waiting on “Feature alpha”, which was blocked' });
     expect(gamma?.status).toBe("done");
     expect(hh.jobs.some((j) => labelOf(j).endsWith("-beta"))).toBe(false);
 
@@ -545,7 +547,7 @@ describe("Dispatcher: escalation", () => {
     expect(await hh.git.branchExists(m.repoPath, m.integrationBranch)).toBe(true);
     const report = readReport(hh, m.id);
     expect(report).toContain("Stuck: tried every escalation step, but its checks still failed (tried 2 times)");
-    expect(report).toContain('Skipped: waiting on "Feature alpha", which was blocked');
+    expect(report).toContain('Skipped: waiting on “Feature alpha”, which was blocked');
     expect(hh.notifications).toEqual([
       { title: "Fixture app: partly done (1/3 features)", message: `Stuck: Feature alpha\nRead the report: mc report ${m.id}`, opts: { priority: "high" } },
     ]);
@@ -563,7 +565,7 @@ describe("Dispatcher: escalation", () => {
     const m = await hh.run(hh.createMission("greenfield").id);
     expect(m.status).toBe("partial");
     expect(m.features[0]).toMatchObject({ status: "blocked", blockedReason: "It needs a paid weather API key." });
-    expect(m.decisionsNeeded).toEqual(['"Feature greet": It needs a paid weather API key.']);
+    expect(m.decisionsNeeded).toEqual(['“Feature greet”: It needs a paid weather API key.']);
     expect(hh.jobsLabeled("gate-c")).toHaveLength(0); // nothing was done, so there is nothing to review
   });
 
@@ -657,7 +659,7 @@ describe("Dispatcher: escalation", () => {
       const testsCommit = m.features[0]?.testsCommit ?? "";
       // The tests commit holds tests only: the attempt's code sits on top of it, where the scan sees it.
       expect(() => execFileSync("git", ["-C", m.repoPath, "cat-file", "-e", `${testsCommit}:src/greet.mjs`], { stdio: "ignore" })).toThrow();
-      if (!usable) expect(m.notes).toContain('The rewritten tests for "Feature greet" could not be used, so its earlier tests stayed in place.');
+      if (!usable) expect(m.notes).toContain('The rewritten tests for “Feature greet” could not be used, so its earlier tests stayed in place.');
     },
   );
 
@@ -716,7 +718,7 @@ describe("Dispatcher: tests, review and gate C", () => {
     expect(hh.jobsLabeled("test-greet")).toHaveLength(2);
     expect(prompt(hh, "test-greet", 1)).toContain("Your previous tests passed without the feature");
     expect(events(hh, m.id, "verify").filter((e) => e.data.label === "greet-red").map((e) => e.data.ok)).toEqual([true, false]);
-    expect(m.notes).toContain('The test author for "Feature greet" also changed files outside the test folders (app.mjs); those changes were undone.');
+    expect(m.notes).toContain('The test author for “Feature greet” also changed files outside the test folders (app.mjs); those changes were undone.');
     expect(readFileSync(join(m.repoPath, "app.mjs"), "utf8")).toBe('export const name = "fixture app";\n');
     expect(m.features[0]?.frozenTests.map((t) => t.path)).toEqual([featureTestPath("greet")]);
   });
@@ -727,7 +729,7 @@ describe("Dispatcher: tests, review and gate C", () => {
     expect(m.status).toBe("done");
     expect(hh.jobsLabeled("test-greet")).toHaveLength(2);
     expect(m.features[0]?.frozenTests).toEqual([]);
-    expect(m.notes).toContain('No acceptance tests were written for "Feature greet", so only the full verification checked it.');
+    expect(m.notes).toContain('No acceptance tests were written for “Feature greet”, so only the full verification checked it.');
   });
 
   it("gives an empty answer and tests that already pass one retry each", async () => {
@@ -764,7 +766,7 @@ describe("Dispatcher: tests, review and gate C", () => {
     expect(hh.jobsLabeled("test-greet")).toHaveLength(3); // the first answer, the retry for passing tests, the retry for an empty answer
     expect(m.features[0]?.frozenTests).toEqual([]);
     expect(existsSync(join(m.repoPath, featureTestPath("greet")))).toBe(false);
-    expect(m.notes).toContain('No acceptance tests were written for "Feature greet", so only the full verification checked it.');
+    expect(m.notes).toContain('No acceptance tests were written for “Feature greet”, so only the full verification checked it.');
   });
 
   it("lets the engineer fix review findings: a green fix is kept, a red one is rolled back", async () => {
@@ -1084,7 +1086,7 @@ describe("Dispatcher: stopping, limits and budget", () => {
     const m = await hh.run(hh.createMission("greenfield").id);
     expect(m.status).toBe("done");
     expect(events(hh, m.id, "verify").filter((e) => e.data.label === "install-greet").map((e) => e.data.ok)).toEqual([false, false]);
-    expect(m.notes).toContain('Installing the dependencies of "Feature greet" failed, so its checks may fail for that reason.');
+    expect(m.notes).toContain('Installing the dependencies of “Feature greet” failed, so its checks may fail for that reason.');
   });
 
   it("fails over to the other family while a provider is limited", async () => {
@@ -1300,5 +1302,37 @@ describe("Dispatcher: feature missions", () => {
     expect(m).toMatchObject({ status: "failed", stage: "onboard" });
     expect(m.decisionsNeeded).toEqual([expect.stringMatching(/is not a git repository/)]);
     expect(hh.jobs).toHaveLength(0);
+  });
+});
+
+// ───────────────────────────── A mission with no mode feature, next to the modes (docs/modes-spec.md 5 and 15) ─────────────────────────────
+
+describe("Dispatcher: a mission with no feature that is checked by reading", () => {
+  it("gives every role its own prompt, no job a folder to read, and no feature a mode, an effort, a check record or a check list", async () => {
+    const hh = harness({ features: [feature("greet")] });
+    const m = await hh.run(hh.createMission("greenfield").id);
+    expect(m.status).toBe("done");
+    const rolePrompt = (role: Role): string => defaultRolePrompt(role);
+    for (const job of hh.jobs) {
+      expect(job.systemPrompt, job.id).toBe(rolePrompt(job.role));
+      expect(job.readDirs, job.id).toBeUndefined();
+    }
+    for (const f of m.features) for (const key of ["mode", "effort", "expect", "checked"]) expect(f, key).not.toHaveProperty(key);
+    expect(m).not.toHaveProperty("ownerStops");
+    expect(hh.store.readEvents(m.id).filter((e) => ["deliverable.checked", "pictures.taken", "rubric.checked"].includes(e.type))).toEqual([]);
+  });
+
+  it("asks nothing of the picture tool and writes no picture", async () => {
+    const hh = harness({ features: [feature("greet")] });
+    const id = hh.createMission("greenfield").id;
+    await hh.run(id);
+    expect((hh.renderer as FakeRenderer).requests).toEqual([]);
+    expect(existsSync(join(hh.store.missionDir(id), "screenshots"))).toBe(false);
+  });
+
+  it("writes the title of a feature in the owner's decision with curly marks", async () => {
+    const hh = harness({ features: [feature("greet")], agents: { architect: (job, call) => (call.label === "diagnose-greet" ? { structured: diagnosis("block", "", "It needs a login.") } : byDefault("architect")(job, call)), engineer: failingBuilds(2) } });
+    const m = await hh.run(hh.createMission("greenfield").id);
+    expect(m.decisionsNeeded).toEqual(["“Feature greet”: It needs a login."]);
   });
 });

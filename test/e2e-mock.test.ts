@@ -665,7 +665,7 @@ describe("e2e: a feature that cannot be built", () => {
       [3, "build", "claude", OPUS, "high", "fail"],
       [4, "build", "codex", ASTRA, "high", "fail"],
     ]);
-    expect(featureOf(m, "farewell")).toMatchObject({ status: "skipped", blockedReason: 'waiting on "Feature greet", which was blocked' });
+    expect(featureOf(m, "farewell")).toMatchObject({ status: "skipped", blockedReason: 'waiting on “Feature greet”, which was blocked' });
     expect(featureOf(m, "extra").status).toBe("done");
     expect(w.labeled("test-farewell")).toEqual([]); // nothing was spent on the skipped feature
     expect(w.labeled("build-farewell")).toEqual([]);
@@ -684,7 +684,7 @@ describe("e2e: a feature that cannot be built", () => {
     expect(report).toContain("1 feature depended on a stuck feature, so I skipped it.");
     const table = sectionOf(report, "Features");
     expect(table).toContain("| ⛔ | Feature greet | Stuck: tried every escalation step, but its checks still failed (tried 5 times) |");
-    expect(table).toContain('| ⛔ | Feature farewell | Skipped: waiting on "Feature greet", which was blocked |');
+    expect(table).toContain('| ⛔ | Feature farewell | Skipped: waiting on “Feature greet”, which was blocked |');
     expect(table).toContain("| ✅ | Feature extra | Built and checked |");
     expect(report).toContain("### What was tried for `greet`");
 

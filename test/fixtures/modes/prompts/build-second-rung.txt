@@ -1,0 +1,76 @@
+# Mission: Habit tracker
+
+This mission builds a new app. The user's request, verbatim:
+
+```
+Build me a habit tracker where I can tick off habits every day.
+```
+
+## Your task
+
+Implement feature `track-habit` so that its acceptance tests and the full verification pass.
+
+Earlier attempts at this feature failed (this is escalation step 2). Earlier work may already be committed on this branch, so inspect the current code before changing it.
+
+Answer with JSON: `summary`, `filesChanged`, `testDispute` (null unless a frozen test is genuinely wrong) and `notes`.
+
+## Feature `track-habit` Track a habit
+
+As a user I can add a habit and tick it off.
+
+Acceptance criteria:
+1. Adding 'Read' shows it in the habit list
+2. Ticking it shows 'Streak: 1'
+
+## UI contract
+
+Shared by the tests and the implementation: routes, labels and test ids must match exactly.
+
+UI-CONTRACT-MARKER: route `/`, input labelled 'Habit name', button 'Add habit', list data-testid=habit-list
+
+## Frozen acceptance tests
+
+The test author wrote these files before you started. **You must not modify these files**: they are checksummed, any edit is reverted automatically, and the attempt then counts as failed. Existing tests from earlier features are off limits too.
+
+- `tests/e2e/track-habit.spec.ts`
+- `tests/unit/streak.test.ts`
+
+## Verify your work
+
+1. Dependencies install with `npm install`; run it again after adding a dependency.
+2. Feature tests: `node scripts/mc-test.mjs tests/e2e/track-habit.spec.ts tests/unit/streak.test.ts`. Run these first and iterate until they pass.
+3. Full verification: `npm run verify`. Run it once the feature tests pass; it must pass too.
+
+The orchestrator runs the same commands from the repository root with CI=1 after you finish, and only a green result counts.
+
+## Guidance from a diagnosis of earlier attempts
+
+Use the streak helper
+
+## The previous attempt failed
+
+It modified frozen test files, which were restored:
+- `tests/unit/streak.test.ts`
+
+These changes were rejected as weakening the tests:
+- tests/unit/streak.test.ts: skip (it.skip)
+
+Verification output (end):
+
+```
+1 failed
+```
+
+## Files to read first
+
+- `src/db/index.ts`: the data layer
+
+Look at the data layer first.
+
+## Files in the repository
+
+```
+src/app/page.tsx
+src/db/index.ts
+package.json
+```

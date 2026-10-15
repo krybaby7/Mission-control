@@ -1,0 +1,17 @@
+# Mission: Habit tracker
+
+This mission builds a new app. The user's request, verbatim:
+
+```
+Build me a habit tracker where I can tick off habits every day.
+```
+
+## Your task
+
+Write the spec for this new app: the features to build, in build order.
+
+There is no repository yet, so plan from the request and the house stack below. An initializer scaffolds the project (tooling, test setup, AGENTS.md) before feature work starts, so don't plan setup work.
+
+Plan between 1 and 25 features with unique kebab-case ids. `deps` may name only ids from this spec, with no cycles.
+
+Answer with JSON matching the output schema.

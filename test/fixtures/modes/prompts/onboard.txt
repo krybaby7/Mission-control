@@ -1,0 +1,30 @@
+# Mission: Habit tracker
+
+This mission builds a new app. The user's request, verbatim:
+
+```
+Build me a habit tracker where I can tick off habits every day.
+```
+
+## Your task
+
+Onboard this existing repository so the team can verify changes automatically. You are in its root; read whatever you need, but don't change anything.
+
+Work out:
+
+- `stackSummary`: languages, frameworks, test tools and layout, in a few sentences an engineer can act on.
+- `verify.install`: the command that installs dependencies, matching the lockfile (for example `npm ci` or `pnpm install --frozen-lockfile`), or null when nothing needs installing.
+- `verify.full`: one command that runs every existing check (lint, typecheck, unit and e2e tests), chained with `&&`, exiting 0 only when all pass.
+- `verify.tests`: a command that runs only the given test files, with `{files}` where the space-separated paths go (for example `npx vitest run {files}`), or null when the tools can't run single files.
+- `verify.testGlobs`: repo-relative globs that match the test files, including where new tests for this request belong.
+- `notes`: what the team must know, such as required services or environment variables, slow or flaky suites, or missing test tooling.
+
+The orchestrator runs these commands non-interactively with `bash -lc` from the repository root and CI=1. Prefer the repository's own scripts, and don't invent ones that don't exist. If there are no tests at all, make `full` the strongest existing check (such as a build or typecheck) and say so in notes.
+
+## Files in the repository
+
+```
+src/app/page.tsx
+src/db/index.ts
+package.json
+```

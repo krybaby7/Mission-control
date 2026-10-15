@@ -1,0 +1,37 @@
+# Mission: Habit tracker
+
+This mission builds a new app. The user's request, verbatim:
+
+```
+Build me a habit tracker where I can tick off habits every day.
+```
+
+## Your task
+
+Write the acceptance tests for feature `track-habit` before it is implemented.
+
+- Put tests only in files matching `tests/**`. Changes anywhere else are discarded.
+- Run them with `node scripts/mc-test.mjs {files}`, replacing `{files}` with your test file paths, and confirm they fail because the feature is missing, not because of a mistake in the tests.
+- Answer with JSON: `testFiles` (every test file you created or changed, repo-relative) and `notes`.
+
+## Feature `track-habit` Track a habit
+
+As a user I can add a habit and tick it off.
+
+Acceptance criteria:
+1. Adding 'Read' shows it in the habit list
+2. Ticking it shows 'Streak: 1'
+
+## UI contract
+
+Shared by the tests and the implementation: routes, labels and test ids must match exactly.
+
+UI-CONTRACT-MARKER: route `/`, input labelled 'Habit name', button 'Add habit', list data-testid=habit-list
+
+## Files in the repository
+
+```
+src/app/page.tsx
+src/db/index.ts
+package.json
+```

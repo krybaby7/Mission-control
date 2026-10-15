@@ -1060,7 +1060,7 @@ describe("the work modes documents (docs/modes-spec.md, 12.5 and the owner's gui
   const plansSpec = read("docs", "plans-spec.md");
   const keys = ["mode", "effort", "heading", "mention", "words", "columns", "rows"];
   const SKIP_OWNER = "Skip your look at these features? The team will add them without stopping for you. Yes or no?";
-  const PARALLEL = "The engine is made for one feature at a time: one loop over the features, one copy of the mission in memory that is written whole at every save, one run lock, one line of merges into a single branch, pacing that assumes one AI call at a time, and a timeline and stops that assume one feature is in flight.";
+  const PARALLEL = "Mission Control is made for one feature at a time: one loop over the features, one copy of the mission in memory that is written whole at every save, one run lock, one line of merges into a single branch, pacing that assumes one AI call at a time, and a timeline and stops that assume one feature is in flight.";
 
   it("the leader's README and the technical page list the flag and the seven keys, and say what was not verified", () => {
     for (const [name, text] of [["leader/README.md", LEADER_README], ["docs/leader.md", LEADER_DOC]] as const) {
@@ -1111,7 +1111,7 @@ describe("the work modes documents (docs/modes-spec.md, 12.5 and the owner's gui
     expect(modes).toContain("**No research with sources.**");
     expect(modes).toContain("**Pages that need a running server get no pictures.**");
     expect(modes).toContain("“Could not work out how to check this project”");
-    expect(modes).toContain("**No spreadsheet inside the engine.**");
+    expect(modes).toContain("**No spreadsheet inside Mission Control.**");
   });
 
   it("the owner's guide and the README say that features side by side are deferred, with the same plain reason", () => {

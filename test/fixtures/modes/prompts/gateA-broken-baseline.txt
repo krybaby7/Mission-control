@@ -1,0 +1,52 @@
+# Mission: Habit tracker
+
+This mission builds a new app. The user's request, verbatim:
+
+```
+Build me a habit tracker where I can tick off habits every day.
+```
+
+## Your task
+
+Review this spec before any code is written. Judge it from the request and the spec alone.
+
+Approve unless a problem would lead to a wrong or unbuildable app. Check that:
+
+- it delivers what the user asked for, without costly extras nobody requested;
+- each feature fits one focused build session and its acceptance criteria can be checked by an automated test;
+- the UI contract names every route, label and test id the criteria rely on, so tests and code written separately will agree;
+- deps are correct and the first feature delivers the core user flow;
+- nothing needs paid services, API keys or accounts the request didn't provide.
+
+Answer with JSON: `verdict` ("approve" or "revise") and `issues`, each a concrete change to make (empty when approving).
+
+## Spec
+
+**App:** Habit Tracker
+
+**Summary:** Track daily habits and streaks.
+
+### 1. `track-habit` Track a habit (standard)
+
+As a user I can add a habit and tick it off.
+
+Acceptance criteria:
+1. Adding 'Read' shows it in the habit list
+2. Ticking it shows 'Streak: 1'
+
+### 2. `about-page` About page (mechanical)
+
+As a visitor I can read about the app.
+
+Acceptance criteria:
+1. /about shows 'About'
+
+Builds on: `track-habit`
+
+### Assumptions
+
+- Single user, no login
+
+### UI contract
+
+UI-CONTRACT-MARKER: route `/`, input labelled 'Habit name', button 'Add habit', list data-testid=habit-list

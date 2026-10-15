@@ -217,6 +217,14 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
     expect(text([blocked, skipped("b", "Elsewhere", "blocked")])).toBe("It stays out. Nothing tries it again unless you ask.");
   });
 
+  it("feature_stuck: the features that needed it are named also when the engine's reason has curly marks around the title", () => {
+    const blocked = featureWith("a", "blocked", { title: "Alpha", blockedReason: "it needs a decision from you" });
+    const skipped = (id: string, on: string, how: "blocked" | "skipped") => featureWith(id, "skipped", { title: id.toUpperCase(), blockedReason: `waiting on “${on}”, which was ${how}` });
+    const text = (features: ReturnType<typeof featureWith>[]) => cardsOf({ features }).cards.find((c) => c.kind === "feature_stuck")?.ifNothing;
+    expect(text([blocked, skipped("b", "Alpha", "blocked"), skipped("c", "B", "skipped")])).toBe("It stays out. Nothing tries it again unless you ask. “B” and “C” needed it, so those stay out too.");
+    expect(text([blocked, skipped("b", "Elsewhere", "blocked")])).toBe("It stays out. Nothing tries it again unless you ask.");
+  });
+
   it("feature_stuck: a reason the engine wrote is the engine's, any other is the AI's, no reason is a fallback", () => {
     const reasonOf = (blockedReason: string | undefined) => cardsOf({ features: [featureWith("a", "blocked", { title: "Alpha", ...(blockedReason !== undefined && { blockedReason }) })] }).cards.find((c) => c.kind === "feature_stuck")?.happened;
     expect(reasonOf("tried every escalation step, but its checks still failed")).toEqual({ text: "The AI team tried every step it has, and the checks still failed.", author: "engine" });

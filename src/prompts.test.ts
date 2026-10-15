@@ -15,6 +15,7 @@ import {
   initPrompt,
   loadRolePrompt,
   loadStack,
+  loadVariantPrompt,
   onboardPrompt,
   packageRoot,
   reportProsePrompt,
@@ -184,6 +185,18 @@ describe("role prompts", () => {
     const reviewer = loadRolePrompt("reviewer");
     for (const s of ["read-only", "`blocker`", "`major`", "`minor`", "suggestedTest", "Approve when there is no blocker or major"]) expect(reviewer).toContain(s);
     expect(loadRolePrompt("scout")).toContain("requested JSON and nothing else");
+  });
+});
+
+describe("variant prompts", () => {
+  // The two prompts for a feature that is checked by reading (docs/modes-spec.md 8.1, 8.2) follow the rules of the role prompts.
+  it.each(["maker", "checker"] as const)("%s is concise, provider-neutral and calm", (name) => {
+    const text = loadVariantPrompt(name);
+    expect(text.startsWith("# Role:")).toBe(true);
+    expect(text.split("\n").length).toBeLessThanOrEqual(65);
+    expect(text).not.toMatch(/claude|codex|gpt|anthropic|openai|opus|sonnet|haiku/i);
+    const shouting = (text.match(/\b[A-Z]{4,}\b/g) ?? []).filter((w) => !["JSON", "HTTP", "HTML", "AGENTS", "CRUD", "README"].includes(w));
+    expect(shouting).toEqual([]);
   });
 });
 

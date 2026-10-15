@@ -1,0 +1,42 @@
+# Mission: Habit tracker
+
+This mission builds a new app. The user's request, verbatim:
+
+```
+Build me a habit tracker where I can tick off habits every day.
+```
+
+## Your task
+
+Scaffold the app "Habit Tracker" exactly as the house stack below describes, until its full verification passes. Write AGENTS.md as the stack describes, with the UI contract below copied in verbatim.
+
+Don't implement any planned feature; they are built one at a time after the scaffold is committed. Don't commit: the orchestrator commits once verification passes.
+
+Answer with JSON: `summary`, the `verify` config the stack document specifies, and `notes` (anything unusual, such as a workaround you needed).
+
+## The app
+
+Track daily habits and streaks.
+
+Planned features, for context only:
+
+- `track-habit` Track a habit
+- `about-page` About page
+
+## UI contract
+
+Shared by the tests and the implementation: routes, labels and test ids must match exactly.
+
+UI-CONTRACT-MARKER: route `/`, input labelled 'Habit name', button 'Add habit', list data-testid=habit-list
+
+## House stack
+
+STACK
+
+## The previous attempt failed
+
+Attempt 1 ended with failing verification. Its files are probably still in the working tree, so check `git status` first, then fix the cause instead of starting over.
+
+```
+boom
+```

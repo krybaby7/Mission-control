@@ -1,6 +1,8 @@
 // Test harness for the Dispatcher: a temporary Mission Control home and workspace, real git, a Verifier running
 // `node --test`, and two MockRunners impersonating "claude" and "codex". Agent answers come from per-role handlers;
-// the defaults build a tiny Node app whose features each add `src/<id>.mjs` exporting `answer()`.
+// the defaults build a tiny Node app whose features each add `src/<id>.mjs` exporting `answer()`. For a feature that is
+// checked by reading (docs/modes-spec.md), the maker writes `docs/<id>.md` from the checks in its brief, the checker passes
+// every check with a real quote and says it opened the file, and a fake picture tool takes the pictures.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -11,7 +13,8 @@ import { Git } from "../../src/git.js";
 import type { Notifier, NotifyOptions } from "../../src/notify.js";
 import { parsePlan } from "../../src/plan.js";
 import { QuotaGovernor } from "../../src/quota.js";
-import { type MockBehavior, MockRunner } from "../../src/runners/mock.js";
+import { pictureName, type RenderRequest, type RenderResult, type RenderedPage, type Renderer } from "../../src/render.js";
+import { type MockBehavior, MockRunner, type MockScript } from "../../src/runners/mock.js";
 import { MissionStore } from "../../src/state.js";
 import type {
   AgentJob,
@@ -26,10 +29,13 @@ import type {
   Mission,
   MissionKind,
   OnboardOutput,
+  PictureWhy,
   PlanSource,
   ReviewOutput,
   Role,
   RoleOverride,
+  RubricOutput,
+  RubricResult,
   SpecFeature,
   SpecOutput,
   TestAuthorOutput,
@@ -60,7 +66,13 @@ export interface AgentCallInfo {
   n: number;
 }
 
-export type AgentHandler = (job: AgentJob, call: AgentCallInfo) => MockBehavior | Promise<MockBehavior>;
+/**
+ * What a handler returns: a MockBehavior, plus `opened`, the files the run says it opened. Only a run on the "claude"
+ * runner reports it (the Claude stream does; Codex and the plain mock cannot tell), so the checker's answer can be
+ * checked against it (docs/modes-spec.md 8.3, point 2).
+ */
+export type AgentBehavior = MockBehavior & { opened?: string[] };
+export type AgentHandler = (job: AgentJob, call: AgentCallInfo) => AgentBehavior | Promise<AgentBehavior>;
 export type AgentScript = Partial<Record<Role, AgentHandler>>;
 
 const FEATURE_LABELS = /^(?:test|build|fix|review|diagnose|context|digest)-(.+)$/;
@@ -140,6 +152,178 @@ export function diagnosis(action: DiagnosisOutput["action"], hint: string, reaso
   return { action, hint, reason };
 }
 
+// ───────────── Features that are checked by reading ─────────────
+
+/** The job is a builder of a document, a page or a data file (the role prompt starts "# Role: maker"). */
+export function isMaker(job: AgentJob): boolean {
+  return job.systemPrompt.startsWith("# Role: maker");
+}
+
+/** The job is the second AI that judges a feature against its checks (the role prompt starts "# Role: checker"). */
+export function isChecker(job: AgentJob): boolean {
+  return job.systemPrompt.startsWith("# Role: checker");
+}
+
+/** The lines `1. ...`, `2. ...` that follow `heading` in a brief, without their numbers. */
+function numberedAfter(prompt: string, heading: string): string[] {
+  const lines = prompt.split("\n");
+  const at = lines.findIndex((l) => l.trim() === heading);
+  const out: string[] = [];
+  for (let i = at + 1; at >= 0 && i < lines.length; i++) {
+    const m = /^\d+\. (.*)$/.exec(lines[i] ?? "");
+    if (!m) {
+      if ((lines[i] ?? "").trim() === "" && out.length === 0) continue;
+      break;
+    }
+    out.push(m[1] ?? "");
+  }
+  return out;
+}
+
+/** The checks in a maker's brief ("Checks the second AI will judge, one by one:") or in a checker's brief ("## Checks"). */
+export function checksInBrief(prompt: string): string[] {
+  const made = numberedAfter(prompt, "Checks the second AI will judge, one by one:");
+  return made.length > 0 ? made : numberedAfter(prompt, "## Checks");
+}
+
+/** The paths under "## Changed files" in a checker's brief. */
+export function changedFilesInBrief(prompt: string): string[] {
+  const lines = prompt.split("\n");
+  const at = lines.indexOf("## Changed files");
+  const out: string[] = [];
+  for (let i = at + 1; at >= 0 && i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (line.startsWith("## ")) break;
+    const m = /^- `(.+)`$/.exec(line);
+    if (m) out.push(m[1] ?? "");
+  }
+  return out;
+}
+
+/** The path the default maker writes for feature `id`. */
+export function deliverablePath(id: string): string {
+  return `docs/${id}.md`;
+}
+
+/** The default maker: writes docs/<id>.md, a title and each check of the brief as a plain sentence of its own, then a line for each problem it was asked to fix. */
+export function writeDeliverable(cwd: string, id: string, checks: string[], fixes: string[] = []): void {
+  writeFile(cwd, deliverablePath(id), `# ${id}\n\n${checks.map((c) => `${c}\n`).join("\n")}${fixes.map((x) => `\nFixed: ${x}\n`).join("")}`);
+}
+
+/** The lines `1. ...` under "## Problems to fix" in a maker's brief, without their numbers. */
+export function problemsInBrief(prompt: string): string[] {
+  const lines = prompt.split("\n");
+  const at = lines.indexOf("## Problems to fix");
+  const out: string[] = [];
+  for (let i = at + 1; at >= 0 && i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (line.startsWith("## ")) break;
+    const m = /^\d+\. (.*)$/.exec(line);
+    if (m) out.push((m[1] ?? "").replace(/\*\*/g, ""));
+  }
+  return out;
+}
+
+export function makerBehavior(job: AgentJob, id: string): AgentBehavior {
+  const checks = checksInBrief(job.prompt);
+  const fixes = problemsInBrief(job.prompt);
+  return { edit: (cwd) => writeDeliverable(cwd, id, checks, fixes), structured: buildOutput("made it") };
+}
+
+/** The absolute paths of the pictures a checker's brief offers (the lines `- <path>: <what it shows>` under "## Pictures"). */
+export function picturesInBrief(prompt: string): string[] {
+  const lines = prompt.split("\n");
+  const at = lines.indexOf("## Pictures");
+  const out: string[] = [];
+  for (let i = at + 1; at >= 0 && i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (line.startsWith("## ")) break;
+    const m = /^- (.+?): .+$/.exec(line);
+    if (m) out.push(m[1] ?? "");
+  }
+  return out;
+}
+
+/** The default checker's answer: every check passes, with the first words of the check as the quote, naming the first changed file it was given. */
+export function checkerResults(job: AgentJob): RubricResult[] {
+  const file = changedFilesInBrief(job.prompt)[0];
+  return checksInBrief(job.prompt).map((check, i) => ({
+    number: i + 1,
+    check,
+    result: "pass" as const,
+    evidence: file ? `The file says “${check.slice(0, 60)}” in ${file}.` : `Read the files and found the proof for check ${i + 1}.`,
+    basis: "text" as const,
+  }));
+}
+
+/**
+ * A checker's answer for `job`: by default every check passes. `tweak` changes the results before they are sent (for
+ * example to fail check 2 or to make it `cannot_judge`). It opened the first changed file, and says so (`opened`, which
+ * only a run on the "claude" runner reports); with `openPictures` it opened every picture the brief offers as well.
+ */
+export function checkerBehavior(job: AgentJob, tweak?: (results: RubricResult[], job: AgentJob) => void, opts: { openPictures?: boolean } = {}): AgentBehavior {
+  const results = checkerResults(job);
+  tweak?.(results, job);
+  const file = changedFilesInBrief(job.prompt)[0];
+  const pictures = opts.openPictures === true ? picturesInBrief(job.prompt).map((p) => (p.startsWith("/") ? p : join(job.cwd, p))) : [];
+  const answer: RubricOutput = {
+    verdict: results.every((r) => r.result === "pass") ? "approve" : "changes",
+    results,
+    seen: [...(file ? [file] : []), ...pictures],
+    notes: [],
+  };
+  return { structured: answer, opened: [...(file ? [join(job.cwd, file)] : []), ...pictures] };
+}
+
+/** One byte-exact 1 by 1 PNG, so a "picture" is a real picture file. */
+const PNG_1X1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+
+export interface FakeRendererOptions {
+  /** Nothing can be drawn, for this reason. */
+  why?: PictureWhy;
+  /** The visible text of a page (default: a sentence). */
+  text?: (path: string) => string;
+  /** The page is wider than a phone screen: always, or for the calls (counted from 1) this function says yes to. */
+  sideways?: boolean | ((call: number) => boolean);
+}
+
+export type FakeRenderer = Renderer & { requests: RenderRequest[] };
+
+/** A picture tool that needs no browser: it writes a tiny PNG for each page and width, and reports plausible facts. */
+export function fakeRenderer(opts: FakeRendererOptions = {}): FakeRenderer {
+  const requests: RenderRequest[] = [];
+  return {
+    requests,
+    async render(request: RenderRequest): Promise<RenderResult> {
+      requests.push(request);
+      const wide = typeof opts.sideways === "function" ? opts.sideways(requests.length) : opts.sideways === true;
+      if (opts.why !== undefined) return { pages: [], taken: 0, why: opts.why };
+      mkdirSync(request.outDir, { recursive: true });
+      let taken = 0;
+      const pages: RenderedPage[] = request.pages.map((page) => {
+        const facts = (width: number) => ({
+          title: page.path,
+          hasViewport: true,
+          documentWidth: wide && width === 390 ? 900 : width,
+          windowWidth: width,
+          text: opts.text?.(page.path) ?? `The page ${page.path} shows a visible sentence.`,
+          brokenImages: 0,
+          failedRequests: [],
+          errors: [],
+        });
+        const shot = (width: "phone" | "desktop") => {
+          const file = join(request.outDir, pictureName(request.featureId, page.n, page.path, width));
+          writeFileSync(file, PNG_1X1);
+          taken++;
+          return { width, file, facts: facts(width === "phone" ? 390 : 1280) };
+        };
+        return { path: page.path, n: page.n, phone: shot("phone"), desktop: shot("desktop") };
+      });
+      return { pages, taken };
+    },
+  };
+}
+
 /** Handlers that build the fixture app successfully, for `features` (the spec the architect returns). */
 export function defaultAgents(features: SpecFeature[]): Required<AgentScript> {
   return {
@@ -150,18 +334,20 @@ export function defaultAgents(features: SpecFeature[]): Required<AgentScript> {
       }
       return { structured: diagnosis("retry_with_hint", "Return the feature id from answer().") };
     },
-    reviewer: (_job, call) => {
+    reviewer: (job, call) => {
       if (call.label === "gate-a") return { structured: { verdict: "approve", issues: [] } satisfies GateOutput };
+      if (isChecker(job)) return checkerBehavior(job);
       return { structured: review() };
     },
     test_author: (_job, call) => ({
       edit: (cwd) => writeFeatureTest(cwd, call.feature ?? "unknown"),
       structured: { testFiles: [featureTestPath(call.feature ?? "unknown")], notes: "" } satisfies TestAuthorOutput,
     }),
-    engineer: (_job, call) => {
+    engineer: (job, call) => {
       if (call.label === "init") {
         return { edit: writeScaffold, structured: { summary: "scaffolded", verify: FIXTURE_VERIFY, notes: [] } satisfies InitOutput };
       }
+      if (isMaker(job)) return makerBehavior(job, call.feature ?? "unknown");
       return { edit: (cwd) => implementFeature(cwd, call.feature ?? "unknown"), structured: buildOutput() };
     },
     scout: (_job, call) => {
@@ -202,6 +388,25 @@ export interface HarnessOptions {
   /** Tweaks applied to the test config (home and workspace are already temp dirs). */
   configure?: (c: Config) => void;
   clock?: Clock;
+  /** The picture tool. Default: `fakeRenderer()`. */
+  renderer?: Renderer;
+}
+
+/** A mock runner that, like the Claude runner, reports the files a run opened (the plain mock cannot). */
+class HarnessRunner extends MockRunner {
+  constructor(
+    script: MockScript,
+    opts: { provider: "claude" | "codex" },
+    private readonly openedBy: Map<string, string[]>,
+  ) {
+    super(script, opts);
+  }
+
+  override async run(...args: Parameters<MockRunner["run"]>): ReturnType<MockRunner["run"]> {
+    const result = await super.run(...args);
+    const opened = this.openedBy.get(args[0].id);
+    return opened !== undefined && this.provider === "claude" ? { ...result, opened } : result;
+  }
 }
 
 export class MissionHarness {
@@ -215,12 +420,16 @@ export class MissionHarness {
   readonly quota: QuotaGovernor;
   readonly claude: MockRunner;
   readonly codex: MockRunner;
+  /** The picture tool the dispatchers get (a fake: no browser is started). Replace it, or pass `renderer` in `run`'s extras. */
+  renderer: Renderer;
   /** Every job either runner received, in call order. */
   readonly jobs: AgentJob[] = [];
   readonly notifications: Notification[] = [];
   readonly defaults: Required<AgentScript>;
   agents: AgentScript;
   private readonly labelCounts = new Map<string, number>();
+  /** The files a run says it opened, by job id, for the runner that reports them. */
+  private readonly openedBy = new Map<string, string[]>();
   private readonly savedMcHome = process.env.MC_HOME;
 
   constructor(opts: HarnessOptions = {}) {
@@ -234,8 +443,9 @@ export class MissionHarness {
     this.quota = new QuotaGovernor({ clock: this.clock, config: this.config });
     this.defaults = defaultAgents(opts.features ?? [feature("greet"), feature("farewell", ["greet"])]);
     this.agents = opts.agents ?? {};
-    this.claude = new MockRunner((job) => this.route(job), { provider: "claude" });
-    this.codex = new MockRunner((job) => this.route(job), { provider: "codex" });
+    this.renderer = opts.renderer ?? fakeRenderer();
+    this.claude = new HarnessRunner((job) => this.route(job), { provider: "claude" }, this.openedBy);
+    this.codex = new HarnessRunner((job) => this.route(job), { provider: "codex" }, this.openedBy);
   }
 
   /**
@@ -274,6 +484,7 @@ export class MissionHarness {
       notifier,
       verifierFor: (id) => new Verifier({ logsDir: this.store.logsDir(id), timeoutMs: 60_000, signal }),
       stopCheck,
+      renderer: this.renderer,
       ...deps,
     });
     return dispatcher;
@@ -291,6 +502,8 @@ export class MissionHarness {
       checkpoints?: CheckpointKind[];
       /** A plan written outside the team (see `planSource`); the mission adopts it instead of asking the planner. */
       plan?: PlanSource;
+      /** `false`: queued with `--no-owner-checkpoint`, so no stop for the owner's look at a feature the plan marks or the second AI could not judge. */
+      ownerStops?: false;
     } = {},
   ): Mission {
     return this.store.createMission({
@@ -303,6 +516,7 @@ export class MissionHarness {
       roleOverrides: init.roleOverrides,
       checkpoints: init.checkpoints,
       plan: init.plan,
+      ownerStops: init.ownerStops,
       nowMs: this.clock.now(),
     });
   }
@@ -337,7 +551,14 @@ export class MissionHarness {
     this.labelCounts.set(label, n);
     const call: AgentCallInfo = { label, n, feature: FEATURE_LABELS.exec(label)?.[1] };
     const handler = this.agents[job.role] ?? this.defaults[job.role];
-    return handler(job, call);
+    const behavior = handler(job, call);
+    return behavior instanceof Promise ? behavior.then((b) => this.keepOpened(job, b)) : this.keepOpened(job, behavior);
+  }
+
+  private keepOpened(job: AgentJob, behavior: AgentBehavior): MockBehavior {
+    const { opened, ...rest } = behavior;
+    if (opened !== undefined) this.openedBy.set(job.id, opened);
+    return rest;
   }
 }
 

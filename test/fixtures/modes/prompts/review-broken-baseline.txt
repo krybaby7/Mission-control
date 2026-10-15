@@ -1,0 +1,54 @@
+# Mission: Habit tracker
+
+This mission builds a new app. The user's request, verbatim:
+
+```
+Build me a habit tracker where I can tick off habits every day.
+```
+
+## Your task
+
+Review the implementation of feature `track-habit`. Its frozen acceptance tests pass (output below). The full verification did not gate it, because it was already failing before this mission (see below).
+
+The change is checked out in your working directory; read the changed files for context, especially if the diff below is truncated.
+
+Answer with JSON: `verdict` ("approve" when there is no blocker or major finding, otherwise "changes") and `findings`.
+
+## Feature `track-habit` Track a habit
+
+As a user I can add a habit and tick it off.
+
+Acceptance criteria:
+1. Adding 'Read' shows it in the habit list
+2. Ticking it shows 'Streak: 1'
+
+## UI contract
+
+Shared by the tests and the implementation: routes, labels and test ids must match exactly.
+
+UI-CONTRACT-MARKER: route `/`, input labelled 'Habit name', button 'Add habit', list data-testid=habit-list
+
+## Acceptance tests (frozen)
+
+- `tests/e2e/track-habit.spec.ts`
+- `tests/unit/streak.test.ts`
+
+## Failures from before this mission
+
+The full verification was already failing before this mission started. Those failures are not findings unless this mission's changes made them worse.
+
+- Error: lint failed in src/a.ts
+- Error: 2 tests failed
+
+## Diff
+
+```diff
+diff --git a/x b/x
++x
+```
+
+## Verification output (end)
+
+```
+ok
+```

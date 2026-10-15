@@ -2,8 +2,23 @@
 // Every step works from the persisted Mission and saves after each state change, so a stopped or crashed run
 // resumes where it left off. Prompt context and progress that are not part of the Mission (last failure output, the last
 // passing verify tail, unit installs, init attempts, the final verify result) live next to it in <missionDir>/dispatch.json.
-import { type Dirent, existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { type Dirent, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { askedBecause, asksForLook, isModeFeature, lookReason, pictureReason } from "./checked-by.js";
+import {
+  type Deliverables,
+  type DeliverableSource,
+  checkDeliverables,
+  checkPageRendered,
+  fileKind,
+  judgeRubric,
+  mergeOutcomes,
+  plainName,
+  projectChecksProblem,
+  type RubricJudgement,
+  readDeliverables,
+  type RuleOutcome,
+} from "./checks.js";
 import {
   answerIsRecorded,
   checkpointId,
@@ -35,13 +50,18 @@ import {
   initPrompt,
   loadRolePrompt,
   loadStack,
+  loadVariantPrompt,
+  makePrompt,
   onboardPrompt,
   reportProsePrompt,
   reviewPrompt,
+  rubricPrompt,
   specPrompt,
   testAuthorPrompt,
+  type VariantPrompt,
 } from "./prompts.js";
 import type { QuotaGovernor } from "./quota.js";
+import { imageName, pictureName, playwrightRenderer, type RenderedPage, type Renderer, type RenderResult } from "./render.js";
 import { buildReportFacts, collectScreenshots, renderReport } from "./report.js";
 import { normalizeVerifyConfig, SCHEMAS } from "./schemas.js";
 import { type MissionStore, planOf, slugify } from "./state.js";
@@ -71,6 +91,7 @@ import type {
   MissionStatus,
   OnboardOutput,
   PendingCheckpoint,
+  PictureWhy,
   PlanReview,
   Profile,
   Provider,
@@ -78,6 +99,7 @@ import type {
   ReviewOutput,
   Role,
   RoleOverride,
+  RubricOutput,
   Rung,
   RunResult,
   SpecFeature,
@@ -115,6 +137,11 @@ export interface DispatcherDeps {
    * and every verification. Default: util/reap.ts, which only acts inside the container.
    */
   reapOrphans?: () => Promise<number[]>;
+  /**
+   * Takes the pictures of a page for a feature that is checked by reading (docs/modes-spec.md section 7). Default: the real
+   * one (`playwright-core` and a Chromium found by folder), which says "no pictures" and why when either is missing.
+   */
+  renderer?: Renderer;
 }
 
 const INTEGRATION_DIR = "_integration";
@@ -407,6 +434,10 @@ interface AgentCall {
   /** Skipped (null) when no model is free right now or the run budget is spent. */
   optional?: boolean;
   maxTurns?: number;
+  /** The system prompt is prompts/<promptFile>.md instead of the role's own (a feature that is checked by reading). Tier, family and quota stay the role's. */
+  promptFile?: VariantPrompt;
+  /** Extra folders a read-only run may open files from: the pictures of a page. Only a Claude run uses it. */
+  readDirs?: string[];
 }
 
 interface AgentAnswer<T> {
@@ -427,12 +458,56 @@ interface UnitCheck {
   frozenViolations: string[];
 }
 
+/** One picture the second AI is offered: the absolute path to open, what the brief calls it, and what it shows. */
+interface PictureFile {
+  path: string;
+  name: string;
+  label: string;
+}
+
+/** The pictures taken for one check of a feature that is checked by reading. */
+interface PictureSet {
+  /** A page, a drawing or an image was to be pictured. */
+  expected: boolean;
+  /** PNG files the picture tool wrote. */
+  taken: number;
+  why?: PictureWhy;
+  /** The pictures of the pages that were drawn. */
+  pages: PictureFile[];
+  /** Changed raster images, which the second AI opens in the working folder. */
+  images: PictureFile[];
+}
+
+const NO_PICTURES: PictureSet = { expected: false, taken: 0, pages: [], images: [] };
+
+/** What Mission Control's own checks found in a feature that is checked by reading, with the pictures taken for it. */
+interface DeliverableResult {
+  pass: boolean;
+  /** At most 10, each at most 200 characters, then `and <n> more.` */
+  problems: string[];
+  facts: string[];
+  /** What the check put back: the project's own tests and check scripts. */
+  putBack: string[];
+  /** The project's own full checks, when they ran. */
+  projectChecks?: "passed" | "failed";
+  /** The changed files that could be read, with their text. */
+  readable: { path: string; text: string }[];
+  /** The visible text of the pages that were drawn. */
+  pageText: string[];
+  pictures: PictureSet;
+}
+
 type BuildRung = Extract<Rung, { action: "build" }>;
 
 class MissionRun {
   private readonly scratch: Scratch;
   private readonly verifier: Verifier;
-  private readonly rolePrompts = new Map<Role, string>();
+  private readonly rolePrompts = new Map<Role | VariantPrompt, string>();
+  /** The last Mission Control check of each feature's passing commit: what the second AI is told, and the pictures. Recomputed after a restart. */
+  private readonly lastChecks = new Map<string, { commit: string; result: DeliverableResult }>();
+  /** Sentences for the owner's look about the last answer of the second AI (a file it did not open, a list that could not be checked). */
+  private readonly lookNotes = new Map<string, string[]>();
+  private renderer: Renderer | undefined;
 
   constructor(
     private readonly deps: DispatcherDeps,
@@ -739,11 +814,11 @@ class MissionRun {
     return { family, tier: forced.tier ?? rung.tier, effort: forced.effort ?? rung.effort };
   }
 
-  private rolePrompt(role: Role): string {
-    let prompt = this.rolePrompts.get(role);
+  private rolePrompt(name: Role | VariantPrompt): string {
+    let prompt = this.rolePrompts.get(name);
     if (prompt === undefined) {
-      prompt = loadRolePrompt(role);
-      this.rolePrompts.set(role, prompt);
+      prompt = name === "maker" || name === "checker" ? loadVariantPrompt(name) : loadRolePrompt(name);
+      this.rolePrompts.set(name, prompt);
     }
     return prompt;
   }
@@ -801,11 +876,12 @@ class MissionRun {
         allowFailover: true,
         optional: call.optional,
         cwd: call.cwd,
-        systemPrompt: this.rolePrompt(call.role),
+        systemPrompt: this.rolePrompt(call.promptFile ?? call.role),
         prompt: call.prompt,
         outputSchema: call.schema,
         access: call.access,
         noTools: call.noTools,
+        ...(call.readDirs && call.readDirs.length > 0 && { readDirs: call.readDirs }),
         maxTurns: call.maxTurns ?? this.deps.config.limits.otherMaxTurns,
       });
     } finally {
@@ -952,7 +1028,7 @@ class MissionRun {
     }
     this.scratch.updateUnit(f.id, { installFailures: installFailures + 1 });
     if (installFailures + 1 >= MAX_INSTALL_TRIES) {
-      this.noteOnce(`Installing the dependencies of "${f.title}" failed, so its checks may fail for that reason.`);
+      this.noteOnce(`Installing the dependencies of “${f.title}” failed, so its checks may fail for that reason.`);
     }
   }
 
@@ -1269,12 +1345,14 @@ class MissionRun {
 
   private async reviseSpec(previous: SpecOutput, issues: string[]): Promise<void> {
     const { spec } = await this.writeSpec(1, { previous, issues });
-    if (spec) {
+    // The planner's answer has no field for a mode: they come back by feature id, and a revision that loses one is refused.
+    const carried = spec ? carryModes(previous, spec) : undefined;
+    if (carried?.ok) {
       this.setPlanReview("revised", issues); // saved together with the new plan
-      this.adoptSpec(spec);
+      this.adoptSpec(carried.spec);
     } else {
       this.setPlanReview("not_applied", issues);
-      this.noteOnce(`The plan reviewer asked for changes that could not be applied: ${issues.join(" ")}`);
+      this.noteOnce(spec ? PLAN_LOST_A_MODE : `The plan reviewer asked for changes that could not be applied: ${issues.join(" ")}`);
     }
   }
 
@@ -1397,7 +1475,7 @@ class MissionRun {
         if (FINISHED.has(f.status)) continue;
         const dead = f.deps.map((d) => this.feature(d)).find((d) => d?.status === "blocked" || d?.status === "skipped");
         if (!dead) continue;
-        this.setStatus(f, "skipped", `waiting on "${dead.title}", which was ${dead.status}`);
+        this.setStatus(f, "skipped", `waiting on “${dead.title}”, which was ${dead.status}`);
         changed = true;
       }
     }
@@ -1448,7 +1526,11 @@ class MissionRun {
   private async startUnit(f: Feature): Promise<void> {
     const wt = await this.ensureUnitWorktree(f);
     f.testsCommit = await this.deps.git.headSha(wt);
-    this.setStatus(f, "testing");
+    if (f.mode === undefined) return this.setStatus(f, "testing");
+    // A feature that is checked by reading has no test author and no frozen tests: the guard of the project's own tests and
+    // check scripts is recorded now, and the work starts at once.
+    await this.recordGuard(f, wt);
+    this.setStatus(f, "building");
   }
 
   // ── testing ──
@@ -1463,7 +1545,7 @@ class MissionRun {
       await git.commitAll(wt, `test(${f.id}): acceptance tests`);
     } else {
       await git.resetHard(wt, base); // drops test files that earlier rounds left behind
-      if (!this.m.baselineBroken) this.noteOnce(`No acceptance tests were written for "${f.title}", so only the full verification checked it.`);
+      if (!this.m.baselineBroken) this.noteOnce(`No acceptance tests were written for “${f.title}”, so only the full verification checked it.`);
     }
     await this.freezeTests(f, wt, files);
     this.setStatus(f, "building");
@@ -1486,7 +1568,7 @@ class MissionRun {
       } else if (amendReason !== undefined || !(await this.testsPassAlready(f, wt, files))) {
         return files;
       } else if (vacuous) {
-        this.noteOnce(`The tests for "${f.title}" already passed before it was built, so they may not check it fully.`);
+        this.noteOnce(`The tests for “${f.title}” already passed before it was built, so they may not check it fully.`);
         return files;
       } else {
         vacuous = true;
@@ -1553,7 +1635,7 @@ class MissionRun {
     const files = await this.writeTests(f, wt, attempt, reason);
     if (files.length === 0) {
       await git.resetHard(wt, attempt);
-      this.noteOnce(`The rewritten tests for "${f.title}" could not be used, so its earlier tests stayed in place.`);
+      this.noteOnce(`The rewritten tests for “${f.title}” could not be used, so its earlier tests stayed in place.`);
       return;
     }
     const authored = await git.changedFiles(wt, attempt);
@@ -1583,7 +1665,7 @@ class MissionRun {
       role: "test_author",
       label: `test-${f.id}`,
       feature: f.id,
-      assignment: this.assign("test_author", this.engineerFamily()),
+      assignment: this.assignFor("test_author", f, this.engineerFamily()),
       cwd: wt,
       prompt: testAuthorPrompt(this.m, f, { fileList: await this.repoFiles(wt), ...ctx }),
       schema: SCHEMAS.testAuthor,
@@ -1599,7 +1681,7 @@ class MissionRun {
     if (touchedTheirs.length > 0) {
       await this.deps.git.restorePaths(wt, base, touchedTheirs);
       this.event("tests.stray", { feature: f.id, files: touchedTheirs });
-      this.noteOnce(`The test author for "${f.title}" also changed the tests of features already finished (${listFiles(touchedTheirs)}); those changes were undone.`);
+      this.noteOnce(`The test author for “${f.title}” also changed the tests of features already finished (${listFiles(touchedTheirs)}); those changes were undone.`);
     }
     const eligible = new Set([...changed.filter((p) => isTestPath(p, globs) && !theirs.has(p)), ...f.frozenTests.map((t) => t.path)]);
     const listed = (answer.out?.testFiles ?? []).map((p) => repoRelative(wt, p));
@@ -1610,7 +1692,7 @@ class MissionRun {
     if (stray.length === 0) return;
     await this.deps.git.restorePaths(wt, base, stray);
     this.event("tests.stray", { feature: f.id, files: stray });
-    this.noteOnce(`The test author for "${f.title}" also changed files outside the test folders (${listFiles(stray)}); those changes were undone.`);
+    this.noteOnce(`The test author for “${f.title}” also changed files outside the test folders (${listFiles(stray)}); those changes were undone.`);
   }
 
   private async testsPassAlready(f: Feature, wt: string, files: string[]): Promise<boolean> {
@@ -1620,17 +1702,37 @@ class MissionRun {
 
   // ── building ──
 
-  private ladder(f: Feature): Rung[] {
-    return this.deps.config.ladders[f.kind === "mechanical" ? "mechanical" : "standard"];
+  /**
+   * The rungs the builder climbs (docs/modes-spec.md 5.3). `light` takes the mechanical ladder (so does `kind: mechanical`),
+   * `deep` the standard one with every build rung lifted to the frontier tier; a feature that is checked by reading has no
+   * diagnose rungs. A feature with no `effort` gets exactly the ladder it always got.
+   */
+  private ladderFor(f: Feature): Rung[] {
+    const { ladders } = this.deps.config;
+    const rungs = f.effort === "deep" ? liftRungs(ladders.standard) : ladders[f.effort === "light" || f.kind === "mechanical" ? "mechanical" : "standard"];
+    return f.mode === undefined ? rungs : rungs.filter(isBuildRung);
+  }
+
+  /**
+   * The assignment of the test author or the reviewer for a feature: as configured, or by the table of 5.3 when the feature
+   * has an `effort`. A `--role` override still wins last, field by field.
+   */
+  private assignFor(role: "test_author" | "reviewer", f: Feature, relativeTo: Family): Assignment {
+    const base = this.assign(role, relativeTo);
+    if (f.effort === undefined) return base;
+    const forced = roleOverride(this.m, role);
+    const table = EFFORT_ROLES[role][f.effort];
+    return { ...base, tier: forced.tier ?? table.tier, effort: forced.effort ?? table.effort };
   }
 
   private async buildStep(f: Feature): Promise<void> {
+    if (f.mode !== undefined) return this.makeStep(f);
     if (this.scratch.unit(f.id).pendingDiagnosis) {
       // A disputed test is diagnosed before anything else, even when a stop came between the dispute and its diagnosis.
       await this.ensureUnitWorktree(f);
       return this.runPendingDiagnosis(f);
     }
-    const rung = this.ladder(f)[f.rung];
+    const rung = this.ladderFor(f)[f.rung];
     if (!rung) return this.blockFeature(f, "tried every escalation step, but its checks still failed");
     if (this.uncheckable(f)) return this.blockFeature(f, UNCHECKABLE);
     await this.ensureUnitWorktree(f);
@@ -1751,7 +1853,7 @@ class MissionRun {
    * diagnosis still has it diagnosed, with the dispute, first thing on resume (see buildStep).
    */
   private async failBuild(f: Feature, answer: AgentAnswer<BuildOutput>, assignment: Assignment, check: UnitCheck): Promise<void> {
-    const ladder = this.ladder(f);
+    const ladder = this.ladderFor(f);
     const signature = check.verify.signature || undefined;
     const previous = f.attempts.filter((a) => a.action === "build").at(-1);
     const agentOk = answer.result.outcome === "ok";
@@ -1826,7 +1928,7 @@ class MissionRun {
         return this.amendTests(f, out.reason || out.hint);
       case "block": {
         const reason = out.reason || out.hint || "it needs a decision from you";
-        this.m.decisionsNeeded.push(`"${f.title}": ${reason}`);
+        this.m.decisionsNeeded.push(`“${f.title}”: ${reason}`);
         return this.blockFeature(f, reason);
       }
     }
@@ -1840,7 +1942,7 @@ class MissionRun {
     for (;;) {
       // The work the owner is about to look at was reviewed once already; a resume must not ask the reviewer again.
       if (!this.reviewSettled(f)) {
-        const finished = await this.reviewAndFix(f, wt);
+        const finished = f.mode === undefined ? await this.reviewAndFix(f, wt) : await this.rubricAndFix(f, wt);
         if (this.looksAt(f)) this.scratch.updateUnit(f.id, { reviewedCommit: f.passingCommit, reviewSkipped: !finished });
       }
       const gate = await this.checkpointGate("feature", f);
@@ -1851,18 +1953,23 @@ class MissionRun {
     await this.merge(f);
   }
 
+  /** How many fix rounds a feature may have: the configured number, and one more when the team thinks `deep`. */
+  private reviewRounds(f: Feature): number {
+    return this.deps.config.limits.maxReviewRounds + (f.effort === "deep" ? 1 : 0);
+  }
+
   /** The review and fix rounds; false when the review did not finish. */
   private async reviewAndFix(f: Feature, wt: string): Promise<boolean> {
     for (;;) {
       const findings = await this.review(f, wt);
       if (!findings) {
-        this.noteOnce(`The review of "${f.title}" did not finish, so it was merged after passing its checks.`);
+        this.noteOnce(`The review of “${f.title}” did not finish, so it was merged after passing its checks.`);
         return false;
       }
       this.keepOpen(f, findings.filter((x) => !isBlocking(x)));
       const blocking = findings.filter(isBlocking);
       if (blocking.length === 0) return true;
-      if (f.reviewRounds >= this.deps.config.limits.maxReviewRounds || !(await this.fixFindings(f, wt, blocking))) {
+      if (f.reviewRounds >= this.reviewRounds(f) || !(await this.fixFindings(f, wt, blocking))) {
         this.keepOpen(f, blocking);
         return true;
       }
@@ -1876,7 +1983,7 @@ class MissionRun {
       role: "reviewer",
       label: `review-${f.id}`,
       feature: f.id,
-      assignment: this.assign("reviewer", f.builtBy ?? this.engineerFamily()),
+      assignment: this.assignFor("reviewer", f, f.builtBy ?? this.engineerFamily()),
       cwd: wt,
       prompt: reviewPrompt(this.m, f, {
         diff: await this.promptDiff(wt, this.m.integrationBranch),
@@ -1900,6 +2007,7 @@ class MissionRun {
 
   /** A fix round by the engineer that passed; true when it is green again (new passingCommit), else rolled back. */
   private async fixFindings(f: Feature, wt: string, findings: Finding[]): Promise<boolean> {
+    if (f.mode !== undefined) return this.fixDeliverable(f, wt, findings);
     const assignment = this.passingAssignment(f);
     const answer = await this.agent<BuildOutput>({
       role: "engineer",
@@ -1939,6 +2047,462 @@ class MissionRun {
     const passed = f.attempts.filter((a) => a.outcome === "pass" && a.action !== "diagnose").at(-1);
     if (!passed) return { family, tier: "standard", effort: "high" };
     return { family, tier: tierOfModel(this.deps.config, family, passed.model), effort: passed.effort };
+  }
+
+  // ── features that are checked by reading (docs/modes-spec.md 5.2) ──
+
+  /**
+   * One step of a feature with no test author and no frozen tests: the builder climbs the ladder (which has no diagnose
+   * rungs), and Mission Control's own checks judge every attempt. No rung left: the feature is set aside, with its branch.
+   */
+  private async makeStep(f: Feature): Promise<void> {
+    const rung = this.ladderFor(f)[f.rung];
+    if (rung === undefined || !isBuildRung(rung)) {
+      const first = firstLine(this.scratch.unit(f.id).lastFailure?.outputTail ?? "").trim();
+      return this.blockFeature(f, `tried every escalation step, but Mission Control's own checks still failed${first !== "" ? `: ${first}` : ""}`);
+    }
+    await this.ensureUnitWorktree(f);
+    await this.makeAttempt(f, rung);
+  }
+
+  private async makeAttempt(f: Feature, rung: BuildRung): Promise<void> {
+    const wt = need(f.worktree, "the unit worktree");
+    const firstBuild = !f.attempts.some((a) => a.action === "build");
+    const fileList = await this.repoFiles(wt);
+    const contextPack = firstBuild ? await this.scout<ContextPackOutput>(`context-${f.id}`, contextPackPrompt(this.m, f, fileList), SCHEMAS.contextPack, wt) : null;
+    const assignment = this.rungAssignment(rung);
+    const last = this.scratch.unit(f.id).lastFailure;
+    const answer = await this.agent<BuildOutput>({
+      role: "engineer",
+      label: `build-${f.id}`,
+      feature: f.id,
+      promptFile: "maker",
+      assignment,
+      cwd: wt,
+      prompt: makePrompt(this.m, f, { rung: f.rung, fileList, contextPack, lastProblems: last ? last.outputTail.split("\n").filter((line) => line !== "") : null }),
+      schema: SCHEMAS.build,
+      access: "workspace-write",
+      maxTurns: this.deps.config.limits.buildMaxTurns,
+    });
+    await this.keepOnBranch(wt, need(f.branch, "the unit branch"));
+    const n = f.attempts.filter((a) => a.action === "build").length + 1;
+    await this.deps.git.commitAll(wt, `wip(${f.id}): attempt ${n}`);
+    const check = await this.checkDeliverable(f, `a${n}`);
+    if (check.pass) return this.passMake(f, answer, assignment, check);
+    await this.failMake(f, answer, assignment, check);
+  }
+
+  private async passMake(f: Feature, answer: AgentAnswer<BuildOutput>, assignment: Assignment, check: DeliverableResult): Promise<void> {
+    const putBack = check.putBack.length > 0 ? ` (edits to the project's own tests or check scripts were put back: ${listFiles(check.putBack)})` : "";
+    this.recordAttempt(f, {
+      ...attemptRun(f.rung, "build", answer, assignment),
+      outcome: "pass",
+      summary: `${answer.out?.summary || "Mission Control's own checks passed"}${putBack}`,
+    });
+    const wt = need(f.worktree, "the unit worktree");
+    f.passingCommit = await this.deps.git.headSha(wt);
+    f.builtBy = answer.family;
+    this.lastChecks.set(f.id, { commit: f.passingCommit, result: check });
+    this.scratch.updateUnit(f.id, { lastFailure: undefined });
+    this.setStatus(f, "reviewing");
+  }
+
+  /** Records the failure, keeps the problems for the next brief and moves to the next rung. No digest and no diagnosis: the problems are already plain words. */
+  private async failMake(f: Feature, answer: AgentAnswer<BuildOutput>, assignment: Assignment, check: DeliverableResult): Promise<void> {
+    const { result } = answer;
+    const agent = result.outcome !== "ok" ? [`the agent run ended "${result.outcome}"${result.error ? `: ${result.error}` : ""}`] : [];
+    this.recordAttempt(f, {
+      ...attemptRun(f.rung, "build", answer, assignment),
+      outcome: result.outcome === "ok" ? "fail" : result.outcome === "limited" ? "limited" : "error",
+      summary: [...agent, ...check.problems].join("; "),
+    });
+    this.scratch.updateUnit(f.id, { lastFailure: { outputTail: check.problems.join("\n") } });
+    f.rung++;
+    this.save();
+  }
+
+  /**
+   * Mission Control's own checks of a feature's files (docs/modes-spec.md section 6), then the pictures of its pages
+   * (section 7) and, for a change that is more than documents, pages and data, the project's own checks (6.4). Puts back what
+   * the builder must not touch, first. Never opens a path that is not a regular file inside the worktree.
+   */
+  private async checkDeliverable(f: Feature, label: string): Promise<DeliverableResult> {
+    const wt = need(f.worktree, "the unit worktree");
+    const testsCommit = need(f.testsCommit, "the unit's start commit");
+    const putBack = await this.restoreGuarded(f, wt, testsCommit);
+    const changed = await this.deps.git.changedFiles(wt, testsCommit);
+    const deliverables = await readDeliverables(this.deliverableSource(wt, testsCommit, changed));
+    const own = await checkDeliverables({ deliverables, ...(f.expect !== undefined && { expect: f.expect }) });
+    const parts: RuleOutcome[] = [own];
+    if (putBack.length > 0) {
+      parts.push({ problems: [], facts: [`The checks put back ${listFiles(putBack.map((p) => plainName(p)))} (the project's own tests or check scripts).`] });
+    }
+    let pictures = NO_PICTURES;
+    let pageText: string[] = [];
+    if (own.pass) {
+      const taken = await this.takePictures(f, wt, deliverables);
+      pictures = taken.pictures;
+      pageText = taken.pageText;
+      parts.push(...taken.outcomes);
+    }
+    const merged = mergeOutcomes(...parts);
+    const problems = [...merged.problems];
+    const facts = [...merged.facts];
+    let projectChecks: "passed" | "failed" | undefined;
+    if (problems.length === 0) {
+      const ran = await this.runProjectChecks(f, wt, label, changed);
+      if (ran.fact !== undefined) facts.push(ran.fact);
+      if (ran.problem !== undefined) problems.push(ran.problem); // after the merge: its 300 characters are kept
+      projectChecks = ran.status;
+    }
+    this.event("deliverable.checked", { feature: f.id, label, ok: problems.length === 0, problems: problems.length, ...(projectChecks !== undefined && { projectChecks }) });
+    return {
+      pass: problems.length === 0,
+      problems,
+      facts,
+      putBack,
+      ...(projectChecks !== undefined && { projectChecks }),
+      readable: deliverables.files.filter((x) => x.text !== undefined).map((x) => ({ path: x.path, text: x.text ?? "" })),
+      pageText,
+      pictures,
+    };
+  }
+
+  /** What `readDeliverables` asks git: the file at the start of the feature, and the lines the feature added. Read-only commands, no hooks. */
+  private deliverableSource(wt: string, testsCommit: string, changed: string[]): DeliverableSource {
+    const before = new Map<string, Promise<string | undefined>>();
+    const textBefore = (path: string): Promise<string | undefined> => {
+      let known = before.get(path);
+      if (known === undefined) {
+        known = (async () => {
+          const r = await gitRead(wt, ["cat-file", "blob", `${testsCommit}:${path}`]);
+          return r.ok ? r.stdout : undefined;
+        })();
+        before.set(path, known);
+      }
+      return known;
+    };
+    const existed = async (path: string): Promise<boolean> => (await gitRead(wt, ["cat-file", "-e", `${testsCommit}:${path}`])).ok;
+    return {
+      worktree: wt,
+      changed,
+      before: textBefore,
+      added: async (path) => {
+        if (fileKind(path) === "binary") return (await existed(path)) ? [] : undefined;
+        if ((await textBefore(path)) === undefined) return undefined;
+        const diff = await gitRead(wt, ["diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", testsCommit, "HEAD", "--", path]);
+        return diff.ok ? addedLines(diff.stdout) : [];
+      },
+    };
+  }
+
+  /** The project's own full checks, for a change that is more than documents, pages and data (spec 6.4, M24); always for a feature the engine added itself. */
+  private async runProjectChecks(f: Feature, wt: string, label: string, changed: string[]): Promise<{ status?: "passed" | "failed"; problem?: string; fact?: string }> {
+    if (!isDerivedFeature(f.id) && !changedBeyondDocuments(changed)) return {};
+    if (this.m.baselineBroken) return { fact: "The project's own checks were already failing before this work, so they were not used to judge it." };
+    const result = await this.verifyUnit(f, wt, label);
+    return result.ok ? { status: "passed", fact: "The project's own checks passed." } : { status: "failed", problem: projectChecksProblem(result.outputTail) };
+  }
+
+  // ── pictures (docs/modes-spec.md section 7) ──
+
+  private pictureTool(): Renderer {
+    return (this.renderer ??= this.deps.renderer ?? playwrightRenderer());
+  }
+
+  private picturesDir(): string {
+    return join(this.missionDir(), "screenshots");
+  }
+
+  /** `look__<feature id>__`, the start of the name of every picture of one feature. */
+  private pictureStem(featureId: string): string {
+    return `look__${pictureStemId(featureId)}__`;
+  }
+
+  /** The pictures of the features (or of one), as absolute paths, sorted. */
+  private lookPictures(featureId?: string): string[] {
+    const stem = featureId === undefined ? "look__" : this.pictureStem(featureId);
+    try {
+      return readdirSync(this.picturesDir())
+        .filter((name) => name.startsWith(stem) && /\.(?:png|jpe?g|gif|webp)$/i.test(name))
+        .sort()
+        .map((name) => join(this.picturesDir(), name));
+    } catch {
+      return [];
+    }
+  }
+
+  private clearPictures(featureId: string): void {
+    for (const file of this.lookPictures(featureId)) rmSync(file, { force: true });
+  }
+
+  /**
+   * Once the scripted checks pass: draws the changed pages (a page nothing changed in is drawn for its picture only, when the
+   * feature changed something that could change how it looks), copies the changed pictures for the owner, and turns the
+   * facts of the drawn pages into rules S23 to S26. At most four files in all.
+   */
+  private async takePictures(f: Feature, wt: string, d: Deliverables): Promise<{ pictures: PictureSet; pageText: string[]; outcomes: RuleOutcome[] }> {
+    const none = { pictures: NO_PICTURES, pageText: [] as string[], outcomes: [] as RuleOutcome[] };
+    const changedPages = d.files.filter((x) => x.kind === "page").map((x) => x.path);
+    const drawings = d.files.filter((x) => x.kind === "drawing").map((x) => x.path);
+    const images = d.files.filter((x) => x.kind === "binary" && RASTER_IMAGE.test(x.path) && x.size <= MAX_IMAGE_BYTES).map((x) => x.path);
+    let pages = changedPages;
+    let fallback = false;
+    if (changedPages.length === 0 && d.files.some((x) => x.kind === "style" || x.kind === "other")) {
+      pages = await this.untouchedPages(wt);
+      fallback = pages.length > 0;
+    }
+    const toDraw = [...pages, ...drawings].slice(0, MAX_PICTURED);
+    const toShow = images.slice(0, Math.max(0, MAX_PICTURED - toDraw.length));
+    if (toDraw.length === 0 && toShow.length === 0) return none;
+    this.clearPictures(f.id);
+    const outDir = this.picturesDir();
+    let result: RenderResult = { pages: [], taken: 0 };
+    if (toDraw.length > 0) {
+      try {
+        result = await this.pictureTool().render({ worktree: wt, outDir, featureId: f.id, pages: toDraw.map((path, i) => ({ path, n: i + 1 })) });
+      } catch {
+        result = { pages: [], taken: 0, why: "start_failed" };
+      }
+      this.event("pictures.taken", { feature: f.id, taken: result.taken, ...(result.taken === 0 && result.why !== undefined && { why: result.why }) });
+    }
+    const drawn = new Map<string, RenderedPage>(result.pages.map((page) => [page.path, page]));
+    const outcomes: RuleOutcome[] = [];
+    for (const path of pages) {
+      const page = drawn.get(path);
+      if (page) outcomes.push(checkPageRendered(page, fallback ? { factsOnly: true } : {}));
+    }
+    // A heading or a word asked for in a page is looked for again in the text the browser shows. With other text files
+    // changed too, the word may sit in them, so this is done only when the pages are all the text there is.
+    const wanted = f.expect;
+    if (!fallback && wanted && ((wanted.headings?.length ?? 0) > 0 || (wanted.mentions?.length ?? 0) > 0) && changedPages.length > 0) {
+      const everyPageDrawn = changedPages.every((path) => drawn.get(path)?.phone !== undefined && drawn.get(path)?.desktop !== undefined);
+      const otherText = d.files.some((x) => x.kind === "markdown" || x.kind === "text");
+      if (everyPageDrawn && !otherText) {
+        const shots = changedPages.flatMap((path) => [drawn.get(path)?.phone, drawn.get(path)?.desktop]).filter((s): s is NonNullable<typeof s> => s !== undefined);
+        const text = shots.map((s) => s.facts.text).join("\n");
+        const headings = shots.every((s) => s.facts.headings !== undefined) ? shots.flatMap((s) => s.facts.headings ?? []) : undefined;
+        const first = drawn.get(changedPages[0]!)!;
+        const join1 = (shot: NonNullable<RenderedPage["phone"]>) => ({ ...shot, facts: { ...shot.facts, text, ...(headings !== undefined && { headings }) } });
+        const combined: RenderedPage = { ...first, ...(first.phone && { phone: join1(first.phone) }), ...(first.desktop && { desktop: join1(first.desktop) }) };
+        outcomes.push(checkPageRendered(combined, { expect: { ...(wanted.headings && { headings: wanted.headings }), ...(wanted.mentions && { mentions: wanted.mentions }) } }));
+      }
+    }
+    const pageFiles: PictureFile[] = result.pages.flatMap((page) =>
+      (["phone", "desktop"] as const).flatMap((width) => {
+        const shot = page[width];
+        return shot ? [{ path: shot.file, name: shot.file, label: `${plainName(page.path)}, ${width} width` }] : [];
+      }),
+    );
+    const imageFiles = this.copyImages(f, wt, toShow);
+    const pageText = changedPages.concat(fallback ? pages : []).flatMap((path) => [drawn.get(path)?.phone?.facts.text, drawn.get(path)?.desktop?.facts.text]).filter((t): t is string => t !== undefined && t !== "");
+    const why = result.taken === 0 && toDraw.length > 0 ? result.why : undefined;
+    return { pictures: { expected: true, taken: result.taken, ...(why !== undefined && { why }), pages: pageFiles, images: imageFiles }, pageText, outcomes };
+  }
+
+  /** The pictures of the work as it is at HEAD, again (after a fix was rolled back). */
+  private async restorePictures(f: Feature, wt: string): Promise<void> {
+    const testsCommit = need(f.testsCommit, "the unit's start commit");
+    const changed = await this.deps.git.changedFiles(wt, testsCommit);
+    await this.takePictures(f, wt, await readDeliverables(this.deliverableSource(wt, testsCommit, changed)));
+  }
+
+  /** The `.html` files at the top of the project that the feature did not change, which pass the reading rules of 6.1, at most four. */
+  private async untouchedPages(wt: string): Promise<string[]> {
+    const top = (await this.repoFiles(wt)).filter((p) => /^[^/]+\.html?$/i.test(p)).slice(0, MAX_PICTURED);
+    if (top.length === 0) return [];
+    const read = await readDeliverables({ worktree: wt, changed: top, before: async () => undefined, added: async () => undefined });
+    return read.files.map((x) => x.path);
+  }
+
+  /** Copies changed pictures for the owner, under the names of spec 7.1; returns what the second AI opens in the working folder. */
+  private copyImages(f: Feature, wt: string, paths: string[]): PictureFile[] {
+    const files: PictureFile[] = [];
+    paths.forEach((rel, i) => {
+      try {
+        mkdirSync(this.picturesDir(), { recursive: true });
+        const dest = join(this.picturesDir(), imageName(f.id, i + 1, rel));
+        rmSync(dest, { force: true });
+        copyFileSync(join(wt, rel), dest, fsConstants.COPYFILE_EXCL);
+      } catch {
+        // the copy is for the owner only; the second AI opens the file in the working folder
+      }
+      files.push({ path: join(wt, rel), name: rel, label: "image" });
+    });
+    return files;
+  }
+
+  // ── the second AI's check ──
+
+  /**
+   * The check and fix rounds of a feature that is checked by reading; false when the check did not finish. The second AI
+   * judges every check; each failed check goes back to the builder, up to the rounds a feature may have.
+   */
+  private async rubricAndFix(f: Feature, wt: string): Promise<boolean> {
+    for (;;) {
+      const judged = await this.rubricCheck(f, wt);
+      if (!judged) {
+        this.noteOnce(`The review of “${f.title}” did not finish, so it was merged after passing Mission Control's own checks only.`);
+        return false;
+      }
+      this.keepOpen(f, judged.minorFindings);
+      if (judged.findings.length === 0) return true;
+      if (f.reviewRounds >= this.reviewRounds(f) || !(await this.fixFindings(f, wt, judged.findings))) {
+        this.keepOpen(f, judged.findings); // serious findings left open: the mission ends partly done, with the decision that says so
+        return true;
+      }
+      f.reviewRounds++;
+      this.save();
+    }
+  }
+
+  /** Mission Control's checks of the passing commit: the ones just made, or made again after a restart. */
+  private async checkedFiles(f: Feature, wt: string): Promise<DeliverableResult> {
+    const commit = f.passingCommit ?? (await this.deps.git.headSha(wt));
+    const known = this.lastChecks.get(f.id);
+    if (known && known.commit === commit) return known.result;
+    const result = await this.checkDeliverable(f, "review");
+    this.lastChecks.set(f.id, { commit, result });
+    return result;
+  }
+
+  /**
+   * Who checks a feature, and whether it is offered the pictures. The reviewer the existing rule picks, except that with
+   * pictures and a cross-family profile a Codex checker is replaced by a Claude one (M27): only Claude is trusted to look at
+   * a picture. A `--role reviewer=<family>` override is kept, and then the pictures are not offered to Codex.
+   */
+  private checkerFor(f: Feature, hasPictures: boolean): { assignment: Assignment; offered: boolean } {
+    const base = this.assignFor("reviewer", f, f.builtBy ?? this.engineerFamily());
+    const pinned = roleOverride(this.m, "reviewer").family !== undefined;
+    const family: Family = hasPictures && base.family !== "claude" && !pinned && profileOf(this.deps.config, this.m).crossFamily ? "claude" : base.family;
+    return { assignment: { ...base, family }, offered: hasPictures && family === "claude" };
+  }
+
+  /**
+   * Asks the second AI to judge every check, once more when the answer cannot be used, and keeps the engine's reading of it
+   * in `f.checked` (spec 8.3). null: the check did not finish (its answer was unusable twice, or it did not run).
+   */
+  private async rubricCheck(f: Feature, wt: string): Promise<Extract<RubricJudgement, { ok: true }> | null> {
+    const check = await this.checkedFiles(f, wt);
+    const pictures = [...check.pictures.pages, ...check.pictures.images];
+    const { assignment, offered } = this.checkerFor(f, pictures.length > 0);
+    const told = pictures.length > 0 && !offered ? PICTURES_NOT_GIVEN : check.pictures.expected && pictures.length === 0 && check.pictures.why !== undefined ? PICTURES_NONE[check.pictures.why] : undefined;
+    const lastFailed = f.checked?.results.filter((r) => r.result === "fail").map((r) => r.n);
+    const brief = rubricPrompt(this.m, f, {
+      facts: check.facts,
+      pictures: offered ? pictures.map((p) => ({ path: p.name, label: p.label })) : [],
+      ...(told !== undefined && { noPictures: told }),
+      files: check.readable.map((r) => plainName(r.path, 200)),
+      diff: check.readable.length === 0 ? "" : await this.promptDiff(wt, this.m.integrationBranch),
+      ...(lastFailed && lastFailed.length > 0 && { lastFailed }),
+    });
+    let problem: string | undefined;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const answer = await this.agent<RubricOutput>({
+        role: "reviewer",
+        label: `review-${f.id}`,
+        feature: f.id,
+        promptFile: "checker",
+        assignment,
+        cwd: wt,
+        prompt: problem === undefined ? brief : withProblems(brief, [problem]),
+        schema: SCHEMAS.rubric,
+        access: "read-only",
+        ...(offered && check.pictures.pages.length > 0 && { readDirs: [this.picturesDir()] }),
+      });
+      if (!answer.out) {
+        problem = runFailure(answer.result);
+        continue;
+      }
+      const opened = Array.isArray(answer.result.opened) ? answer.result.opened.filter((p): p is string => typeof p === "string") : undefined;
+      const judged = judgeRubric({
+        answer: answer.out,
+        checks: f.acceptance,
+        changedFiles: check.readable.map((r) => r.path),
+        changedText: check.readable.map((r) => r.text),
+        pageText: check.pageText,
+        readSeen: (name) => readSeenFile(wt, name),
+        family: answer.family,
+        // A Claude run that opened nothing has no list: that is "it opened nothing", and not "the runner cannot tell".
+        opened: opened ?? (answer.family === "claude" ? [] : undefined),
+        worktree: wt,
+        pictures: offered ? pictures.map((p) => p.path) : [],
+      });
+      if (!judged.ok) {
+        problem = judged.problem;
+        continue;
+      }
+      this.recordChecked(f, check, { judged, reviewer: answer.family, offered });
+      return judged;
+    }
+    this.recordChecked(f, check, { reviewer: assignment.family, offered });
+    return null;
+  }
+
+  /** Saves what the second AI and Mission Control's own checks found, after every answer (spec 8.3, point 8). */
+  private recordChecked(
+    f: Feature,
+    check: DeliverableResult,
+    answered: { judged?: Extract<RubricJudgement, { ok: true }>; reviewer: Family; offered: boolean },
+  ): void {
+    const { judged } = answered;
+    const pictures = check.pictures;
+    const shownPictures = pictures.pages.length + pictures.images.length;
+    const why: PictureWhy | undefined = shownPictures > 0 && !answered.offered ? "reviewer" : shownPictures === 0 ? pictures.why : undefined;
+    f.checked = {
+      round: (f.checked?.round ?? 0) + 1,
+      reviewer: answered.reviewer,
+      results: judged ? judged.results : [],
+      unjudged: judged ? judged.unjudged : f.acceptance.length,
+      ...(judged === undefined && { unfinished: true as const }),
+      scripted: { problems: check.problems, facts: check.facts },
+      pictures: { taken: pictures.taken, ...(why !== undefined && { why }) },
+    };
+    if (judged) {
+      this.lookNotes.set(f.id, judged.lookNotes);
+      const passed = judged.results.filter((r) => r.result === "pass").length;
+      const failed = judged.results.filter((r) => r.result === "fail").length;
+      this.event("rubric.checked", { feature: f.id, round: f.checked.round, pass: passed, fail: failed, unjudged: judged.unjudged, downgraded: judged.downgraded, reviewer: answered.reviewer });
+    } else {
+      this.lookNotes.delete(f.id);
+    }
+    this.save();
+  }
+
+  /** A fix round of a feature that is checked by reading: the builder that passed fixes the failed checks, Mission Control's checks judge it, and a fix that cannot pass them is rolled back. */
+  private async fixDeliverable(f: Feature, wt: string, findings: Finding[]): Promise<boolean> {
+    const assignment = this.passingAssignment(f);
+    const answer = await this.agent<BuildOutput>({
+      role: "engineer",
+      label: `fix-${f.id}`,
+      feature: f.id,
+      promptFile: "maker",
+      assignment,
+      cwd: wt,
+      prompt: makePrompt(this.m, f, { rung: f.rung, fileList: await this.repoFiles(wt), fixes: findings }),
+      schema: SCHEMAS.build,
+      access: "workspace-write",
+      maxTurns: this.deps.config.limits.buildMaxTurns,
+    });
+    await this.keepOnBranch(wt, need(f.branch, "the unit branch"));
+    const round = f.reviewRounds + 1;
+    await this.deps.git.commitAll(wt, `fix(${f.id}): review round ${round}`);
+    const check = await this.checkDeliverable(f, `fix${round}`);
+    this.recordAttempt(f, {
+      ...attemptRun(f.rung, "fix", answer, assignment),
+      outcome: check.pass ? "pass" : "fail",
+      summary: check.pass ? answer.out?.summary || "Mission Control's own checks passed" : [...(answer.result.outcome !== "ok" ? [`the agent run ended "${answer.result.outcome}"`] : []), ...check.problems].join("; "),
+    });
+    if (!check.pass) {
+      await this.deps.git.resetHard(wt, need(f.passingCommit, "the passing commit"));
+      // The pictures of the fix that was rolled back are on disk under the names of the work that stays: draw them again.
+      if (check.pictures.expected) await this.restorePictures(f, wt);
+      return false;
+    }
+    f.passingCommit = await this.deps.git.headSha(wt);
+    this.lastChecks.set(f.id, { commit: f.passingCommit, result: check });
+    this.save();
+    return true;
   }
 
   // ── merge ──
@@ -2032,6 +2596,16 @@ class MissionRun {
     return answer.out?.findings ?? null;
   }
 
+  /**
+   * True when every feature done so far is checked by reading (and there is one): then the repair features the engine adds
+   * itself are checked by reading too (docs/modes-spec.md M23), because a repository with no tests has nothing for a test author
+   * to write against. In a mission with a feature checked by tests they stay what they always were.
+   */
+  private noTestFeatureDone(): boolean {
+    const done = this.m.features.filter((x) => x.status === "done");
+    return done.length > 0 && done.every(isModeFeature);
+  }
+
   private addFixFeature(blocking: Finding[], verifyRed: boolean): void {
     const { m } = this;
     let n = m.gateCRounds + 1;
@@ -2039,7 +2613,8 @@ class MissionRun {
     const redCheck = m.baselineBroken
       ? `The acceptance tests of the finished features pass again: ${this.doneFrozenPaths().join(", ")}.`
       : "The full verification passes.";
-    const acceptance = [...blocking.map(describeFinding), ...(verifyRed ? [redCheck] : [])];
+    const byReading = this.noTestFeatureDone();
+    const acceptance = [...blocking.map(describeFinding), ...(verifyRed ? [byReading ? "The project's own checks pass." : redCheck] : [])];
     const fix = newFeature({
       id: `gate-c-fix-${n}`,
       title: "Fix problems found in the final review",
@@ -2047,6 +2622,7 @@ class MissionRun {
       acceptance,
       kind: "standard",
       deps: [],
+      ...(byReading && { mode: "review" as const }),
     });
     m.features.push(fix);
     this.event("feature.added", { feature: fix.id, acceptance });
@@ -2145,9 +2721,11 @@ class MissionRun {
     }
   }
 
+  /** The app's own screenshots, copied to the report's folder, and the pictures this run took of pages and images (look__*). */
   private async screenshots(): Promise<string[]> {
     const wt = this.m.integrationWorktree;
-    return wt && existsSync(wt) ? collectScreenshots(wt, join(this.missionDir(), "screenshots")) : [];
+    const collected = wt && existsSync(wt) ? await collectScreenshots(wt, join(this.missionDir(), "screenshots")) : [];
+    return [...collected, ...this.lookPictures()];
   }
 
   private async reportProse(): Promise<ReportProseOutput | null> {
@@ -2165,10 +2743,13 @@ class MissionRun {
     const { store, clock, logger } = this.deps;
     try {
       const path = store.reportPath(this.m.id);
+      // A picture of a page that the waiting block shows is not shown a second time under "What it looks like". The app's own screenshots are listed as they always were.
+      const inLook = new Set(this.m.checkpoint?.state === "pending" ? (this.m.checkpoint.look.screenshots ?? []) : []);
+      const pictures = (screenshots ?? (await this.screenshots())).filter((p) => !(basename(p).startsWith("look__") && inLook.has(relative(this.missionDir(), p).split(/[\\/]/).join("/"))));
       const markdown = renderReport(this.m, {
         prose,
         usage: store.readUsage(),
-        screenshots: screenshots ?? (await this.screenshots()),
+        screenshots: pictures,
         generatedAt: new Date(clock.now()).toISOString(),
       });
       writeFileSync(path, markdown);
@@ -2187,7 +2768,7 @@ class MissionRun {
   private async notifyFinished(report: string | undefined): Promise<void> {
     const { m } = this;
     const done = m.features.filter((f) => f.status === "done").length;
-    const title = `${m.title}: ${STATUS_WORD[m.status]} (${done}/${m.features.length} features)`;
+    const title = `${m.title}: ${STATUS_WORD[m.status]} (${done}/${m.features.length} ${m.features.length === 1 ? "feature" : "features"})`;
     const priority = m.status === "done" ? "default" : "high";
     const stuck = m.features.filter((f) => f.status === "blocked").map((f) => oneLine(f.title));
     const lines = [
@@ -2200,9 +2781,13 @@ class MissionRun {
 
   // ───────────── Checkpoints: stopping for the owner's look ─────────────
 
-  /** Whether the owner looks at this feature before it is merged. Features the engine adds by itself are not asked about. */
+  /**
+   * Whether the owner looks at this feature before it is merged: the one rule `asked(f)` of docs/modes-spec.md 5.2, step 8
+   * (the owner chose to look at every feature, or the plan marks this one, or the second AI could not judge it, or the owner
+   * sent it back). For a feature that is checked by tests it is the old rule. Features the engine adds by itself are not asked about.
+   */
   private looksAt(f: Feature): boolean {
-    return this.m.checkpoints?.includes("feature") === true && !isDerivedFeature(f.id);
+    return asksForLook(this.m, f);
   }
 
   /** The feature was reviewed at the commit that is about to be shown or merged (tracked only when the owner looks at it). */
@@ -2219,11 +2804,12 @@ class MissionRun {
    */
   private async checkpointGate(kind: CheckpointKind, f?: Feature): Promise<"go" | "again" | "leave"> {
     const { m } = this;
-    if (!m.checkpoints?.includes(kind)) return "go";
+    const asked = kind === "feature" && f !== undefined ? asksForLook(m, f) : m.checkpoints?.includes(kind) === true;
+    if (!asked) return "go";
     const cp = m.checkpoint;
     // An answer is believed only if the event that records it exists (see answerIsRecorded).
     const recorded = cp?.state === "answered" && isCheckpointShape(cp) && answerIsRecorded(cp, this.deps.store.readEvents(m.id));
-    const step = nextCheckpointState(m, kind, f?.id, recorded);
+    const step = nextCheckpointState(m, kind, f?.id, recorded, asked);
     switch (step.step) {
       case "go":
         return "go";
@@ -2322,6 +2908,7 @@ class MissionRun {
       }
       case "feature": {
         const feature = need(f, "the feature");
+        if (feature.mode !== undefined) return this.modeLook(feature, failed, warning);
         const built = feature.attempts.filter((a) => a.outcome === "pass" && a.action !== "diagnose").at(-1)?.summary;
         const unreviewed = this.scratch.unit(feature.id).reviewSkipped === true;
         const notes = feature.openFindings;
@@ -2342,6 +2929,7 @@ class MissionRun {
       }
       case "final": {
         const done = m.features.filter((x) => x.status === "done").length;
+        const byReading = m.features.filter((x) => x.status === "done" && isModeFeature(x));
         const stuck = m.features.filter((x) => x.status === "blocked");
         const verify = this.scratch.finalVerify();
         const open = m.features.flatMap((x) => x.openFindings);
@@ -2351,6 +2939,9 @@ class MissionRun {
           headline: `Check the finished app “${title}”`,
           lines: [
             done === m.features.length ? (done === 1 ? "The 1 feature is built." : `All ${done} features are built.`) : `${done} of ${m.features.length} features are built.`,
+            ...(byReading.length > 0
+              ? [`${byReading.length} ${byReading.length === 1 ? "feature is" : "features are"} not checked by tests: ${listTitles(byReading.map((x) => shown(x.title)))}. The report says how each was checked.`]
+              : []),
             verify === undefined ? "The final checks did not run." : verify.ok ? "The final checks passed." : "The final checks did not pass.",
             ...(verify?.reviewed === false ? ["The final review did not finish."] : []),
             ...((verify?.blocking ?? 0) > 0 ? [`The final review found ${plural(verify?.blocking ?? 0, "serious problem")} that ${verify?.blocking === 1 ? "was" : "were"} not fixed.`] : []),
@@ -2364,6 +2955,66 @@ class MissionRun {
         };
       }
     }
+  }
+
+  /**
+   * What the owner is shown at a feature that was checked by reading (docs/modes-spec.md 10.2), the facts that matter first: the
+   * card shows only the first twelve lines. The words come from checked-by.ts, and no sentence says a test checked the work.
+   */
+  private async modeLook(feature: Feature, failed: boolean, warning: string[]): Promise<CheckpointLook> {
+    const { m } = this;
+    const title = shown(feature.title);
+    const files = await this.changedFilesOf(feature.worktree, m.integrationBranch);
+    const c = feature.checked;
+    const unfinished = c === undefined || c.unfinished === true;
+    const lines: string[] = [];
+    if (failed) lines.push("Your change could not be made, so this is the earlier version.");
+    lines.push(`“${title}” is built. No tests were written for it. ${unfinished ? "The second AI's check did not finish." : "A second AI checked it against your list."}`);
+    if (c !== undefined && !unfinished) {
+      const results = Array.isArray(c.results) ? c.results : [];
+      const passed = results.filter((r) => r.result === "pass").length;
+      const failedChecks = results.filter((r) => r.result === "fail");
+      const notJudged = results.filter((r) => r.result !== "pass" && r.result !== "fail");
+      lines.push(`The second AI's answers: ${passed} passed, ${failedChecks.length} failed, ${c.unjudged} could not be judged.${c.round > 1 ? ` It checked ${c.round} times.` : ""}`);
+      const open = [...failedChecks, ...notJudged];
+      for (const r of open.slice(0, 3)) {
+        lines.push(`Check ${r.n} (${r.result === "fail" ? "failed" : "not judged"}): ${shown(feature.acceptance[r.n - 1] ?? "", 120)} ${shown(String(r.evidence ?? ""), 200)}`);
+      }
+      const more = open.length - 3;
+      if (more > 0) lines.push(`And ${more} more ${more === 1 ? "check" : "checks"} did not pass; mc plan show ${m.id} lists all of them.`);
+      for (const note of (this.lookNotes.get(feature.id) ?? []).slice(0, 2)) lines.push(note);
+    }
+    if (c !== undefined) {
+      const ranOwn = "The project's own checks passed.";
+      const facts = (Array.isArray(c.scripted?.facts) ? c.scripted.facts : []).filter((x): x is string => typeof x === "string");
+      const first = facts.find((x) => x !== ranOwn);
+      const problems = (Array.isArray(c.scripted?.problems) ? c.scripted.problems : []).filter((x): x is string => typeof x === "string");
+      lines.push(
+        problems.length === 0
+          ? `Mission Control's own checks passed.${first !== undefined ? ` ${shown(first, 200)}` : ""}${facts.includes(ranOwn) ? ` ${ranOwn}` : ""}`
+          : `Mission Control's own checks found: ${problems.map((x) => shown(x, 200)).join("; ")}.`,
+      );
+      const taken = c.pictures?.taken ?? 0;
+      const why = c.pictures?.why;
+      if (taken > 0) {
+        lines.push(`Pictures of the page as it first loads: ${taken} taken, at phone width and desktop width. To see them in Windows, run mc copy-reports in Ubuntu, then open the screenshots folder.`);
+      } else if (why !== undefined && why !== "reviewer") {
+        lines.push(`No pictures were taken: ${pictureReason(why)}.`);
+      }
+      if (why === "reviewer") lines.push("The second AI could not look at the pictures (it runs on a different tool). Please look at them yourself.");
+    }
+    const reason = lookReason(m, feature);
+    if (reason !== undefined) lines.push(askedBecause(reason, c?.unjudged ?? feature.acceptance.length));
+    lines.push(...warning);
+    const pictures = this.lookPictures(feature.id).map((p) => relative(this.missionDir(), p).split(/[\\/]/).join("/"));
+    return {
+      headline: `Check “${title}” before it is added`,
+      lines,
+      ...(feature.branch !== undefined && { branch: feature.branch }),
+      ...(feature.passingCommit !== undefined && { commit: feature.passingCommit.slice(0, 10) }),
+      ...(files.length > 0 && { files: files.map((p) => shown(p)) }),
+      ...(pictures.length > 0 && { screenshots: pictures }),
+    };
   }
 
   private async changedFilesOf(cwd: string | undefined, from: string | undefined): Promise<string[]> {
@@ -2429,11 +3080,12 @@ class MissionRun {
     this.save();
     if (sha256(JSON.stringify(m.spec)) !== cp.reworkFrom) return true; // the architect already changed it before a stop
     const { spec } = await this.writeSpec(1, { previous, issues: [`The owner asked for this change to the plan: ${cp.answer?.note ?? ""}`] });
-    if (spec) {
-      this.adoptSpec(spec);
+    const carried = spec ? carryModes(previous, spec) : undefined;
+    if (carried?.ok) {
+      this.adoptSpec(carried.spec);
       return true;
     }
-    this.noteOnce("A requested change to the plan could not be made, so the earlier plan was kept.");
+    this.noteOnce(spec ? PLAN_LOST_A_MODE_BY_OWNER : "A requested change to the plan could not be made, so the earlier plan was kept.");
     this.scratch.updateUnit("_plan", { reworkFailed: true });
     return false;
   }
@@ -2464,13 +3116,15 @@ class MissionRun {
     }
     const id = cp.reworkFrom;
     if (!this.feature(id)) {
+      const byReading = this.noTestFeatureDone();
       const change = newFeature({
         id,
         title: "The change you asked for",
         story: note,
-        acceptance: [`The change the owner asked for is in place: ${note}`, "The full verification still passes."],
+        acceptance: [`The change the owner asked for is in place: ${note}`, byReading ? "The project's own checks still pass." : "The full verification still passes."],
         kind: "standard",
         deps: [],
+        ...(byReading && { mode: "review" as const }),
       });
       m.features.push(change);
       this.event("feature.added", { feature: id, acceptance: change.acceptance });
@@ -2494,7 +3148,7 @@ class MissionRun {
       case "feature": {
         const feature = need(f, "the feature");
         const reason = "you asked for changes twice and it still was not right";
-        m.decisionsNeeded.push(`"${feature.title}": ${reason}`);
+        m.decisionsNeeded.push(`“${feature.title}”: ${reason}`);
         this.commitCheckpoint(cp);
         await this.blockFeature(feature, reason); // its branch keeps the work; the mission carries on and ends partly done
         return "leave";
@@ -2658,6 +3312,129 @@ class Scratch {
   }
 }
 
+// ───────────────────────────── Features that are checked by reading: helpers ─────────────────────────────
+
+/** Role settings by `effort` (docs/modes-spec.md 5.3), for the test author and the reviewer. `standard` is "as configured" and has no row. */
+const EFFORT_ROLES = {
+  test_author: { light: { tier: "standard", effort: "medium" }, deep: { tier: "frontier", effort: "high" } },
+  reviewer: { light: { tier: "standard", effort: "medium" }, deep: { tier: "frontier", effort: "xhigh" } },
+} as const satisfies Record<"test_author" | "reviewer", Record<"light" | "deep", { tier: Tier; effort: Effort }>>;
+
+const EFFORT_UP: Record<Effort, Effort> = { low: "medium", medium: "high", high: "xhigh", xhigh: "xhigh", max: "max" };
+
+/** `deep`: every build rung on the frontier tier, one step more effort (never beyond xhigh). Diagnose rungs stay. */
+function liftRungs(rungs: Rung[]): Rung[] {
+  return rungs.map((r) => (r.action === "build" ? { ...r, tier: "frontier" as const, effort: EFFORT_UP[r.effort] } : r));
+}
+
+/** What the plan reviewer's revision keeps of the plan it replaces (docs/modes-spec.md M16). */
+export type CarriedModes = { ok: true; spec: SpecOutput } | { ok: false };
+
+/**
+ * The revised plan gets `mode`, `effort` and `expect` back from the plan it replaces, by feature id (the planner's answer has
+ * no field for them). A feature with a new id is a feature checked by tests. A revision that loses a feature with a mode, by
+ * renaming, splitting, merging or dropping it, is refused: `{ ok: false }`, and the plan as it was is kept.
+ */
+export function carryModes(previous: SpecOutput, next: SpecOutput): CarriedModes {
+  if (!previous.features.some((f) => f.mode !== undefined || f.effort !== undefined || f.expect !== undefined)) return { ok: true, spec: next };
+  const now = new Set(next.features.map((f) => f.id));
+  if (previous.features.some((f) => f.mode !== undefined && !now.has(f.id))) return { ok: false };
+  const before = new Map(previous.features.map((f) => [f.id, f]));
+  const features = next.features.map((nf): SpecFeature => {
+    const { mode: _mode, effort: _effort, expect: _expect, ...rest } = nf;
+    const pf = before.get(nf.id);
+    if (!pf) return rest;
+    return { ...rest, ...(pf.mode !== undefined && { mode: pf.mode }), ...(pf.effort !== undefined && { effort: pf.effort }), ...(pf.expect !== undefined && { expect: structuredClone(pf.expect) }) };
+  });
+  if (features.filter(isModeFeature).length < previous.features.filter(isModeFeature).length) return { ok: false };
+  return { ok: true, spec: { ...next, features } };
+}
+
+const PLAN_LOST_A_MODE = "The plan reviewer's changed plan dropped a feature that is checked by a second AI, so the plan was used as written.";
+const PLAN_LOST_A_MODE_BY_OWNER = "The changed plan dropped a feature that is checked by a second AI, so the plan you sent back was kept as it was.";
+
+/** What the second AI is told when it gets no picture (docs/modes-spec.md 7.3). */
+const PICTURES_NONE: Record<PictureWhy, string> = {
+  no_tool: "Pictures: none. The picture tool is not available.",
+  no_browser: "Pictures: none. No browser was found in the container.",
+  start_failed: "Pictures: none. The browser could not start.",
+  too_slow: "Pictures: none. The page took too long to load.",
+  reviewer: "Pictures: none are given to you; you cannot open them.",
+  not_plain_file: "Pictures: none. A page is not a plain file inside the project, so it was not drawn.",
+};
+const PICTURES_NOT_GIVEN = PICTURES_NONE.reviewer;
+
+/** Files of these kinds are documents, pages, pictures and data: a change to nothing else needs no run of the project's own checks. */
+const DOCUMENT_EXTENSIONS = new Set(["md", "markdown", "txt", "html", "htm", "css", "svg", "csv", "png", "jpg", "jpeg", "gif", "webp", "pdf"]);
+const NOT_THE_PROJECT = new Set(["node_modules", "test-results", "playwright-report", ".git"]);
+const RASTER_IMAGE = /\.(?:png|jpe?g|gif|webp)$/i;
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+/** Pages and pictures together, per check (docs/modes-spec.md 7.1). */
+const MAX_PICTURED = 4;
+const MAX_SEEN_BYTES = 1024 * 1024;
+
+/** The project's own full checks must pass when a feature changed something that is not a document, a page, a picture or data (spec 6.4). */
+function changedBeyondDocuments(changed: string[]): boolean {
+  return changed.some((path) => {
+    if (NOT_THE_PROJECT.has(path.split("/")[0] ?? "")) return false;
+    const base = path.slice(path.lastIndexOf("/") + 1);
+    const dot = base.lastIndexOf(".");
+    return dot < 0 || !DOCUMENT_EXTENSIONS.has(base.slice(dot + 1).toLowerCase());
+  });
+}
+
+/** The id as it stands in the name of a picture (`look__<id>__...`). */
+function pictureStemId(featureId: string): string {
+  return pictureName(featureId, 0, "x", "phone").split("__")[1] ?? featureId;
+}
+
+/** The lines a diff adds (`git diff -U0`): everything that starts with "+" after the first hunk header. */
+function addedLines(diff: string): string[] {
+  const out: string[] = [];
+  let inHunk = false;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("@@")) inHunk = true;
+    else if (inHunk && line.startsWith("+")) out.push(line.slice(1));
+  }
+  return out;
+}
+
+/** A read-only git command in a worktree: no hooks, no filters that run programs, no fsmonitor. Stdout is cut at 12 MB (the checks read at most 1 MB of a file). */
+async function gitRead(cwd: string, args: string[]): Promise<{ ok: boolean; stdout: string }> {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX"]) delete env[name];
+  const r = await runProcess({
+    command: "git",
+    args: ["-c", "core.quotepath=off", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "--literal-pathspecs", ...args],
+    cwd,
+    env,
+    timeoutMs: REPO_FILES_TIMEOUT_MS,
+    maxBufferBytes: 12 * 1024 * 1024,
+  });
+  return { ok: r.exitCode === 0, stdout: r.stdout };
+}
+
+/**
+ * A file the second AI says it opened, read under the rules of docs/modes-spec.md 6.1: a regular file (never a symbolic
+ * link) of at most 1 MB, not a picture, whose real path is inside the worktree. undefined when it may not be read.
+ */
+function readSeenFile(wt: string, name: string): string | undefined {
+  try {
+    const rel = repoRelative(wt, name);
+    if (rel === "" || rel.startsWith("/") || rel.includes("\0") || rel.split("/").includes("..")) return undefined;
+    if (fileKind(rel) === "binary") return undefined;
+    const abs = join(wt, rel);
+    const st = lstatSync(abs);
+    if (!st.isFile() || st.size > MAX_SEEN_BYTES) return undefined;
+    const root = realpathSync(wt);
+    const real = realpathSync(abs);
+    if (real !== root && !real.startsWith(root + sep)) return undefined;
+    return readFileSync(abs, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
 // ───────────────────────────── Small helpers ─────────────────────────────
 
 function newFeature(sf: SpecFeature): Feature {
@@ -2763,6 +3540,12 @@ function lastLines(text: string, n: number): string[] {
 function listFiles(paths: string[]): string {
   const shown = paths.slice(0, MAX_LISTED_FILES).join(", ");
   return paths.length > MAX_LISTED_FILES ? `${shown} and ${paths.length - MAX_LISTED_FILES} more` : shown;
+}
+
+/** “A”, “B” and “C”, or the first five and the count of the rest. */
+function listTitles(titles: string[]): string {
+  const marked = titles.slice(0, 5).map((t) => `“${t}”`);
+  return titles.length > 5 ? `${marked.join(", ")} and ${titles.length - 5} more` : marked.join(", ");
 }
 
 function need<T>(value: T | undefined, what: string): T {

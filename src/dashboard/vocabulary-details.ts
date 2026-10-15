@@ -487,7 +487,8 @@ const FEATURE_REASONS: { exact?: string; start?: RegExp; shown: string }[] = [
   { exact: "you asked for changes twice and it still was not right", shown: "You asked for changes twice and it still was not right, so it was set aside." },
 ];
 
-const WAITING_ON = /^waiting on "(.+)", which was (blocked|skipped)$/;
+/** The engine writes curly marks around the title now (`waiting on “Title”, which was blocked`); missions from before wrote straight ones. */
+const WAITING_ON = /^waiting on ["“](.+)["”], which was (blocked|skipped)$/;
 
 /** `reason` is a feature's blockedReason, already cleaned. */
 export function explainFeatureReason(reason: string): Said {

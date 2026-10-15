@@ -228,6 +228,9 @@ describe("T-VOC the feature reason table (9.2)", () => {
     ["you asked for changes twice and it still was not right", "You asked for changes twice and it still was not right, so it was set aside."],
     ['waiting on "Sign-up page", which was blocked', "It needed “Sign-up page”, which is stuck."],
     ['waiting on "Sign-up page", which was skipped', "It needed “Sign-up page”, which was left out."],
+    // The engine writes curly marks around the title now; missions from before wrote straight ones, and both are read.
+    ['waiting on “Sign-up page”, which was blocked', "It needed “Sign-up page”, which is stuck."],
+    ['waiting on “Sign-up page”, which was skipped', "It needed “Sign-up page”, which was left out."],
   ])("%s is engine-written", (reason, shown) => {
     expect(explainFeatureReason(reason)).toEqual({ text: shown, author: "engine" });
   });

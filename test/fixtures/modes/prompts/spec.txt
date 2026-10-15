@@ -1,0 +1,66 @@
+# Mission: Habit tracker
+
+This mission builds a new app. The user's request, verbatim:
+
+```
+Build me a habit tracker where I can tick off habits every day.
+```
+
+## Your task
+
+Write the spec for this new app: the features to build, in build order.
+
+There is no repository yet, so plan from the request and the house stack below. An initializer scaffolds the project (tooling, test setup, AGENTS.md) before feature work starts, so don't plan setup work.
+
+Plan between 1 and 25 features with unique kebab-case ids. `deps` may name only ids from this spec, with no cycles.
+
+Answer with JSON matching the output schema.
+
+## House stack
+
+STACK
+
+## Revise your previous spec
+
+A reviewer asked for changes. Address every issue below and keep what was fine.
+
+- The about page needs a link from the home page
+- Add a test id to the list
+
+Previous spec:
+
+```json
+{
+  "appName": "Habit Tracker",
+  "summary": "Track daily habits and streaks.",
+  "features": [
+    {
+      "id": "track-habit",
+      "title": "Track a habit",
+      "story": "As a user I can add a habit and tick it off.",
+      "acceptance": [
+        "Adding 'Read' shows it in the habit list",
+        "Ticking it shows 'Streak: 1'"
+      ],
+      "kind": "standard",
+      "deps": []
+    },
+    {
+      "id": "about-page",
+      "title": "About page",
+      "story": "As a visitor I can read about the app.",
+      "acceptance": [
+        "/about shows 'About'"
+      ],
+      "kind": "mechanical",
+      "deps": [
+        "track-habit"
+      ]
+    }
+  ],
+  "assumptions": [
+    "Single user, no login"
+  ],
+  "uiContract": "UI-CONTRACT-MARKER: route `/`, input labelled 'Habit name', button 'Add habit', list data-testid=habit-list"
+}
+```

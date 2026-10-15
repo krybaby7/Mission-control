@@ -24,8 +24,10 @@ import {
   type StuckOutlook,
 } from "./vocabulary.js";
 
-const WAITING_ON = /^waiting on "(.+)", which was (?:blocked|skipped)$/;
-const ARCHITECT_BLOCK = /^"(.+?)": (.*)$/s;
+/** `waiting on “Title”, which was blocked`: the engine writes curly marks around a title now; missions from before wrote straight ones. */
+const WAITING_ON = /^waiting on ["“](.+)["”], which was (?:blocked|skipped)$/;
+/** `"Title": reason` or `“Title”: reason`: the engine now writes curly marks around a title; missions from before wrote straight ones. */
+const ARCHITECT_BLOCK = /^["\u201c](.+?)["\u201d]: (.*)$/su;
 
 interface Draft {
   card: NeedsYouCard;
