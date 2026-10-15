@@ -1,0 +1,26 @@
+You asked: I want a small web app to keep my reading list. I can add a book with its title and author, mark a book as read, and see how many books I have read.
+App name: Reading list (the new app goes in a new folder called reading-list, or the next free name)
+Summary: A small web app with one page. A person adds books with a title and an author, marks them as read, and sees how many they have read.
+The plan has 3 features: “Add a book to the list”, “Mark a book as read”, “Count of books read”.
+“Add a book to the list” (id: add-book): As a reader I can add a book with its title and author and see it in my list.
+Check for “Add a book to the list”: The page shows an empty list and the text No books yet when there are no books.
+Check for “Add a book to the list”: Adding a book with the title Dune and the author Frank Herbert shows Dune and Frank Herbert in the list.
+Check for “Add a book to the list”: After a book is added, the Title and Author fields are empty again.
+Check for “Add a book to the list”: Adding a book with an empty title adds nothing and shows the text A title is needed.
+Check for “Add a book to the list”: After the page is reloaded, the added book is still in the list.
+“Mark a book as read” (id: mark-read): As a reader I can mark a book as read, so I can tell it apart from the books I have not read.
+Check for “Mark a book as read”: Pressing Mark as read on a book shows the text Read next to that book.
+Check for “Mark a book as read”: A book that is marked as read is still marked as read after the page is reloaded.
+Check for “Mark a book as read”: Marking one book as read does not change the other books.
+Needs first for “Mark a book as read”: “Add a book to the list”.
+“Count of books read” (id: read-count): As a reader I can see how many of my books I have read.
+Check for “Count of books read”: With no books the page shows Books read: 0.
+Check for “Count of books read”: With three books of which one is marked as read, the page shows Books read: 1.
+Check for “Count of books read”: After a second book is marked as read, the page shows Books read: 2 without a reload.
+Needs first for “Count of books read”: “Mark a book as read”.
+Choice made for you: The list is kept for the person on the same device, so it is still there after a reload.
+Choice made for you: A book with no title is not added.
+Name the tests and the code must agree on: The page title is Reading list.
+Name the tests and the code must agree on: The form has a title field labelled Title, an author field labelled Author and a button labelled Add book.
+Name the tests and the code must agree on: Each book shows its title and author, and a button labelled Mark as read.
+Name the tests and the code must agree on: The text Books read: followed by a number shows how many books are marked as read.

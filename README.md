@@ -48,6 +48,7 @@ your idea ─► Architect (frontier) writes a spec: small, testable features
 - Engineers can't edit frozen tests or the files that define the checks.
 - An anti-cheat scan catches skipped or weakened tests.
 - "Done" means the checks actually pass.
+- Work that has no tests (a guide, a web page, a table) is checked another way, and the report says which: Mission Control's own checks, then a second AI that judges each written check with a reason, and for some features a stop for your look. It is never called "tested" (see [docs/work-modes.md](docs/work-modes.md)).
 
 **Guards while it works on its own:**
 - **Usage limits:** when a subscription hits its limit, its work moves to the other AI, or the run waits for the reset. Usage is paced so you keep some for your own use.
@@ -64,7 +65,7 @@ your idea ─► Architect (frontier) writes a spec: small, testable features
 | `mc doctor [--live]` | Check the setup. `--live` makes one tiny real call per AI |
 | `mc new "<idea>" [--name "<title>"] [--checkpoint plan\|feature\|final]` | Queue a new app. With `--checkpoint` it stops for your look at that point (see below) |
 | `mc feature <app-folder> "<request>" [--checkpoint plan\|feature\|final]` | Queue a change to an existing app |
-| `mc plan preview [file\|-]` / `mc plan queue [file\|-]` / `mc plan show <id>` | Plans written outside the team, usually by the leader, as plain lines of text. `preview` checks a plan and queues nothing; `queue` queues it, skips the team's planner, and by default stops for your look at the plan (`--no-plan-checkpoint` turns that off); `show` prints the whole plan of a mission. A plan that is already queued is not queued twice. Write `-` to send the plan in with the command, or give a file inside `~/mc-apps` |
+| `mc plan preview [file\|-]` / `mc plan queue [file\|-]` / `mc plan show <id>` | Plans written outside the team, usually by the leader, as plain lines of text. `preview` checks a plan and queues nothing; `queue` queues it, skips the team's planner, and by default stops for your look at the plan (`--no-plan-checkpoint` turns that off); a feature marked for your look stops too (`--no-owner-checkpoint` turns that off); `show` prints the whole plan of a mission and how each feature was checked. A plan that is already queued is not queued twice. Write `-` to send the plan in with the command, or give a file inside `~/mc-apps` |
 | `mc run [--until HH:MM] [--profile mixed\|claude\|codex] [--role engineer=claude:frontier]` | Work through the queue |
 | `mc status` / `mc report [id]` / `mc logs <id>` | Progress, the report, a step-by-step log |
 | `mc approve <id> [--note "<text>"]` / `mc send-back <id> --note "<what to change>"` | Answer a mission that stopped for your check (see below) |
@@ -124,6 +125,8 @@ Two parts, for someone who is not technical (a CEO, say) and looks at an iPad or
 | [docs/setup-windows.md](docs/setup-windows.md) | Step-by-step setup for Windows 11 + iPad |
 | [docs/github-setup.md](docs/github-setup.md) | Work with GitHub: log in once, download a repository, send a finished mission back as a draft pull request |
 | [docs/leader.md](docs/leader.md) | The leader: what it may do, how it is limited, what is not tried |
+| [docs/work-modes.md](docs/work-modes.md) | Documents, pages and data: how work that has no tests is checked, what it costs, the privacy note, what was not tried |
+| [docs/modes-spec.md](docs/modes-spec.md) | The design behind it: the three ways of checking, the checks Mission Control runs by itself, pictures, the prompts |
 | [docs/dashboard-spec.md](docs/dashboard-spec.md) | The dashboard's build contract: lamp rules, wording, data sources, tests |
 
 ## For developers
@@ -141,3 +144,8 @@ TypeScript on Node 22. The layout is described in `docs/mvp-spec.md` § Layout. 
 - Agents run as the same user as Mission Control inside the container.
 
 Both are documented in the spec's decision log.
+
+**What is not built.**
+- **Features that run side by side.** Deferred, and not built. The engine is made for one feature at a time: one loop over the features, one copy of the mission in memory that is written whole at every save, one run lock, one line of merges into a single branch, pacing that assumes one AI call at a time, and a timeline and stops that assume one feature is in flight. Running features side by side would need separate working copies, a rule for merge conflicts (who settles them?), saves that cannot overwrite each other, a resume that copes with several half-finished features, and pacing across calls that overlap. Thousands of tests assume a fixed order, so doing it would also make them unreliable. The gain is clock time on big jobs with many features. The use of the allowance is the same, and most small jobs have one to three features. It waits until real use shows that it is needed.
+- **Research that needs sources.** Not covered: a plan carries no web address, and nothing checks that a source is real or that a fact is true.
+- **Pictures on the dashboard, and pages that need a running server.** The pictures of a page go to the report, not to the dashboard, and a page that needs a server gets none. The rest of the list is in [docs/work-modes.md](docs/work-modes.md).

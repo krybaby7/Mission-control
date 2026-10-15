@@ -2,6 +2,7 @@
 // Pure: it gets the data read by read.ts, the run facts and the clock. It never touches the disk.
 import type { CheckpointKind, Feature, Mission, MissionEvent } from "../types.js";
 import { MAX_FEATURES_SHOWN, RECENT_WINDOW_MS, RUN_GONE_GRACE_MS, STALE_BUSY_AFTER_MS, WAIT_OVER_GRACE_MS } from "./constants.js";
+import { hasModeFeature, isModeFeature, noTestsDone } from "./modes.js";
 import type { DispatchPicks, HomeData, MissionData } from "./read.js";
 import type { DashboardSettings } from "./snapshot.js";
 import {
@@ -16,6 +17,7 @@ import {
   type Formatter,
   MISSION_WORDS,
   missionSentence,
+  NOW_FINAL_CHECKS,
   NOW_FINAL_TESTS,
   NOW_NEXT_STEP,
   NOW_REPORT,
@@ -297,11 +299,25 @@ function featureState(status: string, mission: MissionStateId): FeatureStateId {
   }
 }
 
+/**
+ * How many steps the feature's ladder has. A feature checked by tests climbs the standard or the mechanical ladder as it is. A feature
+ * checked by a second AI climbs the same ladder without its diagnosis steps (docs/modes-spec.md, 5.2 and 11.1): the lightweight ladder
+ * when its effort is `light` (or it is the older `mechanical` kind), the standard one otherwise. `deep` lifts the steps and does not add any.
+ * Settings that do not say how many diagnosis steps a ladder has (a hand-written one) are taken to have one each, as the built-in ladders do.
+ */
+export function ladderTotal(f: Feature, settings: DashboardSettings): number {
+  const lightweight = f.kind === "mechanical" || (isModeFeature(f) && f.effort === "light");
+  const length = lightweight ? settings.ladders.mechanical : settings.ladders.standard;
+  if (!isModeFeature(f)) return f.kind === "mechanical" ? settings.ladders.mechanical : settings.ladders.standard;
+  const diagnose = settings.diagnoseSteps?.[lightweight ? "mechanical" : "standard"] ?? 1;
+  return Math.max(1, length - diagnose);
+}
+
 function featureView(f: Feature, state: FeatureStateId, mission: { state: MissionStateId; wait: WaitInfo | null; checkpoint: CheckpointFacts | null }, settings: DashboardSettings): FeatureView {
   const builds = f.attempts.filter((a) => a.action === "build").length;
   const diagnoses = f.attempts.filter((a) => a.action === "diagnose").length;
   const fixes = f.attempts.filter((a) => a.action === "fix").length;
-  const total = f.kind === "mechanical" ? settings.ladders.mechanical : settings.ladders.standard;
+  const total = ladderTotal(f, settings);
   const used = Math.min(builds + diagnoses, total);
   const recovered = f.status === "done" && f.attempts.some((a) => a.action === "build" && a.outcome !== "pass");
   let reason: FeatureView["reason"] = null;
@@ -454,7 +470,7 @@ function factsFor(data: MissionData, scope: Scope, cx: Context): MissionFacts {
     openFromEarlier: scope === "earlier",
     state,
     word: MISSION_WORDS[state],
-    sentence: missionSentence({ state, stage: m.stage, pausedWhy, staleBusy, waitText: waitingNow?.text ?? null, n, k, u: unbuilt, d: done, stuck, leftOut, checkpoint }),
+    sentence: missionSentence({ state, stage: m.stage, pausedWhy, staleBusy, waitText: waitingNow?.text ?? null, n, k, u: unbuilt, d: done, stuck, leftOut, checkpoint, ...(hasModeFeature(m) && { modes: true }) }),
     pausedWhy,
     progress,
     progressWord,
@@ -553,6 +569,7 @@ export function buildNow(m: MissionFacts[], run: RunFacts, f: Formatter, now: nu
   if (owner.view.state !== "working") return null;
   const inProgress = owner.view.features.find((x) => x.state === "being_built" || x.state === "being_reviewed");
   const stage = owner.data.mission?.stage;
-  const text = inProgress !== undefined ? nowChecks(inProgress.title) : stage === "gate_c" ? NOW_FINAL_TESTS : stage === "finalize" ? NOW_REPORT : NOW_NEXT_STEP;
+  const noTests = owner.data.mission !== null && noTestsDone(owner.data.mission);
+  const text = inProgress !== undefined ? nowChecks(inProgress.title) : stage === "gate_c" ? (noTests ? NOW_FINAL_CHECKS : NOW_FINAL_TESTS) : stage === "finalize" ? NOW_REPORT : NOW_NEXT_STEP;
   return { kind: "between_steps", text, missionId: owner.view.id, featureId: inProgress?.id ?? null, since: null, sinceText: null, exact: false };
 }

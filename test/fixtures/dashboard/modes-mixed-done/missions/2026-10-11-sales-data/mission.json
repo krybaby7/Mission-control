@@ -1,0 +1,321 @@
+{
+  "id": "2026-10-11-sales-data",
+  "kind": "feature",
+  "title": "Sales data",
+  "request": "Total the sales by region, describe each column and make a sheet for the board.",
+  "repoPath": "/fixture/mc-apps/sales-data",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-sales-data",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "done",
+  "stage": "complete",
+  "createdAt": "2026-10-11T09:58:00.000Z",
+  "updatedAt": "2026-10-11T09:59:30.000Z",
+  "features": [
+    {
+      "id": "region-totals",
+      "title": "Totals for each region",
+      "story": "As the owner I can run one script and get the units and the revenue for each region.",
+      "acceptance": [
+        "With a sales file that has three regions, the totals file has one row for each region."
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "claude",
+          "model": "model-x",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "wrote the totals script",
+          "at": "2026-10-11T09:58:10.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/region-totals.test.mjs",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "reviewRounds": 1,
+      "openFindings": []
+    },
+    {
+      "id": "column-notes",
+      "title": "Description of each column",
+      "story": "As the owner I can read what each column of the sales file means.",
+      "acceptance": [
+        "Every column of the sales file has a row in the description, with a plain meaning and an example value.",
+        "The description does not say anything about a column that the sales file does not have."
+      ],
+      "kind": "standard",
+      "deps": [
+        "region-totals"
+      ],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "claude",
+          "model": "model-x",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "wrote docs/columns.csv",
+          "at": "2026-10-11T09:58:20.000Z"
+        }
+      ],
+      "frozenTests": [],
+      "reviewRounds": 1,
+      "openFindings": [],
+      "mode": "review",
+      "effort": "light",
+      "expect": {
+        "columns": [
+          "Column",
+          "Meaning",
+          "Example"
+        ],
+        "rows": [
+          4,
+          12
+        ]
+      },
+      "checked": {
+        "round": 1,
+        "reviewer": "claude",
+        "results": [
+          {
+            "n": 1,
+            "result": "pass",
+            "evidence": "Quote from docs/columns.csv: Region,Where the sale happened,North.",
+            "basis": "text"
+          },
+          {
+            "n": 2,
+            "result": "pass",
+            "evidence": "Every row names a column of the sales file.",
+            "basis": "text"
+          }
+        ],
+        "unjudged": 0,
+        "scripted": {
+          "problems": [],
+          "facts": []
+        },
+        "pictures": {
+          "taken": 0
+        }
+      }
+    },
+    {
+      "id": "sales-sheet",
+      "title": "Sales sheet for the board",
+      "story": "As the owner I can open a sheet of the sales that I can show the board.",
+      "acceptance": [
+        "The sheet shows the units and the revenue for each region.",
+        "The sheet looks tidy and is something the owner would be happy to show."
+      ],
+      "kind": "standard",
+      "deps": [
+        "column-notes"
+      ],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "claude",
+          "model": "model-x",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "wrote docs/sheet.md",
+          "at": "2026-10-11T09:58:32.000Z"
+        }
+      ],
+      "frozenTests": [],
+      "reviewRounds": 2,
+      "openFindings": [],
+      "mode": "owner",
+      "checked": {
+        "round": 2,
+        "reviewer": "claude",
+        "results": [
+          {
+            "n": 1,
+            "result": "pass",
+            "evidence": "Quote from docs/sheet.md: North, 120 units.",
+            "basis": "text"
+          },
+          {
+            "n": 2,
+            "result": "cannot_judge",
+            "evidence": "Tidiness is a matter of taste.",
+            "basis": "text"
+          }
+        ],
+        "unjudged": 1,
+        "scripted": {
+          "problems": [],
+          "facts": []
+        },
+        "pictures": {
+          "taken": 0
+        }
+      }
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 9,
+  "notes": [],
+  "spec": {
+    "appName": "Sales data",
+    "summary": "Adds the totals, the column notes and a sheet.",
+    "features": [
+      {
+        "id": "region-totals",
+        "title": "Totals for each region",
+        "story": "As the owner I can run one script and get the units and the revenue for each region.",
+        "acceptance": [
+          "With a sales file that has three regions, the totals file has one row for each region."
+        ],
+        "kind": "standard",
+        "deps": []
+      },
+      {
+        "id": "column-notes",
+        "title": "Description of each column",
+        "story": "As the owner I can read what each column of the sales file means.",
+        "acceptance": [
+          "Every column of the sales file has a row in the description, with a plain meaning and an example value.",
+          "The description does not say anything about a column that the sales file does not have."
+        ],
+        "kind": "standard",
+        "deps": [
+          "region-totals"
+        ],
+        "mode": "review",
+        "effort": "light",
+        "expect": {
+          "columns": [
+            "Column",
+            "Meaning",
+            "Example"
+          ],
+          "rows": [
+            4,
+            12
+          ]
+        }
+      },
+      {
+        "id": "sales-sheet",
+        "title": "Sales sheet for the board",
+        "story": "As the owner I can open a sheet of the sales that I can show the board.",
+        "acceptance": [
+          "The sheet shows the units and the revenue for each region.",
+          "The sheet looks tidy and is something the owner would be happy to show."
+        ],
+        "kind": "standard",
+        "deps": [
+          "column-notes"
+        ],
+        "mode": "owner"
+      }
+    ],
+    "assumptions": [],
+    "uiContract": ""
+  },
+  "plan": {
+    "spec": {
+      "appName": "Sales data",
+      "summary": "Adds the totals, the column notes and a sheet.",
+      "features": [
+        {
+          "id": "region-totals",
+          "title": "Totals for each region",
+          "story": "As the owner I can run one script and get the units and the revenue for each region.",
+          "acceptance": [
+            "With a sales file that has three regions, the totals file has one row for each region."
+          ],
+          "kind": "standard",
+          "deps": []
+        },
+        {
+          "id": "column-notes",
+          "title": "Description of each column",
+          "story": "As the owner I can read what each column of the sales file means.",
+          "acceptance": [
+            "Every column of the sales file has a row in the description, with a plain meaning and an example value.",
+            "The description does not say anything about a column that the sales file does not have."
+          ],
+          "kind": "standard",
+          "deps": [
+            "region-totals"
+          ],
+          "mode": "review",
+          "effort": "light",
+          "expect": {
+            "columns": [
+              "Column",
+              "Meaning",
+              "Example"
+            ],
+            "rows": [
+              4,
+              12
+            ]
+          }
+        },
+        {
+          "id": "sales-sheet",
+          "title": "Sales sheet for the board",
+          "story": "As the owner I can open a sheet of the sales that I can show the board.",
+          "acceptance": [
+            "The sheet shows the units and the revenue for each region.",
+            "The sheet looks tidy and is something the owner would be happy to show."
+          ],
+          "kind": "standard",
+          "deps": [
+            "column-notes"
+          ],
+          "mode": "owner"
+        }
+      ],
+      "assumptions": [],
+      "uiContract": ""
+    },
+    "sha256": "c087c05bc087c05bc087c05bc087c05bc087c05bc087c05bc087c05bc087c05b",
+    "at": "2026-10-11T09:58:02.000Z"
+  },
+  "checkpointLog": [
+    {
+      "id": "feature:sales-sheet#1",
+      "scope": "feature:sales-sheet",
+      "kind": "feature",
+      "featureId": "sales-sheet",
+      "round": 1,
+      "decision": "send_back",
+      "at": "2026-10-11T09:58:50.000Z"
+    },
+    {
+      "id": "feature:sales-sheet#2",
+      "scope": "feature:sales-sheet",
+      "kind": "feature",
+      "featureId": "sales-sheet",
+      "round": 2,
+      "decision": "approve",
+      "at": "2026-10-11T09:59:10.000Z"
+    }
+  ]
+}

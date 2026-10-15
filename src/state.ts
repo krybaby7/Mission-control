@@ -47,6 +47,8 @@ export interface CreateMissionInit {
   checkpoints?: CheckpointKind[];
   /** A plan written outside the team (mc plan queue); the mission adopts it instead of asking the planner. */
   plan?: PlanSource;
+  /** `false` only: the owner chose `--no-owner-checkpoint`. It is copied into the mission only when it is `false`, so every other mission gets no new key. */
+  ownerStops?: false;
   nowMs: number;
 }
 
@@ -118,6 +120,7 @@ export class MissionStore {
       notes: [],
       ...(init.checkpoints?.length ? { checkpoints: [...init.checkpoints] } : {}),
       ...(init.plan ? { plan: init.plan } : {}),
+      ...(init.ownerStops === false ? { ownerStops: false as const } : {}),
     };
     try {
       this.save(mission, init.nowMs);

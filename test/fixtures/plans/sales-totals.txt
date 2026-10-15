@@ -1,0 +1,28 @@
+mc-plan 1
+name: Sales totals
+request: Add a script that totals the units and the revenue for each region in the sales file, and describe each column of that file in plain words.
+folder: sales-data
+base: main
+app-name: Sales data
+summary: Adds a script that totals units and revenue for each region, and a short description of each column of the sales file.
+assumption: The totals are written to a new CSV file with one row for each region, in alphabetical order.
+contract: The totals file is reports/totals.csv and its columns are Region, Units and Revenue.
+
+feature: region-totals
+title: Totals for each region
+story: As the owner I can run one script and get the units and the revenue for each region.
+check: With a sales file that has three regions, the totals file has one row for each of the three regions.
+check: The units and the revenue in each row equal the sums of that region's rows in the sales file.
+check: The regions are in alphabetical order.
+check: A region with no rows in the sales file does not appear in the totals file.
+
+feature: column-notes
+title: Description of each column
+story: As the owner I can read what each column of the sales file means.
+needs: region-totals
+mode: review
+effort: light
+check: Every column of the sales file has a row in the description, with a plain meaning and an example value.
+check: The description does not say anything about a column that the sales file does not have.
+columns: Column, Meaning, Example
+rows: 4-12

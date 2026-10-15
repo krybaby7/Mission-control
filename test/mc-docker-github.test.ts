@@ -790,6 +790,133 @@ describe("publish: the pull request", () => {
     expect(body).toContain("- Review: a separate AI reviewer reads each feature before it is added. 1 review(s) did not finish. Those features were added after their tests passed.");
   });
 
+  // ─────────── features checked by a second AI (docs/modes-spec.md, 10.5) ───────────
+
+  /** A finished feature checked by tests, and one checked by a second AI. */
+  const testedFeature = { id: "totals", title: "Totals", status: "done", frozenTests: [{ path: "tests/totals.test.ts", sha256: "0".repeat(64) }] };
+  const readFeature = { id: "guide", title: "Setup guide", status: "done", mode: "review", frozenTests: [], acceptance: ["The guide has numbered steps."], checked: { round: 1, results: [{ n: 1, result: "pass", evidence: "x", basis: "text" }], unjudged: 0 } };
+  const CHECKED = "Checked: 1 feature by tests; 1 feature by a second AI against your list.";
+  const header = (...lines: string[]): string => ["# Habit tracker", "", "**Done** · 2 of 2 features done", "", "Plan: written by the leader (plan code 5796d033).", ...lines, "", "I worked on your request."].join("\n");
+  /** The part of the body that says what was checked. */
+  const checkedBlock = (body: string): string => body.split("## What was checked")[1]!.split("## From the report")[0]!;
+
+  it("when a finished feature was checked by a second AI, says the tests are not for it and copies the report's Checked line", () => {
+    setup({ features: [testedFeature, readFeature] });
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), header(CHECKED));
+    const block = checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!);
+    expect(block).toContain("- Tests: the team wrote tests before the code for 1 of 2 finished features. The features on the Checked line below were not checked by tests.");
+    expect(block).toContain("\n- Checked: 1 feature by tests; 1 feature by a second AI against your list.\n");
+    // the old claim is gone: a feature counts as finished only when its tests pass
+    expect(block).not.toContain("A feature counts as finished only when its tests");
+    expect(block.indexOf("- Tests:")).toBeLessThan(block.indexOf("- Checked:"));
+  });
+
+  it("copies the Checked line as the report wrote it, with the approval and the stop it was queued without", () => {
+    setup({ features: [{ ...readFeature, mode: "owner" }] });
+    const line = "Checked: 1 feature by a second AI against your list and approved by you.";
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), header(line));
+    const body = run(["publish", ID, ...TO]).gh[0]!.body!;
+    expect(body).toContain("\n- Checked: 1 feature by a second AI against your list and approved by you.\n");
+    expect(body).toContain("the team wrote tests before the code for 0 of 1 finished features");
+    expect(body).not.toMatch(/looked at it|you looked|reviewed by you|signed off|different AI/i);
+  });
+
+  it("says where to look when the report has no Checked line, and does not make one up", () => {
+    setup({ features: [testedFeature, readFeature] });
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), header());
+    const block = checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!);
+    expect(block).toContain("- Checked: the report says how each feature was checked.");
+    expect(block).not.toContain("second AI against your list");
+    // and the same when there is no report at all
+    fs.rmSync(path.join(mcHome, "missions", ID, "report.md"));
+    expect(checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!)).toContain("- Checked: the report says how each feature was checked.");
+  });
+
+  it("changes nothing for a mission whose finished features are all checked by tests, even if the report has a Checked line", () => {
+    setup({ features: [testedFeature] });
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), header("Checked: 1 feature by tests."));
+    const block = checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!);
+    expect(block).toContain("- Tests: the team wrote tests before the code for 1 of 1 finished features. A feature counts as finished only when its tests and the app's own checks pass.");
+    expect(block).not.toContain("- Checked:");
+    expect(block).not.toContain("Checked line");
+  });
+
+  it("a feature checked by a second AI that is not finished does not change the words either", () => {
+    setup({ status: "partial", features: [testedFeature, { ...readFeature, status: "blocked" }] });
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), header("Checked: 1 feature by tests."));
+    const block = checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!);
+    expect(block).toContain("A feature counts as finished only when its tests and the app's own checks pass.");
+    expect(block).not.toContain("- Checked:");
+  });
+
+  it("when no feature was finished it still says so, and nothing about a second AI", () => {
+    setup({ status: "partial", features: [{ ...readFeature, status: "blocked" }] });
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), header(CHECKED));
+    expect(checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!)).toContain("- Tests: no feature was finished, so there is no test result to show.");
+  });
+
+  it("an unfinished review of a feature checked by a second AI was added after Mission Control's own checks passed, and the old count still matches the new note", () => {
+    setup({
+      features: [readFeature],
+      notes: ["The review of “Setup guide” did not finish, so it was merged after passing Mission Control's own checks only.", 'The review of "Totals" did not finish, so it was merged after passing its checks.'],
+    });
+    const block = checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!);
+    expect(block).toContain("- Review: a separate AI reviewer reads each feature before it is added. 2 review(s) did not finish. Those features were added after Mission Control's own checks passed.");
+    expect(block).not.toContain("their tests passed");
+  });
+
+  it("checks that were already failing: no new test judged a feature that has none", () => {
+    const world = setup({ baselineBroken: true, features: [readFeature] });
+    expect(checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!)).toContain("- The app's own checks were already failing before this work started, so they could not be used to judge the new work.\n");
+    writeMission(world, { baselineBroken: true, features: [testedFeature, readFeature] });
+    const block = checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!);
+    expect(block).toContain("so they could not be used to judge the new work. The features checked by tests were judged by their new tests only.");
+    expect(block).not.toContain("only the new tests judged the new work");
+  });
+
+  it("makes the Checked line safe: nothing that tags a person, links an issue or a web address, or adds HTML; one line only", () => {
+    setup({ features: [readFeature] });
+    const hostile = `Checked: 1 feature by @everyone #12 <b>bold</b> \`code\` https://evil.example/x ${BEL}${ESC}[31m${u(0x202e, 0x200b)} end.`;
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), header(hostile, "Checked: a second line that is not used."));
+    const body = run(["publish", ID, ...TO]).gh[0]!.body!;
+    const line = checkedBlock(body).split("\n").find((l) => l.startsWith("- Checked:"))!;
+    expect(line).not.toMatch(/[@#<>\`]|:\/\//);
+    expect(hasControl(line)).toBe(false);
+    expect(line).toContain("1 feature by everyone 12 bbold/b code https:evil.example/x");
+    expect(checkedBlock(body).split("\n").filter((l) => l.startsWith("- Checked:"))).toHaveLength(1);
+    expect(checkedBlock(body)).not.toContain("a second line");
+  });
+
+  it("reads a Checked line only at the start of a line of the report's first lines", () => {
+    setup({ features: [readFeature] });
+    const filler = Array.from({ length: 130 }, (_, i) => `line ${i}`);
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), [...filler, "Checked: 1 feature by a second AI against your list.", "  Checked: indented"].join("\n"));
+    expect(checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!)).toContain("- Checked: the report says how each feature was checked.");
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), "  Checked: 1 feature by a second AI against your list.\nNot Checked: here\n");
+    expect(checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!)).toContain("- Checked: the report says how each feature was checked.");
+  });
+
+  it("the people lines say what the log holds and nothing more, also for a feature the owner approved", () => {
+    setup({
+      features: [{ ...readFeature, mode: "owner" }],
+      checkpointLog: [{ id: "feature:guide#1", scope: "feature:guide", kind: "feature", featureId: "guide", round: 1, decision: "approve", at: "2000-01-01T00:00:00.000Z" }],
+    });
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), header("Checked: 1 feature by a second AI against your list and approved by you."));
+    const body = run(["publish", ID, ...TO]).gh[0]!.body!;
+    expect(body).toContain("- People: the owner answered at these stops: the feature “Setup guide”: approved. Mission Control records each answer. It cannot tell what the owner looked at.");
+    expect(body).not.toMatch(/you looked at it|nobody looked/);
+  });
+
+  it("the whole What was checked block of a mission with a mode feature claims no test for it", () => {
+    setup({ features: [testedFeature, readFeature], baselineBroken: true, notes: ["The review of “Setup guide” did not finish, so it was merged after passing Mission Control's own checks only."] });
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), header(CHECKED));
+    const block = checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!);
+    // every sentence that talks about tests is about the features that have them
+    for (const line of block.split("\n").filter((l) => /\btests?\b/i.test(l))) {
+      expect(line, line).toMatch(/^- (Tests: the team wrote tests before the code for \d+ of \d+ finished features\. The features on the Checked line below were not checked by tests\.|Checked: .*by tests.*|The app's own checks were already failing .*their new tests only\.)$/);
+    }
+  });
+
   it("a partly done mission is published as a draft with its unfinished features listed", () => {
     const world = setup();
     writeMission(world, {

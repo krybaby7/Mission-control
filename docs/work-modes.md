@@ -1,0 +1,123 @@
+# Documents, pages and data: how the team checks work that has no tests
+
+This is the owner's guide to a part of Mission Control that is new: work that is not code. Before this, a feature was done when its tests passed. A guide, a page or a table has no tests, so a plan can now say how each feature is checked, and how hard the team thinks about it. The design is in [docs/modes-spec.md](modes-spec.md). This page says what it means for you, in plain words.
+
+**Status, said plainly.** This was built and tried only with stand-in AIs. No real AI has done a job in these ways yet, nothing has been tried on a Windows PC, and nothing has been tried against a real GitHub. The words below say what the code does. They do not say that the second AI is a good judge, because nobody has measured that.
+
+## The three ways a feature is checked
+
+Every feature of a plan has a way of being checked. The leader chooses it for you and tells you in plain words, one line for each feature, before anything is queued.
+
+| Way | The plan says | Who checks it | What you see |
+|---|---|---|---|
+| By tests | nothing (this is the usual way) | The team writes tests first, then builds until they pass. Another AI reviews the result. | “Checked by tests.” |
+| By a second AI | `mode: review` | The team builds it. Mission Control's own checks run first (see below). Then a second AI reads the result and judges each check on your list as passed, failed or not judged, with a reason. No tests are written. | “Checked by a second AI against your list.” |
+| By a second AI, and then by you | `mode: owner` | The same, and then the team stops so that you look at it before it is added. | “Checked by a second AI against your list and approved by you.” |
+
+The leader uses the way that fits the job. Code, a script and numbers that a script works out are always checked by tests. Writing with named parts (a part of a README, a how-to) is checked by a second AI. Writing where taste matters, anything you will send to other people, and a web page are marked for your look.
+
+**What “a second AI” means.** It is another session of an AI, at a higher level of thinking than the one that built the work. In the default setup it is often the other company's model, but not always: if you use only one company's AI, or the builder ran on the same company's light model, it is the same company. That is why Mission Control says “a second AI” and never “a different AI”.
+
+**What “approved by you” means.** Mission Control records your approval in its log. It cannot know that you opened a file or looked at a picture, and it never says so. The leader may say “look at it”, because that is what the stop is for.
+
+**If the second AI cannot judge a check.** For example, a check about how a page looks, when no picture could be taken. Then that check is listed as “not judged”, it is never counted as passed, and the team stops for your look at that feature, even if the plan did not mark it for your look. Only the command line can switch that stop off (see “Switching the stops off”).
+
+## How hard the team thinks
+
+Each feature can also have an effort: `light`, `standard` or `deep`. The leader chooses it. Standard is the usual choice.
+
+| Effort | Use | What it does |
+|---|---|---|
+| `light` | Short, routine work with little at stake | The team's lightest AI builds it first and a lighter AI checks it. It costs less. |
+| `standard` | Everything else | As the team is set up. |
+| `deep` | Long or important work, tricky wording | The team's strongest AI builds it and checks it, thinks longer, and gets one more round to fix what the check finds. It costs two to three times as much. |
+
+## What Mission Control checks by itself
+
+Before the second AI reads anything, Mission Control runs its own checks. They are a program, not an AI, they cost nothing, and they catch real defects. They run on the files the feature changed:
+
+- some file changed, and no file is empty or very large;
+- no placeholder text (“lorem ipsum”, a to-do marker at the start of a line, a blank in square brackets);
+- no key or password in a file (a net with holes, see below);
+- links to other files in the project lead to a file, and links to a heading lead to a heading;
+- the headings, words and length that the plan asked for (`heading`, `mention`, `words`), counted over the text a reader sees, so a word hidden in a comment does not count;
+- for a table: the columns and the number of rows the plan asked for, the same number of values in every row, and no cell that starts like a formula (a spreadsheet could run it);
+- for a web page: a title, a setting for phone screens, a description for every picture, nothing loaded from the internet, no sideways scrolling at phone width, and a page that is not blank;
+- if the feature also changed code or settings, the project's own full checks run on the result.
+
+A problem that a file already had before the feature is not blamed on the feature. It is listed as a fact.
+
+**What these checks do not prove.** Not that a sentence is true, that a number is right, or that a design is good. A workbook (.xlsx) or a PDF gets its size checked and nothing else; a workbook can hold a formula that reaches a web address, and nothing here looks inside it. Numbers must be proved by a feature checked by tests.
+
+## Pictures
+
+For a web page that is a plain file inside the app (an .html file), Mission Control opens it in a browser in the container, at phone width and at desktop width, and takes a picture of each. The browser is cut off from the internet and from files outside the app. The second AI is given the pictures to look at, and you are shown where they are.
+
+- A picture is the page as it first loads, in the container's fonts. It does not show a click, a hover, other screen sizes, or your own browser.
+- A page that needs a running server gets no pictures. The checks that need a picture are then “not judged”, and the team stops for your look.
+- To see the pictures in Windows, run `mc copy-reports` in the Ubuntu window. It prints the address of the `mc-reports` folder. The pictures are in `missions\<mission>\screenshots` inside it. The report lists them as images too. The dashboard shows no picture.
+- The second AI only looks at pictures when it runs on Claude. In the default setup, if it would run on Codex, a feature with pictures is checked by Claude instead. In the setup that uses only Codex there is no Claude to use, so the checks that need a picture are not judged. Whether Codex can look at a picture was never tried.
+
+## Where you see how a feature was checked
+
+- **The report** has a line `Checked:` in its header, for example “Checked: 2 features by tests; 1 feature by a second AI against your list and approved by you.”, and the Features table says it for each feature.
+- **`mc plan show <mission>`** lists, after the plan, how each feature was checked: the second AI's answer on every check with its reason, Mission Control's own checks, and the pictures.
+- **The dashboard** says “Built” and not “Built and checked” for such a mission. On the Results page each finished feature has a line that says how it was checked. When you approved a feature, the note at the bottom says you were asked to look at it and approved it.
+- **The draft pull request** copies the report's `Checked:` line. It never says that a feature without tests was tested.
+
+## What it costs
+
+Nothing here was measured. The figures are guesses built from the real numbers in [docs/plans-spec.md](plans-spec.md), at list prices, and they are a rough guide only.
+
+| Job | AI calls | Expected share of a week's allowance |
+|---|---|---|
+| A short guide, one feature checked by a second AI | about 7 | about 1 percent |
+| A web page marked for your look, thinking deep | about 7 | about 1.5 to 2 percent |
+| The same page, sent back once at the stop | about 9 | about 2 to 3 percent |
+| A script with tests and a described table | about 11 | about 1 percent |
+
+A fix round adds two calls in every way of checking. Being checked by a second AI is cheaper than tests only while the checks pass the first time. The reason to use it is that it works for work that has no tests, not that it is cheap. The engine still pauses new work at 85 percent of the week.
+
+## Switching the stops off
+
+A feature marked for your look stops every time. The plan file cannot turn that off, and neither can the AI that revises a plan. Only the command line can, with `mc plan queue - --no-owner-checkpoint`. The leader adds it only after it asked “Skip your look at these features? The team will add them without stopping for you. Yes or no?” and you said a clear yes. If you never want the leader to do that, the owner can add a deny rule (see [docs/leader.md](leader.md)). Mission Control then records “it was queued without a stop for your look”. It does not say that you chose not to look.
+
+If you used `--checkpoint feature` as well, you still stop at every feature.
+
+## Privacy
+
+Everything in your apps folder can be read or sent to the AI services (Anthropic and OpenAI) whenever an AI opens a file, and Mission Control also puts file text into what it sends them. An AI that builds can use the internet. For documents, pages and data that matters more than for code: **do not put personal data, customer lists, passwords or private papers in your apps folder.** If you take a private repository with `get`, its files go in front of the AI services as soon as a feature runs. Sending the work to GitHub sends the files you chose, public or private as that repository is.
+
+- Mission Control's own checks send nothing out.
+- The picture step blocks the page's web requests. That was tried with a script, a beacon and a WebSocket. It was not tried with a service worker, DNS lookups or WebRTC.
+- The pictures themselves are sent to the second AI when it looks at them.
+- The check for keys and passwords is a net with holes. It knows ten common shapes, and it looks only at the files of features checked by a second AI.
+- Data for a job must already be in the app's folder. CSV is the format to use. Nothing can be uploaded through the leader. A script that reads a spreadsheet or an archive file should check its size first. The host script sets a memory limit on the container, which should keep a file bomb from filling the machine (read in the script, not run).
+- A spreadsheet can run a cell that starts with an equals sign. If you open a data file that a script wrote, open it in a text editor first, and if Excel asks, do not press “Enable Editing” or “Enable Content” until you have read the cells. This was not tried on a PC.
+
+The leader asks one question before it queues a job that reads a file you named: “Does this file hold personal data, customer details or private papers? Yes or no?” On yes it does not queue the job.
+
+## What was not tried
+
+- A real AI doing a job in these ways. The second AI's judgement is an AI's: it can pass what it should not and fail what is fine. Mission Control makes the cheap ways of being wrong visible (a check not answered, a pass without a reason, a quote that is not in the files, a file it says it opened but did not, a picture it did not open), and turns those answers into “not judged”. It cannot prove that a quote proves the check.
+- Codex as the second AI, looking at a picture.
+- Looking at a real page: one small drawing was shown to one small model, three times. A page was never shown to a model.
+- The browser in the Docker image with the pinned version of the picture library. It was tried here with other versions.
+- Windows, WSL, and your own fonts and browser.
+- The leader following its new rules (the words of the questions are tested, the model's behaviour is not).
+- Whether the numbers above are right.
+
+## The limits
+
+- **A plan for such work needs an app folder** (`folder`), or a new app to put the files in. Starting an empty folder of documents is not built.
+- **A folder that holds only documents** can stop at the start: Mission Control asks the team to work out how to check the project, and with no tests and no checks it may fail with “Could not work out how to check this project”. This is how it already worked. The leader tells you if it happens.
+- **No research with sources.** A job that needs facts from the internet, with sources, is not covered. A plan carries no web address, the builders are told to use only facts that are in the project and in the plan, and nothing checks that a source is real or that a fact is true. The leader says so and does not write a plan for it.
+- **Pages that need a running server get no pictures.**
+- **No spreadsheet inside the engine.** A workbook (.xlsx) can only come from a script that has tests, with a CSV beside it. The CSV can be checked, and the workbook is shown on GitHub as a file that cannot be read there.
+- **No Word or PDF files.** A document is markdown or a page. You can print a page to PDF in a browser.
+- **No audio or video, no colour or contrast audits.**
+- **Data scripts are not scanned for keys or formula cells.** The scans cover features checked by a second AI, so a script with tests that copies a cell from an input file can pass it on.
+
+## Not built: features that run side by side
+
+Features that run side by side are deferred, and not built in this step. The engine is made for one feature at a time: one loop over the features, one copy of the mission in memory that is written whole at every save, one run lock, one line of merges into a single branch, pacing that assumes one AI call at a time, and a timeline and stops that assume one feature is in flight. Running features side by side would need separate working copies, a rule for merge conflicts (who settles them?), saves that cannot overwrite each other, a resume that copes with several half-finished features, and pacing across calls that overlap. Thousands of tests assume a fixed order, so doing it would also make them unreliable. The gain is clock time on big jobs with many features. The use of the allowance is the same, and most small jobs have one to three features. It waits until real use shows that it is needed.

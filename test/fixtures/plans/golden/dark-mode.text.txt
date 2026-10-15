@@ -1,0 +1,21 @@
+You asked: On the settings page of the habit tracker, add a Dark mode switch. It should remember my choice.
+App name: Habit tracker
+Summary: Adds a Dark mode switch to the settings page. The page turns dark when it is on, and the choice is remembered.
+
+1 feature:
+
+1. “Dark mode switch on the settings page” (id: dark-mode)
+   As a user I can switch the app to dark colours on the settings page, and it stays that way when I come back.
+   It counts as done when:
+   - The settings page shows a switch labelled Dark mode, and it is off by default.
+   - Turning the switch on makes the page background dark.
+   - Turning the switch off makes the page background light again.
+   - After the switch is turned on and the page is reloaded, the switch is still on and the page is dark.
+   - After the switch is turned off and the page is reloaded, the switch is off and the page is light.
+
+Choices made for you:
+- The switch is off until the person turns it on, and the choice is kept for that person on the same device.
+
+Names the tests and the code must agree on:
+- The switch is on the settings page and its label is Dark mode.
+- The switch has the test id dark-mode-switch.

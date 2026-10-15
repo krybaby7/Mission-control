@@ -7,6 +7,7 @@
 import { cleanId, clean } from "./sanitize.js";
 import { REASON_MAX_CHARS, RECENT_WINDOW_MS, TIMELINE_MAX_ITEMS } from "./constants.js";
 import { type MissionFacts, readLabel } from "./missions.js";
+import { noTestsDone } from "./modes.js";
 import type { Said, Timeline, TimelineItem, Tone } from "./types.js";
 import { A_FEATURE, explainFailureReason, explainFeatureReason, stopReasonKind, TL, waitInfoFromEvent } from "./vocabulary-details.js";
 import type { Formatter } from "./vocabulary.js";
@@ -39,6 +40,10 @@ interface Context {
   /** feature id -> size of its ladder, from the snapshot's feature views. */
   ladder: Map<string, number>;
   baselineBroken: boolean;
+  /** Ids of the features checked by a second AI. Empty for a mission that has none, and then no row below changes. */
+  byReading: Set<string>;
+  /** The mission has features checked by a second AI and no finished feature checked by tests, so its final steps are not told as tests (docs/modes-spec.md, 11.5). */
+  noTests: boolean;
 }
 
 function contextOf(facts: MissionFacts): Context {
@@ -46,7 +51,9 @@ function contextOf(facts: MissionFacts): Context {
   for (const feature of facts.data.mission?.features ?? []) titles.set(feature.id, feature.title);
   for (const feature of facts.view.features) if (!titles.has(feature.id)) titles.set(feature.id, feature.title);
   const ladder = new Map(facts.view.features.map((feature) => [feature.id, feature.steps.total]));
-  return { title: facts.view.title, titles, ladder, baselineBroken: facts.baselineBroken };
+  const mission = facts.data.mission;
+  const byReading = new Set((mission?.features ?? []).filter((feature) => feature.mode !== undefined).map((feature) => feature.id));
+  return { title: facts.view.title, titles, ladder, baselineBroken: facts.baselineBroken, byReading, noTests: mission !== null && noTestsDone(mission) };
 }
 
 /** The feature an event is about: the id as written (cleaned) and the title to show. Null when the event names none. */
@@ -101,7 +108,8 @@ function translate(type: string, data: Record<string, unknown>, at: number, ctx:
       return translateVerify(data, at, ctx);
     case "merge": {
       const feature = featureOf(data, ctx);
-      return feature === null ? null : row(at, "M", "good", TL.merged(feature.title), feature.id);
+      if (feature === null) return null;
+      return row(at, "M", "good", ctx.byReading.has(feature.id) ? TL.mergedByReading(feature.title) : TL.merged(feature.title), feature.id);
     }
     case "run.end": {
       const outcome = data.outcome;
@@ -166,6 +174,28 @@ function translate(type: string, data: Record<string, unknown>, at: number, ctx:
     case "checkpoint.passed":
       // hidden: the mission.resume that follows reads as the continuation
       return null;
+    case "deliverable.checked": {
+      // Told only when Mission Control's own checks found problems; a pass is the quiet step before the second AI reads.
+      const feature = featureOf(data, ctx);
+      return feature === null || data.ok !== false ? null : row(at, "D", "info", TL.deliverableProblems(feature.title), feature.id);
+    }
+    case "rubric.checked": {
+      const feature = featureOf(data, ctx);
+      if (feature === null || !["pass", "fail", "unjudged"].some((key) => typeof data[key] === "number")) return null;
+      const count = (key: string): number => {
+        const n = data[key];
+        return typeof n === "number" ? n : 0;
+      };
+      const { text: line, tone } = TL.rubricAnswered(feature.title, count("pass"), count("fail"), count("unjudged"));
+      return row(at, "M", tone, line, feature.id);
+    }
+    case "pictures.taken": {
+      const feature = featureOf(data, ctx);
+      if (feature === null) return null;
+      if (typeof data.taken === "number" && data.taken > 0) return row(at, "D", "info", TL.picturesTaken(feature.title), feature.id);
+      // `why` is written only when pages were expected: nothing is said for a feature that has no page.
+      return data.why === undefined ? null : row(at, "D", "warn", TL.picturesNone(feature.title), feature.id);
+    }
     case "run.interrupted":
       return row(at, "M", "warn", TL.runInterrupted);
     case "git.settings.restored":
@@ -232,12 +262,14 @@ function translateAttempt(data: Record<string, unknown>, at: number, ctx: Contex
 function translateVerify(data: Record<string, unknown>, at: number, ctx: Context): Row | null {
   const ok = data.ok === true;
   if (data.label === "gate-c") {
-    if (ok) return row(at, "M", "good", TL.finalTestsPassed);
+    if (ok) return row(at, "M", "good", ctx.noTests ? TL.finalChecksPassed : TL.finalTestsPassed);
     // With a red baseline the engine judges the final check by the regression run, so this failure is not news.
-    return ctx.baselineBroken ? row(at, "M", "info", TL.baselineSuiteFailed) : row(at, "M", "warn", TL.finalTestsFailed);
+    if (ctx.baselineBroken) return row(at, "M", "info", ctx.noTests ? TL.baselineChecksFailed : TL.baselineSuiteFailed);
+    return row(at, "M", "warn", ctx.noTests ? TL.finalChecksFailed : TL.finalTestsFailed);
   }
   if (data.label === "gate-c-features") {
-    return ok ? row(at, "M", "good", TL.newFeatureTestsPassed) : row(at, "M", "warn", TL.newFeatureTestsFailed);
+    if (ok) return row(at, "M", "good", ctx.noTests ? TL.projectChecksPassed : TL.newFeatureTestsPassed);
+    return row(at, "M", "warn", ctx.noTests ? TL.projectChecksFailed : TL.newFeatureTestsFailed);
   }
   if (data.timedOut === true) {
     const feature = featureOf(data, ctx);

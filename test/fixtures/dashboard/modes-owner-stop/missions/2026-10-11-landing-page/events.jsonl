@@ -1,0 +1,14 @@
+{"at":"2026-10-11T09:58:00.000Z","missionId":"2026-10-11-landing-page","type":"mission.start","data":{"stage":"spec"}}
+{"at":"2026-10-11T09:58:03.000Z","missionId":"2026-10-11-landing-page","type":"spec","data":{"appName":"Habit tracker","features":["landing-page","contact-page"]}}
+{"at":"2026-10-11T09:58:05.000Z","missionId":"2026-10-11-landing-page","type":"stage","data":{"from":"gate_a","to":"features"}}
+{"at":"2026-10-11T09:58:06.000Z","missionId":"2026-10-11-landing-page","type":"feature.status","data":{"feature":"landing-page","from":"pending","to":"building"}}
+{"at":"2026-10-11T09:58:07.000Z","missionId":"2026-10-11-landing-page","type":"run.start","data":{"label":"build-landing-page","jobId":"build-landing-page-1","provider":"claude","model":"model-x","role":"engineer","effort":"medium"}}
+{"at":"2026-10-11T09:58:08.000Z","missionId":"2026-10-11-landing-page","type":"run.end","data":{"label":"build-landing-page","jobId":"build-landing-page-1","provider":"claude","model":"model-x","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:08.500Z","missionId":"2026-10-11-landing-page","type":"deliverable.checked","data":{"feature":"landing-page","label":"a1","ok":true,"problems":0}}
+{"at":"2026-10-11T09:58:08.800Z","missionId":"2026-10-11-landing-page","type":"pictures.taken","data":{"feature":"landing-page","taken":2}}
+{"at":"2026-10-11T09:58:09.000Z","missionId":"2026-10-11-landing-page","type":"attempt","data":{"feature":"landing-page","rung":0,"action":"build","outcome":"pass"}}
+{"at":"2026-10-11T09:58:09.100Z","missionId":"2026-10-11-landing-page","type":"feature.status","data":{"feature":"landing-page","from":"building","to":"reviewing"}}
+{"at":"2026-10-11T09:58:10.000Z","missionId":"2026-10-11-landing-page","type":"run.start","data":{"label":"review-landing-page","jobId":"review-landing-page-1","provider":"claude","model":"model-x","role":"reviewer","effort":"medium"}}
+{"at":"2026-10-11T09:58:14.000Z","missionId":"2026-10-11-landing-page","type":"run.end","data":{"label":"review-landing-page","jobId":"review-landing-page-1","provider":"claude","model":"model-x","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:14.500Z","missionId":"2026-10-11-landing-page","type":"rubric.checked","data":{"feature":"landing-page","round":1,"pass":3,"fail":0,"unjudged":1,"downgraded":1,"reviewer":"claude"}}
+{"at":"2026-10-11T09:58:15.000Z","missionId":"2026-10-11-landing-page","type":"checkpoint.parked","data":{"id":"feature:landing-page#1","kind":"feature","feature":"landing-page","round":1}}

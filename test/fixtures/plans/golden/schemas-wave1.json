@@ -1,0 +1,460 @@
+{
+ "spec": {
+  "type": "object",
+  "properties": {
+   "appName": {
+    "type": "string",
+    "description": "Short human-readable app name"
+   },
+   "summary": {
+    "type": "string",
+    "description": "Plain-language summary for a non-programmer"
+   },
+   "features": {
+    "type": "array",
+    "items": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "string",
+       "description": "kebab-case, unique within the spec, e.g. add-todo"
+      },
+      "title": {
+       "type": "string"
+      },
+      "story": {
+       "type": "string",
+       "description": "Plain-language user story"
+      },
+      "acceptance": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Concrete, testable criteria describing observable behavior (UI or HTTP)"
+      },
+      "kind": {
+       "type": "string",
+       "enum": [
+        "standard",
+        "mechanical"
+       ],
+       "description": "mechanical = narrow boilerplate work"
+      },
+      "deps": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "ids of features that must be done first"
+      }
+     },
+     "required": [
+      "id",
+      "title",
+      "story",
+      "acceptance",
+      "kind",
+      "deps"
+     ],
+     "additionalProperties": false
+    },
+    "description": "In build order; the first is the core user flow"
+   },
+   "assumptions": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    },
+    "description": "Decisions made on the user's behalf, in plain language"
+   },
+   "uiContract": {
+    "type": "string",
+    "description": "Routes, visible labels, data-testids and endpoints shared by test authors and engineers"
+   }
+  },
+  "required": [
+   "appName",
+   "summary",
+   "features",
+   "assumptions",
+   "uiContract"
+  ],
+  "additionalProperties": false
+ },
+ "gate": {
+  "type": "object",
+  "properties": {
+   "verdict": {
+    "type": "string",
+    "enum": [
+     "approve",
+     "revise"
+    ]
+   },
+   "issues": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    },
+    "description": "Concrete, actionable problems; empty when approving"
+   }
+  },
+  "required": [
+   "verdict",
+   "issues"
+  ],
+  "additionalProperties": false
+ },
+ "onboard": {
+  "type": "object",
+  "properties": {
+   "stackSummary": {
+    "type": "string",
+    "description": "Languages, frameworks, test tools and layout of the existing repository"
+   },
+   "verify": {
+    "type": "object",
+    "properties": {
+     "install": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "Install dependencies, e.g. `npm install`; null when nothing needs installing"
+     },
+     "full": {
+      "type": "string",
+      "description": "One non-interactive command that runs every check (lint, typecheck, unit, e2e) and exits 0 only when all pass"
+     },
+     "tests": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "Runs specific test files; `{files}` is replaced by space-separated repo-relative paths; null if unsupported"
+     },
+     "testGlobs": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Repo-relative globs that match test files, e.g. tests/**"
+     }
+    },
+    "required": [
+     "install",
+     "full",
+     "tests",
+     "testGlobs"
+    ],
+    "additionalProperties": false
+   },
+   "notes": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    }
+   }
+  },
+  "required": [
+   "stackSummary",
+   "verify",
+   "notes"
+  ],
+  "additionalProperties": false
+ },
+ "init": {
+  "type": "object",
+  "properties": {
+   "summary": {
+    "type": "string",
+    "description": "What was scaffolded"
+   },
+   "verify": {
+    "type": "object",
+    "properties": {
+     "install": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "Install dependencies, e.g. `npm install`; null when nothing needs installing"
+     },
+     "full": {
+      "type": "string",
+      "description": "One non-interactive command that runs every check (lint, typecheck, unit, e2e) and exits 0 only when all pass"
+     },
+     "tests": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "Runs specific test files; `{files}` is replaced by space-separated repo-relative paths; null if unsupported"
+     },
+     "testGlobs": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "Repo-relative globs that match test files, e.g. tests/**"
+     }
+    },
+    "required": [
+     "install",
+     "full",
+     "tests",
+     "testGlobs"
+    ],
+    "additionalProperties": false
+   },
+   "notes": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    }
+   }
+  },
+  "required": [
+   "summary",
+   "verify",
+   "notes"
+  ],
+  "additionalProperties": false
+ },
+ "testAuthor": {
+  "type": "object",
+  "properties": {
+   "testFiles": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    },
+    "description": "Repo-relative paths of every test file written or changed"
+   },
+   "notes": {
+    "type": "string"
+   }
+  },
+  "required": [
+   "testFiles",
+   "notes"
+  ],
+  "additionalProperties": false
+ },
+ "build": {
+  "type": "object",
+  "properties": {
+   "summary": {
+    "type": "string",
+    "description": "What was implemented"
+   },
+   "filesChanged": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    },
+    "description": "Repo-relative paths"
+   },
+   "testDispute": {
+    "anyOf": [
+     {
+      "type": "object",
+      "properties": {
+       "file": {
+        "type": "string",
+        "description": "Repo-relative path of the frozen test"
+       },
+       "reason": {
+        "type": "string",
+        "description": "Why the test is wrong"
+       }
+      },
+      "required": [
+       "file",
+       "reason"
+      ],
+      "additionalProperties": false
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "description": "null unless a frozen test is genuinely wrong"
+   },
+   "notes": {
+    "type": "string"
+   }
+  },
+  "required": [
+   "summary",
+   "filesChanged",
+   "testDispute",
+   "notes"
+  ],
+  "additionalProperties": false
+ },
+ "review": {
+  "type": "object",
+  "properties": {
+   "verdict": {
+    "type": "string",
+    "enum": [
+     "approve",
+     "changes"
+    ]
+   },
+   "findings": {
+    "type": "array",
+    "items": {
+     "type": "object",
+     "properties": {
+      "severity": {
+       "type": "string",
+       "enum": [
+        "blocker",
+        "major",
+        "minor"
+       ]
+      },
+      "file": {
+       "type": [
+        "string",
+        "null"
+       ],
+       "description": "Repo-relative path, or null when the finding is not about one file"
+      },
+      "description": {
+       "type": "string",
+       "description": "What is wrong and why it matters"
+      },
+      "suggestedTest": {
+       "type": [
+        "string",
+        "null"
+       ],
+       "description": "A test that would expose the problem"
+      }
+     },
+     "required": [
+      "severity",
+      "file",
+      "description",
+      "suggestedTest"
+     ],
+     "additionalProperties": false
+    }
+   }
+  },
+  "required": [
+   "verdict",
+   "findings"
+  ],
+  "additionalProperties": false
+ },
+ "diagnosis": {
+  "type": "object",
+  "properties": {
+   "action": {
+    "type": "string",
+    "enum": [
+     "retry_with_hint",
+     "amend_tests",
+     "block"
+    ]
+   },
+   "hint": {
+    "type": "string",
+    "description": "Root cause and concrete guidance for the next engineer"
+   },
+   "reason": {
+    "type": "string",
+    "description": "amend_tests: why the tests are wrong; block: why the feature cannot be built; otherwise empty"
+   }
+  },
+  "required": [
+   "action",
+   "hint",
+   "reason"
+  ],
+  "additionalProperties": false
+ },
+ "contextPack": {
+  "type": "object",
+  "properties": {
+   "files": {
+    "type": "array",
+    "items": {
+     "type": "object",
+     "properties": {
+      "path": {
+       "type": "string",
+       "description": "Repo-relative path from the file list"
+      },
+      "why": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path",
+      "why"
+     ],
+     "additionalProperties": false
+    }
+   },
+   "notes": {
+    "type": "string"
+   }
+  },
+  "required": [
+   "files",
+   "notes"
+  ],
+  "additionalProperties": false
+ },
+ "failureDigest": {
+  "type": "object",
+  "properties": {
+   "summary": {
+    "type": "string"
+   },
+   "likelyCause": {
+    "type": "string"
+   },
+   "failingTests": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    },
+    "description": "Failing test names or files, copied from the output"
+   }
+  },
+  "required": [
+   "summary",
+   "likelyCause",
+   "failingTests"
+  ],
+  "additionalProperties": false
+ },
+ "reportProse": {
+  "type": "object",
+  "properties": {
+   "narrative": {
+    "type": "string",
+    "description": "3-8 plain-language sentences for a non-programmer"
+   },
+   "whatYouCanDo": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    },
+    "description": "Things the user can now do in the app, in plain language"
+   }
+  },
+  "required": [
+   "narrative",
+   "whatYouCanDo"
+  ],
+  "additionalProperties": false
+ }
+}

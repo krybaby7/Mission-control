@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Ajv } from "ajv";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assertStrictCompatible, normalizeVerifyConfig, SCHEMAS, type SchemaName, validateOutput, type VerifyConfigOutput } from "./schemas.js";
@@ -12,6 +15,7 @@ import type {
   OnboardOutput,
   ReportProseOutput,
   ReviewOutput,
+  RubricOutput,
   SpecOutput,
   TestAuthorOutput,
 } from "./types.js";
@@ -104,6 +108,18 @@ const samples: { [K in SchemaName]: { valid: unknown; broken: unknown } } = {
     valid: { narrative: "Tonight the team built your habit tracker.", whatYouCanDo: ["Add a habit"] } satisfies ReportProseOutput,
     broken: { narrative: 7, whatYouCanDo: [] },
   },
+  rubric: {
+    valid: {
+      verdict: "changes",
+      results: [
+        { number: 1, check: "The guide is a list of numbered steps.", result: "pass", evidence: "“1. Run the installer.” in docs/setup.md", basis: "text" },
+        { number: 2, check: "On a phone the page is one column.", result: "cannot_judge", evidence: "No picture could be opened.", basis: "picture" },
+      ],
+      seen: ["docs/setup.md"],
+      notes: [{ severity: "minor", file: null, description: "The last step has no full stop." }],
+    } satisfies RubricOutput,
+    broken: { verdict: "changes", results: [{ number: 1, check: "x", result: "pass", evidence: "y" }], seen: [], notes: [] },
+  },
 };
 
 const names = Object.keys(SCHEMAS) as SchemaName[];
@@ -111,7 +127,7 @@ const names = Object.keys(SCHEMAS) as SchemaName[];
 describe("SCHEMAS", () => {
   it("covers every structured output", () => {
     expect(names.sort()).toEqual(
-      ["build", "contextPack", "diagnosis", "failureDigest", "gate", "init", "onboard", "reportProse", "review", "spec", "testAuthor"].sort(),
+      ["build", "contextPack", "diagnosis", "failureDigest", "gate", "init", "onboard", "reportProse", "review", "rubric", "spec", "testAuthor"].sort(),
     );
   });
 
@@ -132,6 +148,27 @@ describe("SCHEMAS", () => {
   it.each(names)("%s rejects unexpected top-level keys", (name) => {
     const result = validateOutput(SCHEMAS[name], { ...(samples[name].valid as object), extra: true });
     expect(result).toEqual({ ok: false, errors: '(root) has unexpected property "extra"' });
+  });
+
+  it("leaves every schema of the end of wave 1 as it was: the spec, the review and the others serialise to the same text", () => {
+    const before = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "plans", "golden", "schemas-wave1.json"), "utf8")) as Record<string, unknown>;
+    expect(Object.keys(before)).not.toContain("rubric");
+    for (const [name, schema] of Object.entries(before)) expect(JSON.stringify(SCHEMAS[name as SchemaName]), name).toBe(JSON.stringify(schema));
+    expect(Object.keys(SCHEMAS)).toEqual([...Object.keys(before), "rubric"]);
+  });
+
+  it("the rubric answer needs the basis of every judgement, a whole number for each check, and only the three results", () => {
+    const answer = (result: object) => ({ verdict: "changes", results: [result], seen: [], notes: [] });
+    const good = { number: 1, check: "c", result: "pass", evidence: "e", basis: "text" };
+    expect(validateOutput(SCHEMAS.rubric, answer(good)).ok).toBe(true);
+    const { basis: _basis, ...noBasis } = good;
+    expect(validateOutput(SCHEMAS.rubric, answer(noBasis))).toEqual({ ok: false, errors: "/results/0 must have required property 'basis'" });
+    expect(validateOutput(SCHEMAS.rubric, answer({ ...good, basis: "guess" })).ok).toBe(false);
+    expect(validateOutput(SCHEMAS.rubric, answer({ ...good, number: 1.5 })).ok).toBe(false);
+    expect(validateOutput(SCHEMAS.rubric, answer({ ...good, number: "1" })).ok).toBe(false);
+    expect(validateOutput(SCHEMAS.rubric, answer({ ...good, result: "maybe" })).ok).toBe(false);
+    expect(validateOutput(SCHEMAS.rubric, answer({ ...good, result: "cannot_judge", basis: "picture" })).ok).toBe(true);
+    expect(validateOutput(SCHEMAS.rubric, { ...answer(good), notes: [{ severity: "huge", file: null, description: "x" }] }).ok).toBe(false);
   });
 
   it("allows a null testDispute and null finding fields", () => {

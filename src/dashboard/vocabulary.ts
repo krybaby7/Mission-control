@@ -4,6 +4,7 @@
 // The detail modules (timeline, allowance, debrief and the wait text) keep their wording in vocabulary-details.ts, which
 // is re-exported here, so there is still one vocabulary.
 import { DATE_FORM_AFTER_MS, MAX_TIME_MS } from "./constants.js";
+import type { LookWhy } from "./modes.js";
 import type {
   FeatureStateId,
   Lamp,
@@ -184,6 +185,8 @@ export interface MissionSentenceFacts {
   leftOut: number;
   /** The checkpoint of a mission saved as stopped on one (pausedWhy checkpoint); null otherwise. */
   checkpoint?: CheckpointWords | null;
+  /** True only for a mission that has a feature checked by a second AI: "built and checked" would claim tests for it, so it says "built" (docs/modes-spec.md, 11.5). */
+  modes?: boolean;
 }
 
 /** What the words about a checkpoint need to know (the dashboard's CheckpointFacts fits). */
@@ -246,11 +249,12 @@ export function missionSentence(x: MissionSentenceFacts): string {
           return "Paused. It continues on the next run.";
       }
     case "done":
+      if (x.modes === true) return x.n === 1 ? "The feature is built." : `All ${x.n} features are built.`;
       return x.n === 1 ? "The feature is built and checked." : `All ${x.n} features are built and checked.`;
     case "partly_done": {
       if (x.n === 0) return "Nothing was built.";
       if (x.d === x.n) return "Every feature is built, but the final check left something open.";
-      const parts = [`${x.d} of ${x.n} features are built and checked.`];
+      const parts = [x.modes === true ? `${x.d} of ${x.n} features are built.` : `${x.d} of ${x.n} features are built and checked.`];
       if (x.stuck > 0) parts.push(`${x.stuck} ${x.stuck === 1 ? "feature is" : "features are"} stuck.`);
       if (x.leftOut > 0) parts.push(`${x.leftOut} ${x.leftOut === 1 ? "feature was" : "features were"} left out.`);
       return parts.join(" ");
@@ -335,6 +339,8 @@ export function agentRunText(kind: AgentLabelKind | "other", title: string | nul
 }
 
 export const NOW_FINAL_TESTS = "Running the final tests";
+/** The same step of a mission that has features checked by a second AI and none checked by tests. */
+export const NOW_FINAL_CHECKS = "Running the final checks";
 export const NOW_REPORT = "Writing the report";
 export const NOW_NEXT_STEP = "Getting the next step ready";
 export function nowChecks(title: string): string {
@@ -493,6 +499,8 @@ export const CARD_TEXT = {
   stuckTitle: (title: string) => `${quoted(title)} is stuck`,
   checksTitle: (title: string) => `${quoted(title)}: the project's own checks were already failing`,
   checksHappened: "The project's own checks were already failing before this mission started, so the new work was checked by its own new tests only.",
+  // The same card for a mission that has features checked by a second AI and none checked by tests (docs/modes-spec.md, 10.3).
+  checksHappenedByReading: "The project's own checks were already failing before this mission started, so they could not be used to judge the new work.",
   checksIfNothing: "Nothing changes. Someone may want to look at the older failures.",
   loginTitle: "One AI needs a new login",
   loginIfNothing:
@@ -500,6 +508,16 @@ export const CARD_TEXT = {
   checkpointTitle: (title: string, kind: CheckpointWords["kind"], featureTitle: string | null) =>
     `${quoted(title)}: please check ${kind === "feature" ? `${checkpointSubject(kind, featureTitle)} before it is added` : checkpointSubject(kind, featureTitle)}`,
   checkpointHappened: "The team stopped here because you asked to look at it first.",
+  /**
+   * A stop at a feature checked by a second AI that the owner did not ask for with `--checkpoint feature` (docs/modes-spec.md, 11.3).
+   * "You asked to look at it first" would not be true of these, so the card says why the team stopped.
+   */
+  checkpointHappenedLook: {
+    owner: "The team stopped here because this feature is marked for your look, and you look at it first.",
+    not_judged: "The team stopped here because the second AI could not judge every check of this feature, so you look at it first.",
+    unfinished: "The team stopped here because the second AI's check of this feature did not finish, so you look at it first.",
+    sent_back: "The team stopped here again because you sent this feature back, so you look at the changed work.",
+  } satisfies Record<LookWhy, string>,
   // A plan the leader wrote stops by default, so "because you asked" would not be true (docs/plans-spec.md, 9).
   checkpointHappenedLeaderPlan: "The team stopped here because the leader wrote this plan, and you look at it first.",
   checkpointIfNothing: "Nothing happens. This mission waits for you. Other work carries on.",
@@ -510,21 +528,27 @@ export const CARD_TEXT = {
   decisionIfOther: "Nothing happens. The question stays open.",
 } as const;
 
+/** The first part of the line under the card of a feature checked by a second AI that the owner is asked to look at (docs/modes-spec.md, 11.3). */
+const OWNER_LOOK_SUMMARY = "The second AI's answer on each check is in the report, and so are the pictures when there are any.";
+
 /**
  * The line under a checkpoint card's title. `branch` is the name the work is saved under (feature and final). `sentBack` is how
  * many times the owner has sent this check back: from the cap on, the card says what the next send-back does (checkpoints spec, 5.4).
  * `leaderPlan` is true for the plan stop of a mission whose plan the leader wrote: the card holds twelve lines, so it points at the
- * leader and at the owner's own command for all of it (docs/plans-spec.md, 9).
+ * leader and at the owner's own command for all of it (docs/plans-spec.md, 9). `ownerLook` is true for a stop at a feature checked by a
+ * second AI that the owner did not ask for: the line then says where the second AI's answers and the pictures are.
  */
-export function checkpointSummary(kind: CheckpointWords["kind"], branch: string | null, sentBack: number, cap: number, leaderPlan = false): string {
+export function checkpointSummary(kind: CheckpointWords["kind"], branch: string | null, sentBack: number, cap: number, leaderPlan = false, ownerLook = false): string {
   const base =
     kind === "plan"
       ? leaderPlan
         ? "Nothing is built yet. Ask the leader to show you every check of the plan, word for word. The owner can also print all of it at the PC."
         : "Nothing is built yet. The report has the whole plan."
-      : branch === null
-        ? "The report says how to open it."
-        : `The work is saved under the name ${branch}. The report says how to open it.`;
+      : ownerLook
+        ? `${OWNER_LOOK_SUMMARY}${branch === null ? "" : ` The work is saved under the name ${branch}.`}`
+        : branch === null
+          ? "The report says how to open it."
+          : `The work is saved under the name ${branch}. The report says how to open it.`;
   if (sentBack < cap) return base;
   // The engine's own words for the three end states (src/checkpoint.ts, endState), so the card, the report and `mc send-back` agree.
   const end = kind === "plan" ? "nothing will be built" : kind === "feature" ? "this feature is set aside and the rest carries on" : "the finished result is kept as it is";

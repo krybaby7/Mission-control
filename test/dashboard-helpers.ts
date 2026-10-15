@@ -368,7 +368,7 @@ const timelineItem = obj({
 });
 const tick = obj({ id: lit(TICK_IDS), label: text, state: lit(TICK_STATES), why: text, caveat: nullable(text) });
 const verdict = obj({ id: lit(VERDICT_IDS), word: text, sentence: text });
-const debriefFeature = obj({ featureId: text, title: text, note: nullable(said), attempts: count });
+const debriefFeature = obj({ featureId: text, title: text, note: nullable(said), attempts: count }, { checkedBy: text });
 const missionDebrief = obj({
   missionId: text,
   title: text,

@@ -311,6 +311,16 @@ describe("mc new / feature", () => {
     expect(out).toContain(`Mission id: ${m.id}`);
   });
 
+  it("puts curly quote marks around the title in what it prints", async () => {
+    expect(await mc("new", "A habit tracker with streaks", "--name", "Habit tracker")).toBe(0);
+    expect(out).toContain("Queued your new app “Habit tracker”.\n");
+    expect(out).not.toContain('"Habit tracker"');
+    const repo = await makeRepo();
+    expect(await mc("feature", repo, "Add a dark mode")).toBe(0);
+    expect(out).toContain(`Queued a change to ${repo}: “Add a dark mode” (starting from branch main).`);
+    expect(out).not.toContain('"Add a dark mode"');
+  });
+
   it("takes an idea or a request typed without quotes as one description", async () => {
     expect(await mc("new", "A", "habit", "tracker", "with", "streaks", "--name", "Habits")).toBe(0);
     expect(onlyMission()).toMatchObject({ request: "A habit tracker with streaks", title: "Habits" });
@@ -545,6 +555,19 @@ describe("mc status / stop / report / logs", () => {
     expect(await mc("report", b.id)).toBe(0);
     expect(out).toContain("# Notes app");
 
+    // The run summary is found under either file name: run-<date>.md, as a run writes it now, or night-<date>.md, as earlier runs did.
+    const runSummary = join(home, "reports", "run-2026-10-11.md");
+    writeFileSync(runSummary, readFileSync(summary, "utf8").replace("2026-10-10", "2026-10-11"));
+    const newer = new Date(Date.now() + 1000);
+    utimesSync(runSummary, newer, newer);
+    expect(await mc("report")).toBe(0);
+    expect(out).toContain(`Run summary: ${runSummary}`);
+    const older = new Date(Date.now() - 5000);
+    utimesSync(runSummary, older, older);
+    expect(await mc("report")).toBe(0);
+    expect(out).toContain(`Run summary: ${summary}`);
+    rmSync(runSummary);
+
     // A mission report written after that night (or a night with one mission) is shown itself.
     const halfHourAgo = new Date(Date.now() - 30 * 60_000);
     utimesSync(summary, halfHourAgo, halfHourAgo);
@@ -708,7 +731,7 @@ describe("mc run", () => {
     vi.spyOn(process.stderr, "write").mockImplementation(() => true); // the night's own log lines
     expect(await mc("run")).toBe(0);
     expect(out).toContain("Nothing was queued");
-    expect(out).toMatch(/Run summary: .*reports\/night-\d{4}-\d{2}-\d{2}\.md/);
+    expect(out).toMatch(/Run summary: .*reports\/run-\d{4}-\d{2}-\d{2}\.md/);
   });
 
   it("does not say nothing was queued when a failed mission waits, and gives the command that continues it", async () => {

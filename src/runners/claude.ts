@@ -1,7 +1,7 @@
 // Claude Code runner: drives `claude -p` with stream-json output and maps its event stream to a RunResult.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { detectLimitText, limitKindFromClaudeType } from "../limits.js";
 import { validateOutput } from "../schemas.js";
 import type { AgentJob, AgentRunner, LimitInfo, Logger, RunEvent, RunOptions, RunResult, Usage } from "../types.js";
@@ -25,6 +25,9 @@ export interface ClaudeRunnerOptions {
 }
 
 const READ_ONLY_TOOLS = "Read,Grep,Glob";
+/** `RunResult.opened` keeps at most this many paths, each cut at this many characters. */
+const OPENED_MAX_PATHS = 200;
+const OPENED_MAX_CHARS = 300;
 /**
  * Everything a write job may use, as an allowlist: files, shell, web, subagents, task lists and skills (names this
  * CLI lacks are ignored). Anything else stays off, including tools that reach past the run and the worktree:
@@ -116,6 +119,8 @@ export class ClaudeRunner implements AgentRunner {
     ];
     if (job.outputSchema) args.push("--json-schema", JSON.stringify(job.outputSchema));
     if (job.resumeSessionId) args.push("--resume", job.resumeSessionId);
+    // Folders a read-only run may open files from, one flag each. Only absolute paths: a relative one could be read as a flag.
+    for (const dir of job.readDirs ?? []) if (typeof dir === "string" && isAbsolute(dir)) args.push("--add-dir", dir);
     args.push("--permission-mode", job.access === "workspace-write" ? this.writeMode : "dontAsk");
     args.push("--tools", toolsFor(job));
     args.push("--setting-sources", "", "--strict-mcp-config");
@@ -255,6 +260,8 @@ class ClaudeStream {
   stopReason?: string;
   /** The last event was the result: nothing has happened since (a new turn would start with assistant events). */
   idleAfterResult = false;
+  /** The `file_path` of each `Read` call, first seen first (see `RunResult.opened`). */
+  readonly opened: string[] = [];
 
   constructor(private readonly emit: (event: RunEvent) => void) {}
 
@@ -308,9 +315,19 @@ class ClaudeStream {
         this.lastText = text;
         this.emit({ type: "progress", text: text.slice(0, PROGRESS_CHARS) });
       } else if (block?.type === "tool_use") {
+        this.noteRead(block);
         this.emit({ type: "progress", text: toolSummary(block) });
       }
     }
+  }
+
+  /** Keeps the path of a `Read` call (and nothing from any other tool): which files the run opened, for the checks of what it says it saw. */
+  private noteRead(block: Json): void {
+    if (block.name !== "Read" || this.opened.length >= OPENED_MAX_PATHS) return;
+    const path = asString(asRecord(block.input)?.file_path);
+    if (path === undefined || path === "") return;
+    const kept = path.slice(0, OPENED_MAX_CHARS);
+    if (!this.opened.includes(kept)) this.opened.push(kept);
   }
 
   private onRateLimit(event: Json): void {
@@ -452,6 +469,7 @@ function buildResult(job: AgentJob, stream: ClaudeStream, proc: SpawnResult, now
     usage: stream.result?.usage ?? emptyUsage(),
     durationMs: proc.durationMs,
     exitCode: proc.exitCode,
+    ...(stream.opened.length > 0 && { opened: [...stream.opened] }),
   };
 }
 

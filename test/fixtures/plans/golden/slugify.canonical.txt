@@ -1,0 +1,59 @@
+mc-plan 1
+name: Slugify
+request: Add a slugify(text) function to word-tools. It turns a title into a URL-friendly slug. Rules: lower-case everything; letters with accents lose the accent (e-acute becomes e); every run of characters that are not letters or digits becomes a single hyphen; there is never a hyphen at the start or end; an empty or whitespace-only string returns an empty string; a non-string input throws a TypeError with a clear message. Export it from src/index.js, add automated tests that cover each rule, and add a short section to README.md.
+folder: word-tools
+base: main
+app-name: word-tools: slugify
+summary: word-tools is a small library of text helpers for programmers. This change adds slugify, which turns a title such as "Café Déjà Vu!" into a web-address-friendly form such as "cafe-deja-vu". It comes with automated tests for every rule and a short explanation in the README.
+assumption: slugify lives in its own file, src/slugify.js, with its tests in src/slugify.test.js, the same layout capitalize uses. It is re-exported from src/index.js next to capitalize.
+assumption: The error message for non-string input is exactly "slugify expects a string", matching the existing "capitalize expects a string" style.
+assumption: Strings count as input; anything else (numbers, null, undefined, arrays, objects) throws. A String object (new String(...)) is not a string and throws too, matching capitalize.
+assumption: Accents are removed by splitting letters into base letter plus accent marks (Unicode NFD) and dropping the marks. Letters that don't split this way, such as ß, æ or ø, are kept as they are rather than turned into hyphens.
+assumption: Letters or digits" means any Unicode letter or digit, so non-Latin text like Cyrillic or Greek is kept (lower-cased) rather than erased. Underscores and all punctuation count as separators.
+assumption: A string made only of punctuation or symbols (for example "!!!") returns an empty string, since the rules leave nothing behind once the start and end hyphens are trimmed.
+assumption: Nothing else is added: no maximum length, no custom separator option, no transliteration of non-Latin scripts to Latin letters, and no new dependencies.
+contract: This is a library with no UI or HTTP endpoints. The contract is the module API, the files and the README.
+contract: Files:
+contract: src/slugify.js: export function slugify(text) with a one-line JSDoc comment in the style of src/capitalize.js. No dependencies; use only built-in String methods and regular expressions (for example normalize("NFD"), /\pM/gu, /[^\pL\pN]+/gu).
+contract: src/index.js: keep export capitalize from "./capitalize.js"; and add export slugify from "./slugify.js";.
+contract: src/slugify.test.js: uses import test from "node:test", import assert from "node:assert/strict", and imports slugify from "./index.js", matching src/capitalize.test.js.
+contract: Tests run with npm test (node --test), which picks up src/**/*.test.js.
+contract: Behaviour of slugify(text):
+contract: If typeof text !== "string", throw new TypeError("slugify expects a string"). Tests check this with assert.throws(fn, name: "TypeError", message: "slugify expects a string" ).
+contract: Lower-case the text, decompose it with NFD, and remove all combining marks (\pM).
+contract: Replace every run of one or more characters that are not Unicode letters (\pL) or digits (\pN) with a single "-".
+contract: Strip any leading and trailing "-".
+contract: Return the result. Empty or whitespace-only input returns "".
+contract: Reference examples (input → output):
+contract: Hello World" → "hello-world"; "HELLO" → "hello"; "Café Déjà Vu" → "cafe-deja-vu"; "Café Déjà Vu!" → "cafe-deja-vu"; "Crème Brûlée" → "creme-brulee"; "Café" → "cafe"; "Hello, World!!" → "hello-world"; "a -- b" → "a-b"; "hello_world" → "hello-world"; "Top 10 Tips" → "top-10-tips"
+contract: README.md: add a section headed exactly ## slugify(text) between the ## capitalize(word) section and ## Tests. In one or two sentences in the existing style, describe the rules, give the example slugify("Café Déjà Vu!") returns "cafe-deja-vu", and say that non-string input throws a TypeError.
+feature: slugify-function
+title: slugify(text) function, exported from src/index.js, with tests
+story: As a developer using word-tools, I can call slugify(title) to get a lower-case, accent-free, hyphen-separated slug I can put in a URL.
+check: import slugify from "./index.js" (src/index.js) yields a function, and the existing capitalize export still works
+check: slugify("Hello World") returns "hello-world"
+check: slugify("HELLO") returns "hello"
+check: slugify("Café Déjà Vu") returns "cafe-deja-vu"
+check: slugify("Crème Brûlée") returns "creme-brulee"
+check: slugify("Café") (e followed by a combining acute accent) returns "cafe"
+check: slugify("Hello, World!!") returns "hello-world"
+check: slugify("a -- b") returns "a-b"
+check: slugify("hello_world") returns "hello-world"
+check: slugify("Top 10 Tips") returns "top-10-tips"
+check: slugify(" --Hello World-- ") returns "hello-world" (no leading or trailing hyphen)
+check: slugify("!!!") returns ""
+check: slugify("") returns ""
+check: slugify(" \t\n ") returns ""
+check: slugify("Привет мир") returns "привет-мир" (non-Latin letters are kept as letters)
+check: slugify(42), slugify(null), slugify(undefined) and slugify(["a"]) each throw a TypeError whose message is exactly "slugify expects a string"
+check: npm test passes, including the existing capitalize tests
+feature: slugify-readme
+title: README section for slugify
+story: As a developer reading the README, I can see what slugify does and an example of it.
+kind: mechanical
+needs: slugify-function
+check: README.md contains a line that is exactly "## slugify(text)"
+check: The "## slugify(text)" heading appears after the "## capitalize(word)" section and before the "## Tests" heading
+check: The slugify section contains the text slugify("Café Déjà Vu!") and the text "cafe-deja-vu"
+check: The slugify section mentions that a non-string input throws a TypeError
+check: The existing "# word-tools", "## capitalize(word)" and "## Tests" headings are still present

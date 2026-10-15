@@ -51,6 +51,11 @@ import {
 export interface DashboardSettings {
   /** config.ladders.<kind>.length */
   ladders: { standard: number; mechanical: number };
+  /**
+   * How many diagnosis steps each ladder has (config.ladders.<kind> entries with action "diagnose"). A feature checked by a second AI skips
+   * them (docs/modes-spec.md, 5.2). Absent in a hand-written settings object: one each, as the built-in ladders have.
+   */
+  diagnoseSteps?: { standard: number; mechanical: number };
   pacing: { maxFiveHourUtilization: number; maxWeeklyUtilization: number };
   /** Unique providers of config.families and config.light. */
   providers: string[];
@@ -79,6 +84,10 @@ export function settingsFromConfig(c: Pick<Config, "ladders" | "pacing" | "famil
   const providers = [...new Set<string>([c.families.claude.provider, c.families.codex.provider, c.light.provider])];
   return {
     ladders: { standard: c.ladders.standard.length, mechanical: c.ladders.mechanical.length },
+    diagnoseSteps: {
+      standard: c.ladders.standard.filter((r) => r.action === "diagnose").length,
+      mechanical: c.ladders.mechanical.filter((r) => r.action === "diagnose").length,
+    },
     pacing: { maxFiveHourUtilization: c.pacing.maxFiveHourUtilization, maxWeeklyUtilization: c.pacing.maxWeeklyUtilization },
     providers,
     source: "saved",

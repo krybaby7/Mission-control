@@ -75,6 +75,7 @@ describe("settings", () => {
     const config = defaultConfig();
     expect(settingsFromConfig(config)).toEqual({
       ladders: { standard: 5, mechanical: 5 },
+      diagnoseSteps: { standard: 1, mechanical: 1 },
       pacing: { maxFiveHourUtilization: 0.97, maxWeeklyUtilization: 0.85 },
       providers: ["claude", "codex"],
       source: "saved",

@@ -37,6 +37,8 @@ Mission Control lets AI agents run commands for as long as a run lasts, without 
 - **Your usage allowance.** Each run uses a lot of your Claude and ChatGPT limits. Mission Control paces itself: by default one run uses at most about a third (35%) of each plan's weekly limit (setting `pacing.maxWeeklySharePerNight`), and it stops rather than run on paid extra usage. But it does use them.
 - **Mission Control itself.** Agents run as the same user as Mission Control, so a misbehaving agent could stop a run early or change Mission Control's settings and records in `~/.mission-control`. Work already saved is kept, and the next run carries on.
 
+**What the AI services can read.** Everything in your apps folder can be read or sent to the AI services (Anthropic and OpenAI) whenever an AI opens a file, and Mission Control also puts file text into what it sends them. An AI that builds can use the internet. For documents, pages and data that matters more than for code: do not put personal data, customer lists, passwords or private papers in your apps folder. If you take a private repository with `mc get`, its files go in front of the AI services as soon as a feature runs. Sending the work to GitHub sends the files you chose, public or private as that repository is. Mission Control's own checks of a document, a page or a table send nothing out. The picture step blocks the page's web requests (tried with a script, a beacon and a WebSocket; not tried with a service worker, DNS lookups or WebRTC), and the pictures themselves go to the second AI when it looks at them. The check for keys and passwords is a net with holes: it knows ten common shapes and looks only at the files of features checked by a second AI. Data for a job must already be in the app's folder, and CSV is the format to use: nothing can be uploaded through the leader. The script sets a memory limit on the container, which should keep a file bomb from filling the machine (read in the script, not run). See [docs/work-modes.md](work-modes.md).
+
 **So, follow these rules:**
 
 1. Never put real passwords, API keys, SSH keys, bank details or personal documents in `~/mc-apps`, and never give them to an agent. To send finished work to GitHub, use `mc publish` (see [Optional: work on a repository on GitHub](#optional-work-on-a-repository-on-github)): it uses your own login on the PC and needs no token in that folder. The one exception is a GitHub token limited to one repository, if you turn on the older way of uploading: see [Optional: upload finished work to GitHub](#optional-upload-finished-work-to-github) first.
@@ -307,7 +309,7 @@ Some work is only right when you look at it yourself: how a page looks, whether 
 
 ### Plans the leader writes
 
-For a small, clear job the leader can write the plan itself instead of leaving it to the team's planner (see [Optional: start the leader](#optional-start-the-leader)). It shows you the plan in the chat, with every check word for word and a short plan code, and asks one question, "Queue this plan and start the team on it?", before anything is queued. The team still writes the tests first, builds, has a different AI review each feature, and checks the finished app. This part has not been tried on a real PC yet.
+For a small, clear job the leader can write the plan itself instead of leaving it to the team's planner (see [Optional: start the leader](#optional-start-the-leader)). It shows you the plan in the chat, with every check word for word and a short plan code, and asks one question, "Queue this plan and start the team on it?", before anything is queued. The team still builds each feature, has it reviewed, and checks the finished app. A feature checked by tests has its tests written first. This part has not been tried on a real PC yet.
 
 - A mission queued this way stops at the plan for your look before anything is built, even though you did not ask for it with `--checkpoint`. You answer it as in the steps above. The leader skips this stop only if you tell it you do not want to look at its plans, it asks one more question ("Skip your look at this plan? ..."), and you say a clear yes.
 - The leader reads the whole plan to you again at the stop. You can also read it yourself, without the leader. In an Ubuntu window, this prints all of it, with the plan code, every check, the choices made for you, and whether the team's plan reviewer or you changed it:
@@ -321,6 +323,17 @@ For a small, clear job the leader can write the plan itself instead of leaving i
 - The plan code is the same in the leader's message, in `mc plan show` and in the report. It always names the plan as the leader wrote it: if it differs from the one the leader quoted when it asked you, what was queued is not the plan you were shown. `mc plan show` also says whether the team's plan reviewer or your note changed the plan since.
 
 What this protects, and what it doesn't. A check is a place where you look, not a lock. The AI team runs as the same Ubuntu user as Mission Control, so a determined one could write an approval itself. That could only skip your look: every test and review still runs, and nothing that fails is added. Mission Control keeps a record of each answer, distrusts a waiting check that shows an answer with no record, and sends a notice to your iPad each time an answer is recorded, so one you didn't give shows up there.
+
+### Documents, pages and data
+
+For work that is not code (a guide, a page, a table), the leader can write a plan that says how each feature is checked. Nothing here has been tried on a real PC, and no real AI has done such a job yet. [docs/work-modes.md](work-modes.md) is the full guide.
+
+- For each feature the leader tells you one of three lines: "Checked by tests.", "Checked by a second AI against this list.", or "Checked by a second AI against this list, and then by you." In the last case the team stops before it adds the feature, so that you can look at it. The plan file cannot turn that stop off. The leader asks "Skip your look at these features? The team will add them without stopping for you. Yes or no?" before it does, and only the command `mc plan queue - --no-owner-checkpoint` can.
+- If the second AI cannot judge one of the checks, the team stops for your look at that feature too.
+- At the stop, `mc plan show <mission>` lists what the second AI found, check by check. For a web page the team takes pictures at phone width and at desktop width. In Windows, run `mc copy-reports` in the Ubuntu window. It prints the address of the `mc-reports` folder, and the pictures are in `missions\<mission>\screenshots` inside it. The report lists them too. The dashboard shows no picture.
+- The report starts with a line `Checked:` that says how many features were checked in each way, and the draft pull request on GitHub copies it. Mission Control says "approved by you" for your answer, because that is what it records. It cannot know that you opened a file.
+- Before a job that reads a file you named, the leader asks "Does this file hold personal data, customer details or private papers? Yes or no?". If you open a data file that a script wrote, open it in a text editor first, and if Excel asks, do not press "Enable Editing" or "Enable Content" until you have read the cells (this was not tried on a PC).
+- A plan for such work needs an app folder, or a new app to put the files in. A folder that holds only documents can stop at the start because the team cannot work out how to check the project. Pages that need a running server get no pictures. A job that needs facts from the internet, with sources, is not covered.
 
 ## Step 10: When the run has finished
 
@@ -338,7 +351,7 @@ What this protects, and what it doesn't. A check is a place where you look, not 
    mc copy-reports
    ```
 
-   It prints a folder address like `\\wsl.localhost\Ubuntu\home\adam\mc-reports`. Paste it into the address bar of **File Explorer**. Open `reports\latest.md` with Notepad (the run summaries are the `reports\night-<date>.md` files; only their file names keep an older word). Notepad shows the report's pictures as lines of text: the screenshots themselves are picture files in `missions\<mission>\screenshots`.
+   It prints a folder address like `\\wsl.localhost\Ubuntu\home\adam\mc-reports`. Paste it into the address bar of **File Explorer**. Open `reports\latest.md` with Notepad (the run summaries are the `reports\run-<date>.md` files; summaries from earlier runs are named `night-<date>.md`). Notepad shows the report's pictures as lines of text: the screenshots themselves are picture files in `missions\<mission>\screenshots`.
 4. Try the app:
 
    ```

@@ -1,0 +1,199 @@
+{
+  "id": "2026-10-11-setup-guide",
+  "kind": "feature",
+  "title": "Habit tracker",
+  "request": "Write a short setup guide for the habit tracker.",
+  "repoPath": "/fixture/mc-apps/habit-tracker",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-setup-guide",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "running",
+  "stage": "features",
+  "createdAt": "2026-10-11T09:58:00.000Z",
+  "updatedAt": "2026-10-11T09:58:24.000Z",
+  "features": [
+    {
+      "id": "setup-guide",
+      "title": "Setup guide for new users",
+      "story": "As a new user I can follow a short guide to install the app and add my first habit.",
+      "acceptance": [
+        "The guide is a list of numbered steps, and each step is one action.",
+        "The guide says how to start the app and what the reader should see when it works.",
+        "The guide explains how to add a first habit.",
+        "The guide does not name any file or setting that the project does not have."
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "reviewing",
+      "rung": 1,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "claude",
+          "model": "model-x",
+          "effort": "medium",
+          "outcome": "fail",
+          "summary": "Mission Control's own checks found a problem",
+          "at": "2026-10-11T09:58:09.000Z"
+        },
+        {
+          "rung": 1,
+          "action": "build",
+          "provider": "claude",
+          "model": "model-x",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "wrote docs/setup.md",
+          "at": "2026-10-11T09:58:12.000Z"
+        },
+        {
+          "rung": 1,
+          "action": "fix",
+          "provider": "claude",
+          "model": "model-x",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "fixed check 2",
+          "at": "2026-10-11T09:58:22.000Z"
+        }
+      ],
+      "frozenTests": [],
+      "reviewRounds": 1,
+      "openFindings": [],
+      "mode": "review",
+      "expect": {
+        "headings": [
+          "Install",
+          "Add your first habit"
+        ],
+        "mentions": [
+          "Habit tracker"
+        ],
+        "words": [
+          200,
+          500
+        ]
+      },
+      "checked": {
+        "round": 1,
+        "reviewer": "claude",
+        "results": [
+          {
+            "n": 1,
+            "result": "pass",
+            "evidence": "Quote from docs/setup.md: the steps are numbered 1 to 5.",
+            "basis": "text"
+          },
+          {
+            "n": 2,
+            "result": "fail",
+            "evidence": "The guide never says what the reader should see when it works.",
+            "basis": "text"
+          },
+          {
+            "n": 3,
+            "result": "pass",
+            "evidence": "Step 4 explains how to add a first habit.",
+            "basis": "text"
+          },
+          {
+            "n": 4,
+            "result": "pass",
+            "evidence": "Every file named in the guide is in the project.",
+            "basis": "text"
+          }
+        ],
+        "unjudged": 0,
+        "scripted": {
+          "problems": [],
+          "facts": []
+        },
+        "pictures": {
+          "taken": 0
+        }
+      }
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 9,
+  "notes": [],
+  "spec": {
+    "appName": "Habit tracker",
+    "summary": "Adds a short setup guide for new users.",
+    "features": [
+      {
+        "id": "setup-guide",
+        "title": "Setup guide for new users",
+        "story": "As a new user I can follow a short guide to install the app and add my first habit.",
+        "acceptance": [
+          "The guide is a list of numbered steps, and each step is one action.",
+          "The guide says how to start the app and what the reader should see when it works.",
+          "The guide explains how to add a first habit.",
+          "The guide does not name any file or setting that the project does not have."
+        ],
+        "kind": "standard",
+        "deps": [],
+        "mode": "review",
+        "expect": {
+          "headings": [
+            "Install",
+            "Add your first habit"
+          ],
+          "mentions": [
+            "Habit tracker"
+          ],
+          "words": [
+            200,
+            500
+          ]
+        }
+      }
+    ],
+    "assumptions": [],
+    "uiContract": ""
+  },
+  "plan": {
+    "spec": {
+      "appName": "Habit tracker",
+      "summary": "Adds a short setup guide for new users.",
+      "features": [
+        {
+          "id": "setup-guide",
+          "title": "Setup guide for new users",
+          "story": "As a new user I can follow a short guide to install the app and add my first habit.",
+          "acceptance": [
+            "The guide is a list of numbered steps, and each step is one action.",
+            "The guide says how to start the app and what the reader should see when it works.",
+            "The guide explains how to add a first habit.",
+            "The guide does not name any file or setting that the project does not have."
+          ],
+          "kind": "standard",
+          "deps": [],
+          "mode": "review",
+          "expect": {
+            "headings": [
+              "Install",
+              "Add your first habit"
+            ],
+            "mentions": [
+              "Habit tracker"
+            ],
+            "words": [
+              200,
+              500
+            ]
+          }
+        }
+      ],
+      "assumptions": [],
+      "uiContract": ""
+    },
+    "sha256": "5796d0335796d0335796d0335796d0335796d0335796d0335796d0335796d033",
+    "at": "2026-10-11T09:58:02.000Z"
+  }
+}

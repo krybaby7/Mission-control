@@ -1,0 +1,220 @@
+{
+  "id": "2026-10-11-landing-page",
+  "kind": "feature",
+  "title": "Landing page",
+  "request": "Add a one-page landing page for the habit tracker.",
+  "repoPath": "/fixture/mc-apps/habit-tracker",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-11-landing-page",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "stopped",
+  "stage": "features",
+  "createdAt": "2026-10-11T09:58:00.000Z",
+  "updatedAt": "2026-10-11T09:58:15.000Z",
+  "features": [
+    {
+      "id": "landing-page",
+      "title": "One-page landing page",
+      "story": "As a visitor I can see in a few seconds what the app does and how to start.",
+      "acceptance": [
+        "The page has a headline that says what the app does, and a button labelled Get started.",
+        "The page lists three benefits, each with a short heading and one sentence.",
+        "On a phone the page is one column, the text is easy to read and nothing runs off the screen.",
+        "On a desktop the three benefits sit side by side."
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "reviewing",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "claude",
+          "model": "model-x",
+          "effort": "medium",
+          "outcome": "pass",
+          "summary": "wrote landing.html",
+          "at": "2026-10-11T09:58:09.000Z"
+        }
+      ],
+      "frozenTests": [],
+      "reviewRounds": 1,
+      "openFindings": [],
+      "mode": "owner",
+      "effort": "deep",
+      "expect": {
+        "mentions": [
+          "Get started"
+        ]
+      },
+      "checked": {
+        "round": 1,
+        "reviewer": "claude",
+        "results": [
+          {
+            "n": 1,
+            "result": "pass",
+            "evidence": "Quote from landing.html: Get started.",
+            "basis": "text"
+          },
+          {
+            "n": 2,
+            "result": "pass",
+            "evidence": "Three benefits, each with a heading.",
+            "basis": "text"
+          },
+          {
+            "n": 3,
+            "result": "pass",
+            "evidence": "The phone picture shows one column.",
+            "basis": "picture"
+          },
+          {
+            "n": 4,
+            "result": "cannot_judge",
+            "evidence": "No picture was opened by the second AI.",
+            "basis": "picture"
+          }
+        ],
+        "unjudged": 1,
+        "scripted": {
+          "problems": [],
+          "facts": []
+        },
+        "pictures": {
+          "taken": 2
+        }
+      }
+    },
+    {
+      "id": "contact-page",
+      "title": "Contact page",
+      "story": "As a visitor I can find how to reach the team.",
+      "acceptance": [
+        "The contact page shows an email address."
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "pending",
+      "rung": 0,
+      "attempts": [],
+      "frozenTests": [],
+      "reviewRounds": 0,
+      "openFindings": []
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 9,
+  "notes": [],
+  "spec": {
+    "appName": "Landing page",
+    "summary": "Adds a single landing page.",
+    "features": [
+      {
+        "id": "landing-page",
+        "title": "One-page landing page",
+        "story": "As a visitor I can see in a few seconds what the app does and how to start.",
+        "acceptance": [
+          "The page has a headline that says what the app does, and a button labelled Get started.",
+          "The page lists three benefits, each with a short heading and one sentence.",
+          "On a phone the page is one column, the text is easy to read and nothing runs off the screen.",
+          "On a desktop the three benefits sit side by side."
+        ],
+        "kind": "standard",
+        "deps": [],
+        "mode": "owner",
+        "effort": "deep",
+        "expect": {
+          "mentions": [
+            "Get started"
+          ]
+        }
+      },
+      {
+        "id": "contact-page",
+        "title": "Contact page",
+        "story": "As a visitor I can find how to reach the team.",
+        "acceptance": [
+          "The contact page shows an email address."
+        ],
+        "kind": "standard",
+        "deps": []
+      }
+    ],
+    "assumptions": [],
+    "uiContract": ""
+  },
+  "plan": {
+    "spec": {
+      "appName": "Habit tracker",
+      "summary": "Adds a single landing page.",
+      "features": [
+        {
+          "id": "landing-page",
+          "title": "One-page landing page",
+          "story": "As a visitor I can see in a few seconds what the app does and how to start.",
+          "acceptance": [
+            "The page has a headline that says what the app does, and a button labelled Get started.",
+            "The page lists three benefits, each with a short heading and one sentence.",
+            "On a phone the page is one column, the text is easy to read and nothing runs off the screen.",
+            "On a desktop the three benefits sit side by side."
+          ],
+          "kind": "standard",
+          "deps": [],
+          "mode": "owner",
+          "effort": "deep",
+          "expect": {
+            "mentions": [
+              "Get started"
+            ]
+          }
+        },
+        {
+          "id": "contact-page",
+          "title": "Contact page",
+          "story": "As a visitor I can find how to reach the team.",
+          "acceptance": [
+            "The contact page shows an email address."
+          ],
+          "kind": "standard",
+          "deps": []
+        }
+      ],
+      "assumptions": [],
+      "uiContract": ""
+    },
+    "sha256": "aceddd4daceddd4daceddd4daceddd4daceddd4daceddd4daceddd4daceddd4d",
+    "at": "2026-10-11T09:58:02.000Z"
+  },
+  "checkpoint": {
+    "id": "feature:landing-page#1",
+    "scope": "feature:landing-page",
+    "kind": "feature",
+    "featureId": "landing-page",
+    "round": 1,
+    "state": "pending",
+    "parkedAt": "2026-10-11T09:58:15.000Z",
+    "notifiedAt": "2026-10-11T09:58:15.200Z",
+    "look": {
+      "headline": "Check “One-page landing page” before it is added",
+      "lines": [
+        "“One-page landing page” is built. No tests were written for it. A second AI checked it against your list.",
+        "The second AI's answers: 3 passed, 0 failed, 1 could not be judged.",
+        "Check 4 (not judged): On a desktop the three benefits sit side by side. No picture was opened by the second AI.",
+        "Mission Control's own checks passed.",
+        "Pictures of the page as it first loads: 2 taken, at phone width and desktop width.",
+        "You are asked because the plan marks this feature for your look."
+      ],
+      "branch": "mc/2026-10-11-landing-page--landing-page",
+      "commit": "3f2a91c",
+      "files": [
+        "landing.html"
+      ]
+    }
+  }
+}

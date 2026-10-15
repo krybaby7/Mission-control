@@ -55,6 +55,11 @@ export interface AgentJob {
   resumeSessionId?: string;
   /** If set, the raw provider stdout stream (NDJSON) is appended here. */
   logFile?: string;
+  /**
+   * Extra folders a read-only run may open files from (Claude: one `--add-dir` each). It lets the second AI open pictures
+   * that live outside its working folder. Absent = none. Runners that cannot use it (Codex, the mock) ignore it.
+   */
+  readDirs?: string[];
 }
 
 export interface Usage {
@@ -126,6 +131,11 @@ export interface RunResult {
   error?: string;
   durationMs: number;
   exitCode: number | null;
+  /**
+   * Claude runs: the `file_path` of each `Read` tool call the run made, at most 200 paths of at most 300 characters each.
+   * Absent when the run opened nothing or the runner cannot tell (Codex, the mock), so an old result is unchanged.
+   */
+  opened?: string[];
 }
 
 export interface RunOptions {
@@ -283,6 +293,29 @@ export interface SpecFeature {
   kind: "standard" | "mechanical";
   /** ids of features that must be done first. */
   deps: string[];
+  /**
+   * How the feature is checked when tests do not do it. Absent = by tests, written first (today's way). Only "review"
+   * and "owner" are ever stored; a plan that says `mode: tests` leaves the field out. "owner" also stops for the owner's look.
+   */
+  mode?: "review" | "owner";
+  /** How hard the team thinks about the feature. Absent = standard. Only "light" and "deep" are ever stored. */
+  effort?: "light" | "deep";
+  /** Checks that Mission Control's own script runs on the files of a "review" or "owner" feature. Never present on a tests feature. */
+  expect?: FeatureExpect;
+}
+
+/** The script-checked parts of a plan feature (docs/modes-spec.md 4.1). Plain words and numbers only: nothing here is a path or a command. */
+export interface FeatureExpect {
+  /** Headings the text must have, 0 to 12, each 1 to 80 characters. */
+  headings?: string[];
+  /** Words or names the visible text must contain, written exactly, 0 to 12, each 1 to 80 characters. */
+  mentions?: string[];
+  /** How many words the feature adds, [first, second]: 1 <= first <= second <= 99999. */
+  words?: [number, number];
+  /** The column names of a table, in order, 1 to 30, all different, each 1 to 40 characters. */
+  columns?: string[];
+  /** How many data rows a table has, [first, second]: 0 <= first <= second <= 999999. */
+  rows?: [number, number];
 }
 
 export interface Spec {
@@ -347,6 +380,45 @@ export interface Feature extends SpecFeature {
   testsCommit?: string;
   /** Last commit in the unit branch that passed verification (fallback if a review fix breaks things). */
   passingCommit?: string;
+  /** Only a "review" or "owner" feature: what the second AI and Mission Control's own script found at the last check. Saved after every answer of the second AI. */
+  checked?: FeatureChecked;
+}
+
+/** One verdict of the second AI on one written check. "cannot_judge" is never a pass. */
+export type CheckResult = "pass" | "fail" | "cannot_judge";
+
+/** What a verdict rests on: the words of the files, or a picture the second AI opened. */
+export type CheckBasis = "text" | "picture";
+
+/** Why no picture was taken (docs/modes-spec.md 7.3), as a short code. The sentence for each is written by whoever shows it. */
+export type PictureWhy = "no_tool" | "no_browser" | "start_failed" | "too_slow" | "reviewer" | "not_plain_file";
+
+/** The second AI's verdict on one check, as stored on the feature (the check's own text is `acceptance[n - 1]`). */
+export interface CheckedResult {
+  /** The number of the check in the list, from 1. */
+  n: number;
+  result: CheckResult;
+  /** AI-written text: control characters removed, at most 300 characters. Show it only through `shown()`. */
+  evidence: string;
+  basis: CheckBasis;
+}
+
+/** The record of the last check of a "review" or "owner" feature (docs/modes-spec.md 8.3, point 8). Absent until the second AI has been asked. */
+export interface FeatureChecked {
+  /** How many times the second AI has answered for this feature, counted from 1. */
+  round: number;
+  /** The family that really answered the last time (after any failover). When it never answered: the family it was asked on. */
+  reviewer: Family;
+  /** One entry per check, in order, after the engine's own corrections. Empty when `unfinished` is set. */
+  results: CheckedResult[];
+  /** How many checks nobody judged (`cannot_judge`). With `unfinished`, every check. */
+  unjudged: number;
+  /** True only when the answer of the second AI was unusable twice, or it did not run: the review did not finish. Left out otherwise. */
+  unfinished?: true;
+  /** What Mission Control's own script found in the last attempt: the problems left (at most 10, each at most 200 characters) and the facts. */
+  scripted: { problems: string[]; facts: string[] };
+  /** The pictures of the page as it first loads. `why` is set only when none were taken and a page was expected. */
+  pictures: { taken: number; why?: PictureWhy };
 }
 
 export interface VerifyConfig {
@@ -422,6 +494,11 @@ export interface Mission {
   checkpointLog?: CheckpointRecord[];
   /** Set only when the plan was handed in with `mc plan queue` (written outside the team, by the leader). Absent = the team's planner writes it. */
   plan?: PlanSource;
+  /**
+   * Set only to `false`, and only when the owner queued a plan with a "review" or "owner" feature using `--no-owner-checkpoint`:
+   * the team does not stop for the owner's look at those features. Absent = it stops. A plan file can never set it.
+   */
+  ownerStops?: false;
 }
 
 /** A plan written outside the team: what the team adopts instead of calling its own planner, and how it was received. */
@@ -581,6 +658,32 @@ export interface BuildOutput {
 export interface ReviewOutput {
   verdict: "approve" | "changes";
   findings: Finding[];
+}
+
+/** The second AI's answer for a "review" or "owner" feature: a verdict on every written check (SCHEMAS.rubric, docs/modes-spec.md 8.3). The engine checks it and recomputes the verdict. */
+export interface RubricOutput {
+  verdict: "approve" | "changes";
+  results: RubricResult[];
+  /** The files and pictures the AI says it opened, as the brief names them. */
+  seen: string[];
+  /** Problems outside the list that would mislead or hurt a reader. */
+  notes: RubricNote[];
+}
+
+export interface RubricResult {
+  /** The number of the check in the list, from 1. */
+  number: number;
+  /** The check, copied from the list. */
+  check: string;
+  result: CheckResult;
+  evidence: string;
+  basis: CheckBasis;
+}
+
+export interface RubricNote {
+  severity: "major" | "minor";
+  file: string | null;
+  description: string;
 }
 
 export interface DiagnosisOutput {

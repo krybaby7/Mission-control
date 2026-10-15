@@ -1,8 +1,9 @@
 // The run behind `mc run`: takes the run lock, works through the queued missions one at a time until they
 // are finished, a stop is requested or the deadline passes, then writes the run summary and notifies.
-// Some internal names (runNight, NightOptions, NightResult, TonightStore) and the file names night-<date>.md and
-// night-<date>.log keep the older word, because tests and files that already exist use them. The words a person reads
-// in this file say "run".
+// Some internal names (runNight, NightOptions, NightResult, TonightStore) and the setting pacing.maxWeeklySharePerNight
+// keep the older word, because tests and settings files that already exist use them. The words a person reads in this
+// file say "run", and so do the file names of a run: reports/run-<date>.md and logs/run-<date>.log. Files that earlier
+// runs wrote as night-<date>.md and night-<date>.log stay where they are, and `mc report` still reads the .md ones.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isWaitingForCheck, lookCommand, parkedNotice, waitingWhat } from "./checkpoint.js";
@@ -20,6 +21,7 @@ import { systemClock } from "./util/clock.js";
 import { ensureDir, expandHome } from "./util/fs.js";
 import { createLogger, type LevelLogger } from "./util/logger.js";
 import { killTree } from "./util/process.js";
+import { featuresDone } from "./util/words.js";
 import { Verifier } from "./verify.js";
 
 export interface NightOptions {
@@ -33,7 +35,7 @@ export interface NightOptions {
   roleOverrides?: RoleOverride[];
   config?: Config;
   clock?: Clock;
-  /** Default: info lines on the console, everything (agent progress included) in <home>/logs/night-<date>.log (the file name keeps its older word). */
+  /** Default: info lines on the console, everything (agent progress included) in <home>/logs/run-<date>.log. */
   logger?: Logger;
   /** Tests: stand-ins for the CLI runners. */
   runners?: Partial<Record<Provider, AgentRunner>>;
@@ -181,7 +183,7 @@ function missionFileExists(store: MissionStore, id: string): boolean {
 
 /** Info lines on the console; the log file also gets debug lines (agent progress). */
 function nightLogger(home: string, startedAt: number): LevelLogger {
-  const file = createLogger({ file: join(home, "logs", `night-${localDate(startedAt)}.log`), level: "debug" });
+  const file = createLogger({ file: join(home, "logs", `run-${localDate(startedAt)}.log`), level: "debug" });
   const screen = createLogger({ console: true, level: "info" });
   return {
     debug: (msg, data) => file.debug(msg, data),
@@ -447,7 +449,7 @@ function needsOwner(m: Mission): boolean {
 }
 
 async function runOne(night: Night, dispatcher: Dispatcher, m: Mission): Promise<Mission> {
-  night.logger.info(`Working on "${m.title}" (${m.id})`);
+  night.logger.info(`Working on “${m.title}” (${m.id})`);
   let ended: Mission;
   try {
     ended = await dispatcher.runMission(m.id); // writes the mission's report whenever it completes, stops or fails
@@ -455,7 +457,7 @@ async function runOne(night: Night, dispatcher: Dispatcher, m: Mission): Promise
     ended = await recordCrash(night, m, err);
   }
   copyToLatest(night, ended.id);
-  night.logger.info(`"${ended.title}": ${missionOutcome(ended)}`);
+  night.logger.info(`“${ended.title}”: ${missionOutcome(ended)}`);
   return ended;
 }
 
@@ -516,7 +518,7 @@ function reportsDir(config: Config): string {
 
 function writeSummary(night: Night, missions: Mission[], waitingForYou: Mission[], waitingForCheck: Mission[]): string {
   const dir = ensureDir(reportsDir(night.config));
-  const base = `night-${localDate(night.startedAt)}`;
+  const base = `run-${localDate(night.startedAt)}`;
   let path = join(dir, `${base}.md`);
   for (let n = 2; existsSync(path); n++) path = join(dir, `${base}-${n}.md`);
   writeFileSync(path, renderSummary(night, missions, waitingForYou, waitingForCheck));
@@ -617,7 +619,7 @@ function statusPhrase(status: MissionStatus): string {
 
 function featureCount(m: Mission): string {
   if (m.features.length === 0) return "no features planned yet";
-  return `${m.features.filter((f) => f.status === "done").length} of ${m.features.length} features done`;
+  return featuresDone(m.features.filter((f) => f.status === "done").length, m.features.length);
 }
 
 // ───────────────────────────── Helpers ─────────────────────────────

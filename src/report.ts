@@ -5,11 +5,13 @@ import { type Dirent, readFileSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
+import { checkedLine, checkedWords, hasModeFeature, howChecked, tableWords } from "./checked-by.js";
 import { endState, isCheckpointShape, isWaitingForCheck, localClock, MAX_SEND_BACKS, planReviewShort, sendBacks, shown, subjectOf, waitingWhat, whyStopped } from "./checkpoint.js";
 import { inContainer } from "./config.js";
 import { planOf } from "./state.js";
 import type { Attempt, Feature, Finding, Mission, MissionStatus, PendingCheckpoint, Provider, ReportProseOutput, UsageRecord } from "./types.js";
 import { stripControlChars } from "./util/terminal.js";
+import { featuresDone } from "./util/words.js";
 
 // ───────────────────────────── Usage ─────────────────────────────
 
@@ -164,7 +166,7 @@ export function buildReportFacts(m: Mission, usage: UsageRecord[]): string {
     `Mission: ${oneLine(m.title)}`,
     `Kind: ${m.kind === "greenfield" ? "a brand-new app" : `a change to an existing app (${m.repoPath})`}`,
     `Request: ${m.request.trim()}`,
-    `Status: ${statusLabel(m.status)} (${m.status}). ${counts.done} of ${counts.total} features done, ` +
+    `Status: ${statusLabel(m.status)} (${m.status}). ${featuresDone(counts.done, counts.total)}, ` +
       `${counts.blocked} blocked, ${counts.skipped} skipped, ${counts.unfinished} unfinished.`,
   ];
   if (m.status === "partial" && allFeaturesDone(counts)) {
@@ -175,7 +177,7 @@ export function buildReportFacts(m: Mission, usage: UsageRecord[]): string {
   }
   if (m.spec?.summary) lines.push(`Plan summary: ${oneLine(m.spec.summary)}`);
   lines.push(
-    ...factSection("Features", m.features.map(featureFact)),
+    ...factSection("Features", m.features.map((f) => featureFact(m, f))),
     ...factSection("Choices made for the user (assumptions)", m.spec?.assumptions ?? []),
     ...factSection("Decisions the user needs to make", m.decisionsNeeded),
     ...factSection("Open review findings", openFindings(m).map(({ feature, finding }) => findingFact(feature, finding))),
@@ -198,11 +200,12 @@ function factSection(title: string, items: string[]): string[] {
   return ["", `${title}:`, ...(items.length > 0 ? items.map((i) => `- ${oneLine(i)}`) : ["- (none)"])];
 }
 
-function featureFact(f: Feature): string {
+function featureFact(m: Mission, f: Feature): string {
   const head = `${f.id} "${f.title}" [${f.status}]`;
   switch (f.status) {
     case "done":
-      return `${head}: ${f.story}`;
+      // A feature no test checked says how it was checked, so the writer of the summary cannot call it tested (docs/modes-spec.md 8.5).
+      return f.mode === undefined ? `${head}: ${f.story}` : `${head}: ${sentence(f.story)} ${checkedByFact(m, f)}`;
     case "blocked": {
       const tries = f.attempts.length > 0 ? ` (after ${plural(f.attempts.length, "attempt")})` : "";
       return `${head}: ${f.blockedReason ?? "no reason recorded"}${tries}`;
@@ -212,6 +215,11 @@ function featureFact(f: Feature): string {
     default:
       return `${head}: not finished`;
   }
+}
+
+/** `Checked by: a second AI against your list and approved by you. No tests were written for it.` (the words of the `Checked:` line, without the leading "by "). */
+function checkedByFact(m: Mission, f: Feature): string {
+  return `Checked by: ${checkedWords(howChecked(m, f)).replace(/^by /, "")}. No tests were written for it.`;
 }
 
 function findingFact(f: Feature, finding: Finding): string {
@@ -248,11 +256,12 @@ export interface RenderReportOptions {
 export function renderReport(m: Mission, opts: RenderReportOptions): string {
   const usage = missionUsage(m, opts.usage);
   const container = opts.inContainer ?? inContainer();
+  const guarded = guardProse(m, opts.prose);
   const sections = [
     checkSection(m, container, opts.reportDir),
     headerSection(m, opts.generatedAt),
-    narrative(m, opts.prose, container),
-    whatYouCanDoSection(m, opts.prose),
+    narrative(m, guarded.prose, container),
+    whatYouCanDoSection(m, guarded.prose),
     howToTrySection(m, container),
     decisionsSection(m, container),
     featuresSection(m),
@@ -261,7 +270,7 @@ export function renderReport(m: Mission, opts: RenderReportOptions): string {
     choicesSection(m),
     reviewNotesSection(m),
     usageSection(usage),
-    technicalSection(m, opts.generatedAt),
+    technicalSection(m, opts.generatedAt, guarded.left),
   ];
   // Agents wrote much of this (prose, findings, summaries): no control characters reach a terminal that shows it.
   return stripControlChars(sections.filter((s) => s !== "").join("\n\n") + "\n");
@@ -269,11 +278,27 @@ export function renderReport(m: Mission, opts: RenderReportOptions): string {
 
 function headerSection(m: Mission, generatedAt: string): string {
   const { done, total } = countFeatures(m.features);
-  const progress = total === 0 ? "no features planned yet" : `${done} of ${total} features done`;
+  const progress = total === 0 ? "no features planned yet" : featuresDone(done, total);
   const header = `# ${oneLine(m.title)}\n\n**${statusLabel(m.status, m)}** · ${progress} · report written ${formatLocalTime(generatedAt)}`;
   // While a check waits, the waiting block (which comes first) already says it, above the look: it is not said twice.
   const line = isWaitingForCheck(m) ? "" : planLine(m);
-  return line === "" ? header : `${header}\n\n${line}`;
+  // Only when a finished feature is not checked by tests: how each finished feature was checked, in one line.
+  const checked = checkedLine(m) ?? "";
+  return [header, line, checked].filter((part) => part !== "").join("\n\n");
+}
+
+/** Any form of the word "test": a sentence about work that no test checked must not use it (docs/modes-spec.md 10.3). */
+const TEST_WORD = /\btest(?:s|ed|ing)?\b/i;
+
+/**
+ * The AI-written narrative and "what you can do" lines, unless the mission has a feature that no test checked and the AI
+ * talks about tests: then both are left out (the plain narrative and the feature list stand in) and `left` is true, so the
+ * technical details can say so. A rule in the prompt asks the AI not to; this is the check that does not depend on it.
+ */
+function guardProse(m: Mission, prose: ReportProseOutput | null | undefined): { prose: ReportProseOutput | null | undefined; left: boolean } {
+  if (!prose || !hasModeFeature(m.features)) return { prose, left: false };
+  const texts = [prose.narrative, ...(Array.isArray(prose.whatYouCanDo) ? prose.whatYouCanDo : [])];
+  return texts.some((t) => typeof t === "string" && TEST_WORD.test(t)) ? { prose: null, left: true } : { prose, left: false };
 }
 
 /**
@@ -412,7 +437,8 @@ function templateNarrative(m: Mission, container: boolean): string {
   ];
   if (m.spec?.summary) sentences.push(`The plan: ${sentence(m.spec.summary)}`);
   const counts = countFeatures(m.features);
-  sentences.push(...progressSentences(counts), ...(isWaitingForCheck(m) ? ["I stopped here on purpose, so you can look at it before I go on."] : statusSentence(m.status, counts)));
+  const byReading = m.features.some((f) => f.status === "done" && f.mode !== undefined);
+  sentences.push(...progressSentences(counts, byReading), ...(isWaitingForCheck(m) ? ["I stopped here on purpose, so you can look at it before I go on."] : statusSentence(m.status, counts, byReading)));
   const decisions = decisionItems(m, container).length;
   if (decisions > 0) {
     sentences.push(
@@ -422,15 +448,26 @@ function templateNarrative(m: Mission, container: boolean): string {
   return sentences.join(" ");
 }
 
-function progressSentences(c: FeatureCounts): string[] {
+/**
+ * `byReading`: a finished feature is not checked by tests, so "built and checked" would say more than is known. The
+ * `Checked:` line and the Features table say how each was checked (docs/modes-spec.md 10.1).
+ */
+function progressSentences(c: FeatureCounts, byReading = false): string[] {
   if (c.total === 0) return ["I didn't get as far as planning the features."];
   if (allFeaturesDone(c)) {
+    if (byReading) {
+      return [
+        c.total === 1
+          ? "The feature is built. The Features table says how it was checked."
+          : `All ${c.total} features are built. The “Checked” line and the Features table say how each was checked.`,
+      ];
+    }
     return [c.total === 1 ? "The feature is built and checked." : `All ${c.total} features are built and checked.`];
   }
   const sentences = [
     c.done === 0
       ? "None of the features are finished yet."
-      : `${c.done} of the ${c.total} features ${c.done === 1 ? "is" : "are"} built and checked.`,
+      : `${c.done} of the ${c.total} features ${c.done === 1 ? "is" : "are"} built${byReading ? "" : " and checked"}.`,
   ];
   if (c.blocked > 0) sentences.push(`${plural(c.blocked, "feature")} got stuck; the table below says why.`);
   if (c.skipped > 0) {
@@ -440,10 +477,10 @@ function progressSentences(c: FeatureCounts): string[] {
   return sentences;
 }
 
-function statusSentence(status: MissionStatus, c: FeatureCounts): string[] {
+function statusSentence(status: MissionStatus, c: FeatureCounts, byReading = false): string[] {
   switch (status) {
     case "done":
-      return ["Everything passed the final checks."];
+      return [byReading ? "The final checks of the whole app passed." : "Everything passed the final checks."];
     case "partial":
       return allFeaturesDone(c)
         ? [
@@ -606,7 +643,8 @@ function retryItem(m: Mission, container: boolean): string | undefined {
 
 function featuresSection(m: Mission): string {
   if (m.features.length === 0) return section("Features", "No features were planned yet.");
-  const rows = m.features.map((f) => `| ${featureIcon(f)} | ${cell(f.title)} | ${cell(featureOutcome(f))} |`);
+  const byReading = hasModeFeature(m.features);
+  const rows = m.features.map((f) => `| ${featureIcon(f)} | ${cell(f.title)} | ${cell(featureOutcome(f, byReading ? m : undefined))} |`);
   return section("Features", ["|  | Feature | What happened |", "|---|---|---|", ...rows].join("\n"));
 }
 
@@ -616,10 +654,17 @@ function featureIcon(f: Feature): string {
   return "⏳";
 }
 
-function featureOutcome(f: Feature): string {
+/** `m` is given only for a mission that has a feature no test checked: the words then say how each finished feature was checked. */
+function featureOutcome(f: Feature, m?: Mission): string {
   switch (f.status) {
     case "done": {
       const notes = f.openFindings.length;
+      if (m) {
+        const h = howChecked(m, f);
+        const words = tableWords(h);
+        // Unmet checks are the review notes, and the words already say so.
+        return notes > 0 && h.row !== 5 ? `${words} (${plural(notes, "review note")} below)` : words;
+      }
       return notes > 0 ? `Built and checked (${plural(notes, "review note")} below)` : "Built and checked";
     }
     case "blocked": {
@@ -695,7 +740,7 @@ function providerName(p: Provider): string {
   return Object.hasOwn(PROVIDER_NAME, p) ? PROVIDER_NAME[p] : cell(String(p ?? "unknown"));
 }
 
-function technicalSection(m: Mission, generatedAt: string): string {
+function technicalSection(m: Mission, generatedAt: string, proseLeftOut = false): string {
   const facts = [
     `Mission id: ${code(m.id)} (${m.kind}, profile ${code(m.profile)})`,
     `Repository: ${m.repoPath ? code(m.repoPath) : "not created"}`,
@@ -723,6 +768,11 @@ function technicalSection(m: Mission, generatedAt: string): string {
   }
   const notes = runNotes(m);
   if (notes.length > 0) parts.push("### Run notes", bulletList(notes, ""));
+  if (proseLeftOut) {
+    parts.push(
+      "The AI-written summary was left out, because it described how the work was checked in words that do not match Mission Control's records. The summary at the top was written by Mission Control.",
+    );
+  }
   return parts.join("\n\n");
 }
 

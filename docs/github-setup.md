@@ -116,7 +116,7 @@ If you run it again for the same mission, after more work, it uploads the new wo
 
 - The mission's title and name, the branch, and the main branch it is meant for.
 - The plan code, if the leader wrote the plan.
-- **What was checked.** From the mission's own record, in plain words: how many features had tests written before the code, whether the app's own checks were already failing, how many reviews did not finish, and which stops you answered. It says plainly when nobody looked at the work before it was published. Mission Control records each of your answers. It cannot tell what you actually looked at, and the draft says so.
+- **What was checked.** From the mission's own record, in plain words: how many features had tests written before the code, whether the app's own checks were already failing, how many reviews did not finish, and which stops you answered. It says plainly when nobody looked at the work before it was published. Mission Control records each of your answers. It cannot tell what you actually looked at, and the draft says so. When a finished feature was checked by a second AI and not by tests (a guide, a page, a table; see [work-modes.md](work-modes.md)), the draft says that those features were not checked by tests, and it copies the report's `Checked:` line as the report wrote it. It never says that such a feature was tested. If the report has no `Checked:` line, the draft says that the report tells how each feature was checked.
 - Which features are not finished, for a partly finished mission.
 - The first lines of the report, in a block of plain text. The steps for trying the app on your PC are left out.
 

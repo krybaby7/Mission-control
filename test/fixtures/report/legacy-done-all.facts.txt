@@ -1,0 +1,29 @@
+Mission: Habit tracker
+Kind: a change to an existing app (/home/pwuser/mc-apps/habit-tracker)
+Request: Add habits and tick them off each day.
+Status: Done (done). 2 of 2 features done, 0 blocked, 0 skipped, 0 unfinished.
+Plan summary: A simple app to keep track of your daily habits
+
+Features:
+- add-habit "Add a habit" [done]: You can add a new habit with a name.
+- tick-habit "Tick off a habit" [done]: You can tick a habit off.
+
+Choices made for the user (assumptions):
+- No login: it is a single-user app on your computer.
+
+Decisions the user needs to make:
+- (none)
+
+Open review findings:
+- [minor] add-habit: The button label could be clearer.
+
+Run notes:
+- The review of "Add a habit" did not finish, so it was merged after passing its checks.
+
+Totals: 0 agent runs (0 stopped by usage limits), 0 tokens, estimated list-price cost $0.00, about less than a minute of agent time.
+
+How to try it:
+- cd /home/pwuser/mc-apps/habit-tracker
+- git checkout mc/2026-10-09-habit-tracker
+- npm install
+- npm run verify

@@ -1,0 +1,20 @@
+mc-plan 1
+name: Landing page
+request: Add a one-page landing page for the habit tracker. It should say what the app does and have a Get started button.
+folder: habit-tracker
+base: main
+app-name: Habit tracker
+summary: Adds a single landing page for the habit tracker with a headline, three benefits and a Get started button.
+assumption: The page is one plain page of its own, with no outside scripts or fonts.
+contract: The button is labelled Get started.
+
+feature: landing-page
+title: One-page landing page
+story: As a visitor I can see in a few seconds what the app does and how to start.
+mode: owner
+effort: deep
+check: The page has a headline that says what the app does, and a button labelled Get started.
+check: The page lists three benefits, each with a short heading and one sentence.
+check: On a phone the page is one column, the text is easy to read and nothing runs off the screen.
+check: On a desktop the three benefits sit side by side.
+mention: Get started

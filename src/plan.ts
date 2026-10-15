@@ -4,7 +4,9 @@
 // planner's own `SpecOutput` plus a small envelope (name, request, folder, base) and a plan code, or lists everything
 // wrong with it in words that say what to do. `describePlan` writes a plan back in words for `mc plan preview`, `queue`
 // and `show` and for the owner's check, so the owner sees exactly what the team will build from. The grammar, every limit
-// and every message are in docs/plans-spec.md (sections 3.1 to 3.3).
+// and every message are in docs/plans-spec.md (sections 3.1 to 3.3). The keys that say how a feature is checked and how
+// hard the team thinks (mode, effort, heading, mention, words, columns, rows) are optional parts of the same format and
+// are in docs/modes-spec.md (section 4); a plan that uses none of them reads, is coded and is described exactly as before.
 //
 // Plan text is untrusted: it has no key that is run, opened or followed, no curly bracket and no backtick, and each value
 // is plain words (no hidden characters). Free text can still say "run this"; the owner's check and the leader's rules
@@ -14,7 +16,7 @@ import { isDerivedFeature, oneLine, planReviewSentence } from "./checkpoint.js";
 // dispatcher's own `validateSpec`. Neither module uses the other while it loads, only inside functions.
 import { validateSpec } from "./dispatcher.js";
 import { slugify } from "./state.js";
-import type { PlanReview, SpecFeature, SpecOutput } from "./types.js";
+import type { FeatureExpect, PlanReview, SpecFeature, SpecOutput } from "./types.js";
 import { sha256 } from "./util/fs.js";
 
 export const PLAN_FIRST_LINE = "mc-plan 1";
@@ -31,13 +33,33 @@ const MAX_CHECKS = 20;
 const MAX_ASSUMPTIONS = 10;
 const MAX_CONTRACT = 40;
 const MAX_NEEDS = 9;
+const MAX_HEADINGS = 12;
+const MAX_MENTIONS = 12;
+const MAX_COLUMNS = 30;
+const COLUMN_MAX = 40;
+const MODES = ["tests", "review", "owner"];
+const EFFORTS = ["light", "standard", "deep"];
+// ASCII digits only: `\d` would take fullwidth and other digits too.
+const RANGE = /^([0-9]+)-([0-9]+)$/;
+const WORDS_TOP = 99_999;
+const ROWS_TOP = 999_999;
 const ID_MAX = 60;
 const FOLDER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const BASE = /^[A-Za-z0-9_][A-Za-z0-9._/-]{0,99}$/;
 const KEY_SHAPE = /^[A-Za-z][A-Za-z0-9_-]*$/;
 const PLAN_KEYS = "name, request, folder, base, app-name, summary, assumption, contract";
-const FEATURE_KEYS = "feature, title, story, kind, needs, check";
+const FEATURE_KEYS = "feature, title, story, kind, mode, effort, needs, check, heading, mention, words, columns, rows";
 const ROUTINE_WORK = "the team tries its lightest AI first and moves up if the checks fail.";
+/** How a feature is checked, in the words of `describePlan` (docs/modes-spec.md 4.4). */
+const CHECKED_BY = {
+  tests: "tests, written first.",
+  review: "a second AI, against its list of checks. No tests are written for it.",
+  owner: "a second AI, against its list of checks, and then by you. No tests are written for it.",
+};
+const EFFORT_WORDS = {
+  light: "light. The team's lightest AI builds it first and a lighter AI checks it.",
+  deep: "deep. The team's strongest AI builds it and checks it, and thinks longer.",
+};
 
 // ───────────────────────────── Keys ─────────────────────────────
 
@@ -65,8 +87,15 @@ const KEYS = new Map<string, KeyRule>([
   ["title", { part: "feature", once: true, max: 80 }],
   ["story", { part: "feature", once: true, max: 400 }],
   ["kind", { part: "feature", once: true }],
+  ["mode", { part: "feature", once: true }],
+  ["effort", { part: "feature", once: true }],
   ["needs", { part: "feature", once: true }],
   ["check", { part: "feature", once: false, max: 300 }],
+  ["heading", { part: "feature", once: false, max: 80 }],
+  ["mention", { part: "feature", once: false, max: 80 }],
+  ["words", { part: "feature", once: true }],
+  ["columns", { part: "feature", once: true }],
+  ["rows", { part: "feature", once: true }],
 ]);
 
 // ───────────────────────────── Plain words ─────────────────────────────
@@ -169,6 +198,8 @@ interface Block {
   id: string;
   once: Map<string, Entry>;
   checks: Entry[];
+  headings: Entry[];
+  mentions: Entry[];
 }
 
 /** Reads a plan. Pure: nothing is read from disk and nothing is queued. Lists every problem it finds (the preview prints 12). */
@@ -223,7 +254,7 @@ export function parsePlan(input: string, opts: { quoteFirstLine?: boolean } = {}
     }
 
     if (key === "feature") {
-      block = { n, id: value, once: new Map(), checks: [] };
+      block = { n, id: value, once: new Map(), checks: [], headings: [], mentions: [] };
       blocks.push(block);
       const where = `Line ${n} (the id of feature ${blocks.length})`;
       const why = wordsProblem(value, ID_MAX, false);
@@ -244,6 +275,8 @@ export function parsePlan(input: string, opts: { quoteFirstLine?: boolean } = {}
     if (rule.once) kept.set(key, entry);
     else if (key === "assumption") where = `Line ${n} (assumption ${head.assumptions.push(entry)})`;
     else if (key === "contract") where = `Line ${n} (contract line ${head.contract.push(entry)})`;
+    else if (block && key === "heading") where = `Line ${n} (heading ${block.headings.push(entry)} of ${of})`;
+    else if (block && key === "mention") where = `Line ${n} (mention ${block.mentions.push(entry)} of ${of})`;
     else if (block) where = `Line ${n} (check ${block.checks.push(entry)} of ${of})`;
     if (block && (key === "title" || key === "story")) where = `Line ${n} (the ${key} of ${of})`;
 
@@ -253,6 +286,15 @@ export function parsePlan(input: string, opts: { quoteFirstLine?: boolean } = {}
         if (why) {
           problems.push(
             `Line ${n} (an id in “needs” of ${of}) can't be used: ${why}. Use a feature id: lowercase letters, digits and single dashes, up to ${ID_MAX} characters, for example dark-mode.`,
+          );
+        }
+      }
+    } else if (key === "columns") {
+      for (const name of value.split(",").map(trimBlanks).filter((d) => d !== "")) {
+        const why = wordsProblem(name, COLUMN_MAX, false);
+        if (why) {
+          problems.push(
+            `Line ${n} (a column name in “columns” of ${of}) can't be used: ${why}. Use plain words, up to ${COLUMN_MAX} characters, starting with a letter or a number, with no backticks and no web addresses.`,
           );
         }
       }
@@ -298,6 +340,7 @@ export function parsePlan(input: string, opts: { quoteFirstLine?: boolean } = {}
       problems.push(`Line ${needs.n}: “needs” must list feature ids separated by commas, at most ${MAX_NEEDS}, for example: needs: add-book, mark-read.`);
     }
   }
+  blocks.forEach((b, i) => problems.push(...modeProblems(b, i + 1)));
   if (head.assumptions.length > MAX_ASSUMPTIONS) problems.push(`The plan has ${head.assumptions.length} “assumption” lines; at most ${MAX_ASSUMPTIONS} are allowed.`);
   if (head.contract.length > MAX_CONTRACT) problems.push(`The plan has ${head.contract.length} “contract” lines; at most ${MAX_CONTRACT} are allowed.`);
   const folder = head.once.get("folder");
@@ -330,6 +373,7 @@ export function parsePlan(input: string, opts: { quoteFirstLine?: boolean } = {}
         acceptance: b.checks.map((c) => c.value),
         kind: b.once.get("kind")?.value === "mechanical" ? "mechanical" : "standard",
         deps: (b.once.get("needs")?.value ?? "").split(",").map(trimBlanks).filter((d) => d !== ""),
+        ...modeFields(b),
       }),
     ),
     assumptions: head.assumptions.map((a) => a.value),
@@ -344,6 +388,102 @@ export function parsePlan(input: string, opts: { quoteFirstLine?: boolean } = {}
 
 function bad(problems: string[]): PlanParse {
   return { ok: false, problems };
+}
+
+// ───────────────────────────── How a feature is checked: the new keys (docs/modes-spec.md 4.1 and 4.6) ─────────────────────────────
+
+/** The checks V26 to V33 for one feature, in that order. Run only when nothing else is wrong with the lines themselves. */
+function modeProblems(b: Block, place: number): string[] {
+  const problems: string[] = [];
+  const at = `Feature ${place} (“${quote(b.id)}”)`;
+  const mode = b.once.get("mode");
+  const effort = b.once.get("effort");
+  const words = b.once.get("words");
+  const rows = b.once.get("rows");
+  const columns = b.once.get("columns");
+  if (mode && !MODES.includes(mode.value)) problems.push(`Line ${mode.n}: “mode” must be tests, review or owner.`);
+  if (effort && !EFFORTS.includes(effort.value)) problems.push(`Line ${effort.n}: “effort” must be light, standard or deep.`);
+  if (b.once.get("kind")?.value === "mechanical" && effort?.value === "deep") {
+    problems.push(`${at} has “kind: mechanical” and “effort: deep”. “mechanical” is for light work. Leave out “kind”, or use “effort: light”.`);
+  }
+  if (words && !rangeOk(words.value, 1, WORDS_TOP)) {
+    problems.push(
+      `Line ${words.n}: “words” must be two whole numbers with a dash between them, for example: words: 300-600. The first is at least 1 and not more than the second, and both are at most ${WORDS_TOP}.`,
+    );
+  }
+  if (rows && !rangeOk(rows.value, 0, ROWS_TOP)) {
+    problems.push(
+      `Line ${rows.n}: “rows” must be two whole numbers with a dash between them, for example: rows: 10-50. The first may be 0 and is not more than the second, and both are at most ${ROWS_TOP}.`,
+    );
+  }
+  if (columns && !columnsOk(columns.value)) {
+    problems.push(`Line ${columns.n}: “columns” must list column names separated by commas, at most ${MAX_COLUMNS}, all different, for example: columns: Item, Units, Price.`);
+  }
+  if (b.headings.length > MAX_HEADINGS) problems.push(`${at} has ${b.headings.length} “heading” lines; at most ${MAX_HEADINGS} are allowed.`);
+  if (b.mentions.length > MAX_MENTIONS) problems.push(`${at} has ${b.mentions.length} “mention” lines; at most ${MAX_MENTIONS} are allowed.`);
+  // Only when "mode" is missing or says tests. A "mode" line that was refused has already been reported (V26) and is not reported twice.
+  if (mode === undefined || mode.value === "tests") {
+    const found = (
+      [
+        ["heading", b.headings[0]],
+        ["mention", b.mentions[0]],
+        ["words", words],
+        ["columns", columns],
+        ["rows", rows],
+      ] as [string, Entry | undefined][]
+    )
+      .filter((x): x is [string, Entry] => x[1] !== undefined)
+      .sort((x, y) => x[1].n - y[1].n)[0];
+    if (found) {
+      problems.push(`Line ${found[1].n}: “${found[0]}” is only for a feature that uses “mode: review” or “mode: owner”. A feature checked by tests is judged by its tests.`);
+    }
+  }
+  return problems;
+}
+
+/** `<first>-<second>` as two whole numbers (ASCII digits, nothing else), `low <= first <= second <= top`. */
+function rangeOk(value: string, low: number, top: number): boolean {
+  const m = RANGE.exec(value);
+  if (!m) return false;
+  const first = Number(m[1]);
+  const second = Number(m[2]);
+  return first >= low && first <= second && second <= top;
+}
+
+/** The names of `columns`: none empty, at most 30, all different (capitals and spaces ignored). */
+function columnsOk(value: string): boolean {
+  const names = value.split(",").map(trimBlanks);
+  if (names.length > MAX_COLUMNS || names.some((n) => n === "")) return false;
+  return new Set(names.map(columnKey)).size === names.length;
+}
+
+function columnKey(name: string): string {
+  return name.normalize("NFC").toLowerCase().replace(/\s+/g, "");
+}
+
+/** The optional fields of a feature that a plan sets. Only values other than the defaults are kept, so a plan that sets none has none. */
+function modeFields(b: Block): Pick<SpecFeature, "mode" | "effort" | "expect"> {
+  const mode = b.once.get("mode")?.value;
+  const effort = b.once.get("effort")?.value;
+  const words = b.once.get("words")?.value;
+  const rows = b.once.get("rows")?.value;
+  const columns = b.once.get("columns")?.value;
+  const range = (v: string): [number, number] => {
+    const [first = "0", second = "0"] = v.split("-");
+    return [Number(first), Number(second)];
+  };
+  const expect: FeatureExpect = {
+    ...(b.headings.length > 0 && { headings: b.headings.map((e) => e.value) }),
+    ...(b.mentions.length > 0 && { mentions: b.mentions.map((e) => e.value) }),
+    ...(words !== undefined && { words: range(words) }),
+    ...(columns !== undefined && { columns: columns.split(",").map(trimBlanks) }),
+    ...(rows !== undefined && { rows: range(rows) }),
+  };
+  return {
+    ...((mode === "review" || mode === "owner") && { mode }),
+    ...((effort === "light" || effort === "deep") && { effort }),
+    ...(Object.keys(expect).length > 0 && { expect }),
+  };
 }
 
 // ───────────────────────────── The fixed form and the plan code ─────────────────────────────
@@ -372,8 +512,15 @@ export function canonicalText(envelope: PlanEnvelope, spec: SpecOutput): string 
   for (const f of spec.features) {
     lines.push(`feature: ${f.id}`, `title: ${f.title}`, `story: ${f.story}`);
     if (f.kind === "mechanical") lines.push("kind: mechanical");
+    if (f.mode !== undefined) lines.push(`mode: ${f.mode}`);
+    if (f.effort !== undefined) lines.push(`effort: ${f.effort}`);
     if (f.deps.length > 0) lines.push(`needs: ${f.deps.join(", ")}`);
     for (const c of f.acceptance) lines.push(`check: ${c}`);
+    for (const h of f.expect?.headings ?? []) lines.push(`heading: ${h}`);
+    for (const t of f.expect?.mentions ?? []) lines.push(`mention: ${t}`);
+    if (f.expect?.words) lines.push(`words: ${f.expect.words[0]}-${f.expect.words[1]}`);
+    if (f.expect?.columns) lines.push(`columns: ${f.expect.columns.join(", ")}`);
+    if (f.expect?.rows) lines.push(`rows: ${f.expect.rows[0]}-${f.expect.rows[1]}`);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -417,7 +564,15 @@ export function describePlan(spec: Describable, opts: DescribeOptions): string[]
     checks: texts(f.acceptance),
     deps: texts(f.deps),
     routine: f.kind === "mechanical",
+    mode: f.mode === "review" || f.mode === "owner" ? f.mode : undefined,
+    effort: f.effort === "light" || f.effort === "deep" ? f.effort : undefined,
+    own: expectLines(f.expect),
   }));
+  const anyMode = features.some((f) => f.mode !== undefined);
+  // The names a plan fixes are for the builder and for whatever checks the work. When no feature is checked by tests, the heading must not talk of tests.
+  const noTests = features.length > 0 && features.every((f) => f.mode !== undefined);
+  const contractWho = noTests ? "the work and its checks" : "the tests and the code";
+  const howChecked = (f: { mode: "review" | "owner" | undefined }): keyof typeof CHECKED_BY => f.mode ?? "tests";
   const titleOf = (id: string): string => features.find((f) => f.id === id)?.title || id;
   const needs = (deps: string[]): string => deps.map((d) => `“${titleOf(d)}”`).join(", ");
   const choices = texts(spec.assumptions);
@@ -445,6 +600,8 @@ export function describePlan(spec: Describable, opts: DescribeOptions): string[]
   head("App name:", `${text(spec.appName)}${where}`);
   head("Summary:", text(spec.summary));
   if (opts.style === "look") {
+    // The card shows the first twelve lines: the way the features are checked is among the first eight.
+    if (anyMode) fact("How the features are checked:", `${checkedCounts(features.map(howChecked))}.`);
     // One fact to a line, each saying what it is about: the report and the card show these lines one by one.
     fact(`The plan has ${total}:`, `${features.map((f) => `“${f.title}”`).join(", ")}.`);
     for (const f of features) {
@@ -452,9 +609,12 @@ export function describePlan(spec: Describable, opts: DescribeOptions): string[]
       for (const check of f.checks) fact(`Check for “${f.title}”:`, check);
       if (f.deps.length > 0) fact(`Needs first for “${f.title}”:`, `${needs(f.deps)}.`);
       if (f.routine) fact(`Marked as routine work for “${f.title}”:`, ROUTINE_WORK);
+      if (anyMode) fact(`Checked by for “${f.title}”:`, CHECKED_BY[howChecked(f)]);
+      if (f.effort !== undefined) fact(`Effort for “${f.title}”:`, EFFORT_WORDS[f.effort]);
+      for (const line of f.own) fact(`Mission Control's own check for “${f.title}”:`, line);
     }
     for (const c of choices) fact("Choice made for you:", c);
-    for (const n of names) fact("Name the tests and the code must agree on:", n);
+    for (const n of names) fact(`Name ${contractWho} must agree on:`, n);
     return out;
   }
   out.push("", `${total}:`, "");
@@ -465,16 +625,60 @@ export function describePlan(spec: Describable, opts: DescribeOptions): string[]
     bullets(f.checks, "   ");
     if (f.deps.length > 0) add(`Needs first: ${needs(f.deps)}.`, "   ");
     if (f.routine) add(`Marked as routine work: ${ROUTINE_WORK}`, "   ");
+    if (anyMode) add(`Checked by: ${CHECKED_BY[howChecked(f)]}`, "   ");
+    if (f.effort !== undefined) add(`Effort: ${EFFORT_WORDS[f.effort]}`, "   ");
+    if (f.own.length > 0) {
+      out.push("   Mission Control also checks, with no AI:");
+      bullets(f.own, "   ");
+    }
   });
   if (choices.length > 0) {
     out.push("", "Choices made for you:");
     bullets(choices);
   }
   if (names.length > 0) {
-    out.push("", "Names the tests and the code must agree on:");
+    out.push("", `Names ${contractWho} must agree on:`);
     bullets(names);
   }
   return out;
+}
+
+/** "1 by tests, 1 by a second AI, 1 by a second AI and then by you": the features counted by how they are checked (a count of 0 is left out). */
+function checkedCounts(ways: ("tests" | "review" | "owner")[]): string {
+  const n = (way: string): number => ways.filter((w) => w === way).length;
+  return [
+    [n("tests"), "by tests"],
+    [n("review"), "by a second AI"],
+    [n("owner"), "by a second AI and then by you"],
+  ]
+    .filter(([count]) => (count as number) > 0)
+    .map(([count, words]) => `${count} ${words}`)
+    .join(", ");
+}
+
+/**
+ * The plan's own checks of a feature (headings, words, length, table) as short sentences. A value that holds a curly quote
+ * mark is shown with a straight one, so the marks around the values stay in pairs. Reads a damaged value without failing.
+ */
+function expectLines(expect: unknown): string[] {
+  if (typeof expect !== "object" || expect === null) return [];
+  const e = expect as Record<string, unknown>;
+  const values = (x: unknown): string[] => (Array.isArray(x) ? x.filter((v): v is string => typeof v === "string").map((v) => oneLine(v).replace(/[“”]/g, '"')).filter((v) => v !== "") : []);
+  const quoted = (xs: string[]): string => xs.map((x) => `“${x}”`).join(", ");
+  const range = (x: unknown): [number, number] | undefined =>
+    Array.isArray(x) && x.length === 2 && x.every((v) => typeof v === "number" && Number.isFinite(v)) ? [x[0] as number, x[1] as number] : undefined;
+  const headings = values(e.headings);
+  const mentions = values(e.mentions);
+  const columns = values(e.columns);
+  const words = range(e.words);
+  const rows = range(e.rows);
+  return [
+    ...(headings.length > 0 ? [`It has the headings ${quoted(headings)}.`] : []),
+    ...(mentions.length > 0 ? [`Its visible text contains the words ${quoted(mentions)}, written exactly like that.`] : []),
+    ...(words ? [`Its new text is ${words[0]} to ${words[1]} words long.`] : []),
+    ...(columns.length > 0 ? [`The table has the columns ${columns.join(", ")}.`] : []),
+    ...(rows ? [`The table has ${rows[0]} to ${rows[1]} rows.`] : []),
+  ];
 }
 
 /**

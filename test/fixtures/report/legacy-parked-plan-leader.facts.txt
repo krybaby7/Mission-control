@@ -1,0 +1,25 @@
+Mission: Habit tracker
+Kind: a change to an existing app (/home/pwuser/mc-apps/habit-tracker)
+Request: Add habits and tick them off each day.
+Status: Paused, continues on the next run (stopped). 0 of 0 features done, 0 blocked, 0 skipped, 0 unfinished.
+Plan summary: A simple app to keep track of your daily habits
+
+Features:
+- (none)
+
+Choices made for the user (assumptions):
+- No login: it is a single-user app on your computer.
+
+Decisions the user needs to make:
+- Should a streak survive a skipped weekend?
+
+Open review findings:
+- (none)
+
+Run notes:
+- The review of "Add a habit" did not finish, so it was merged after passing its checks.
+
+Totals: 0 agent runs (0 stopped by usage limits), 0 tokens, estimated list-price cost $0.00, about less than a minute of agent time.
+
+How to try it:
+- (none)

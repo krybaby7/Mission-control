@@ -8,6 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError } from "commander";
 import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
+import { hasModeFeature, howChecked, ownerSentences, pictureReason } from "./checked-by.js";
 import { type AnswerInput, type AnswerProblem, answerNotice, answerProblem, applyAnswer, CHECKPOINT_KINDS, cleanNote, didWhat, endState, isCheckpointShape, isWaitingForCheck, localClock, lookCommand, MAX_NOTE_CHARS, MAX_SEND_BACKS, sendBacks, shown, waitingWhat } from "./checkpoint.js";
 import { parsePort, runDashboard } from "./dashboard/command.js";
 import { DEFAULT_PORT } from "./dashboard/constants.js";
@@ -21,7 +22,7 @@ import { packageRoot } from "./prompts.js";
 import { renderReport } from "./report.js";
 import { findMission, missionOutcome, runNight } from "./run.js";
 import { MissionStore, planOf } from "./state.js";
-import type { CheckpointKind, Config, Mission, MissionEvent, MissionStatus, RoleOverride } from "./types.js";
+import type { CheckpointKind, Config, Feature, Mission, MissionEvent, MissionStatus, PictureWhy, RoleOverride, SpecFeature } from "./types.js";
 import { ensureDir, expandHome } from "./util/fs.js";
 import { runProcess } from "./util/process.js";
 import { stripControlChars } from "./util/terminal.js";
@@ -50,6 +51,9 @@ const CHECKPOINT_HELP =
   "stop for your check at this point: plan (before building), feature (before each feature is added), final (before finishing). Can be repeated.";
 
 const NO_PLAN_CHECKPOINT_HELP = "do not stop for your check of the plan (only when you said you do not want to look at it first)";
+
+const NO_OWNER_CHECKPOINT_HELP =
+  "do not stop for your look at the features marked “owner” or that the second AI could not fully judge (only when you said you do not want to look at them first)";
 
 const EXAMPLES = `
 Examples:
@@ -144,6 +148,7 @@ function buildProgram(io: CliIO, setExit: (code: number) => void): Command {
     .description("show a plan in plain words and make sure it can be used; nothing is queued. Give a file, or write - to read the plan sent in with the command")
     .option("--checkpoint <kind>", CHECKPOINT_HELP, collect, [])
     .option("--no-plan-checkpoint", NO_PLAN_CHECKPOINT_HELP)
+    .option("--no-owner-checkpoint", NO_OWNER_CHECKPOINT_HELP)
     .action(async (file: string | undefined, opts: PlanOptions) => setExit(await planIntakeCommand(io, "preview", file, opts)));
   plan
     .command("queue [file]")
@@ -152,6 +157,7 @@ function buildProgram(io: CliIO, setExit: (code: number) => void): Command {
     )
     .option("--checkpoint <kind>", CHECKPOINT_HELP, collect, [])
     .option("--no-plan-checkpoint", NO_PLAN_CHECKPOINT_HELP)
+    .option("--no-owner-checkpoint", NO_OWNER_CHECKPOINT_HELP)
     .action(async (file: string | undefined, opts: PlanOptions) => setExit(await planIntakeCommand(io, "queue", file, opts)));
   plan
     .command("show <mission>")
@@ -227,6 +233,8 @@ interface PlanOptions {
   checkpoint: string[];
   /** False with --no-plan-checkpoint. */
   planCheckpoint: boolean;
+  /** False with --no-owner-checkpoint. Only a plan with a "review" or "owner" feature records it (as `ownerStops: false`); any other plan ignores it. */
+  ownerCheckpoint?: boolean;
 }
 
 interface RunOptions {
@@ -485,7 +493,7 @@ function newCommand(io: CliIO, idea: string, opts: MissionOptions): void {
   });
   say(
     io.stdout,
-    `Queued your new app "${mission.title}".`,
+    `Queued your new app “${mission.title}”.`,
     `Mission id: ${mission.id}`,
     ...stopLine(checkpoints),
     `It starts on the next run, for example: mc run --until 07:00`,
@@ -513,7 +521,7 @@ async function featureCommand(io: CliIO, folder: string, requestText: string, op
   });
   say(
     io.stdout,
-    `Queued a change to ${repoPath}: "${mission.title}" (starting from branch ${baseBranch}).`,
+    `Queued a change to ${repoPath}: “${mission.title}” (starting from branch ${baseBranch}).`,
     `Mission id: ${mission.id}`,
     ...stopLine(checkpoints),
     `It starts on the next run, for example: mc run --until 07:00`,
@@ -675,7 +683,7 @@ async function planIntakeCommand(io: CliIO, mode: "preview" | "queue", file: str
   }
   const quoted = `“${envelope.name}”`;
   const subject = target ? `a change to ~/mc-apps/${envelope.folder}, starting from branch ${target.baseBranch}` : "a new app";
-  const stop = checkpoints.length > 0 ? stopLine(checkpoints) : ["It will not stop for your check."];
+  const stop = planStopLines(checkpoints, spec.features, opts.ownerCheckpoint);
   const block = describePlan(spec, { request: envelope.request, style: "text", newApp: target === undefined });
   if (!queue) {
     say(
@@ -691,7 +699,7 @@ async function planIntakeCommand(io: CliIO, mode: "preview" | "queue", file: str
       "- The team's planner is skipped. This plan is used as written.",
       "- A second AI reads the plan first and may ask for changes.",
       ...stop.map((line) => `- ${line}`),
-      "- For each feature the checks are written first, the work is done until they pass, and a different AI reviews it.",
+      ...checkingLines(spec.features, opts.ownerCheckpoint === false && !checkpoints.includes("feature")).map((line) => `- ${line}`),
       "",
       'To queue it, run the same command with "plan queue" instead of "plan preview".',
     );
@@ -706,6 +714,7 @@ async function planIntakeCommand(io: CliIO, mode: "preview" | "queue", file: str
     baseBranch: target?.baseBranch ?? "main",
     ...missionChoices(queue.config, { role: [], checkpoint: [] }),
     ...(checkpoints.length > 0 && { checkpoints }),
+    ...(opts.ownerCheckpoint === false && spec.features.some((f) => f.mode !== undefined) && { ownerStops: false as const }),
     plan: { spec, sha256: parsed.sha256, at: new Date(now).toISOString() },
     nowMs: now,
   });
@@ -749,6 +758,73 @@ function isLive(m: Mission): boolean {
 /** What the owner is told about a plan that is already queued (the leader's text quotes this sentence). */
 function samePlanSentence(m: Mission): string {
   return `This plan is already queued as “${shown(m.title)}” (${m.id}). See it with: mc status`;
+}
+
+const NO_STOP_AT_ALL = "It will not stop for your check.";
+
+/**
+ * Where a plan's mission will stop, as sentences (a preview puts a hyphen in front of each; a queue does not). A plan with
+ * no "review" or "owner" feature gets exactly the old lines. With one, the sentence "It will not stop for your check." would sit
+ * next to a stop line and say the opposite, so it is replaced by one that is true (docs/modes-spec.md 9.2). When the owner
+ * asked to stop at every feature the look lines are left out: every feature stops anyway.
+ */
+function planStopLines(checkpoints: CheckpointKind[], features: readonly SpecFeature[], ownerCheckpoint: boolean | undefined): string[] {
+  const modes = features.filter((f) => f.mode !== undefined);
+  if (modes.length === 0) return checkpoints.length > 0 ? stopLine(checkpoints) : [NO_STOP_AT_ALL];
+  const skip = ownerCheckpoint === false;
+  const base = checkpoints.length > 0 ? stopLine(checkpoints) : skip ? [NO_STOP_AT_ALL] : ["It will not stop for your check of the plan or of the finished app."];
+  if (checkpoints.includes("feature")) return base;
+  if (skip) {
+    return [...base, "It will not stop for your look at features marked “owner” or at features the second AI could not fully judge. They are checked by a second AI only."];
+  }
+  const owner = modes.filter((f) => f.mode === "owner").map((f) => f.title);
+  const review = modes.filter((f) => f.mode === "review").map((f) => f.title);
+  return [
+    ...base,
+    ...(owner.length > 0 ? [`It will stop for your look at ${titleList(owner)}, before ${owner.length === 1 ? "it is" : "each is"} added.`] : []),
+    ...(review.length > 0
+      ? [`If the second AI cannot judge a check of ${titleList(review)}, it will stop for your look at ${review.length === 1 ? "that feature" : "those features"}.`]
+      : []),
+  ];
+}
+
+/** “A”, “A” and “B”, “A”, “B” and “C”; with more than three, the first three and "and N more". */
+function titleList(titles: string[]): string {
+  // A curly mark inside a title is shown as a straight one, so the marks around the titles stay in pairs.
+  const quoted = titles.map((t) => `“${shown(t, 80).replace(/[“”]/g, '"')}”`);
+  if (quoted.length <= 1) return quoted[0] ?? "";
+  if (quoted.length <= 3) return `${quoted.slice(0, -1).join(", ")} and ${quoted.at(-1)}`;
+  return `${quoted.slice(0, 3).join(", ")} and ${quoted.length - 3} more`;
+}
+
+const CHECKED_BY_TESTS =
+  "the checks are written first, the work is done until they pass, and a different AI reviews it.";
+
+/**
+ * What the preview says about how each feature is checked. A plan with no "review" or "owner" feature gets the one old line;
+ * otherwise one line for each way of checking that the plan uses, then the line about pictures. `noOwnerLook`: the owner
+ * asked for no stop at the features marked for a look (and not for a stop at every feature, which would stop them anyway).
+ */
+function checkingLines(features: readonly SpecFeature[], noOwnerLook: boolean): string[] {
+  const count = (mode: SpecFeature["mode"]): number => features.filter((f) => f.mode === mode).length;
+  const [tests, review, owner] = [count(undefined), count("review"), count("owner")];
+  if (review + owner === 0) return [`For each feature ${CHECKED_BY_TESTS}`];
+  return [
+    ...(tests > 0 ? [`Checked by tests (${tests}): ${CHECKED_BY_TESTS}`] : []),
+    ...(review > 0
+      ? [
+          `Checked by a second AI (${review}): the work is done, Mission Control checks it with scripts, and a second AI judges each check as passed or not, with a reason. No tests are written.`,
+        ]
+      : []),
+    ...(owner > 0
+      ? [
+          noOwnerLook
+            ? `Checked by a second AI and then by you (${owner}): the same, but it will be queued without a stop for your look.`
+            : `Checked by a second AI and then by you (${owner}): the same, and then the team stops for your look before the feature is added.`,
+        ]
+      : []),
+    "For web pages Mission Control tries to take pictures at phone width and desktop width, and the second AI is asked to look at them. If it cannot, it says so.",
+  ];
 }
 
 /** The kinds asked for with --checkpoint, plus the plan unless --no-plan-checkpoint, in the order the owner meets them. */
@@ -852,8 +928,83 @@ function planShowCommand(io: CliIO, id: string): number {
     ...reviewLines(plan?.review, sendBacks(m, "plan")),
     "",
     ...describePlan(spec, { request: m.request, style: "text", newApp: m.kind === "greenfield" && m.repoPath === "" }),
+    ...howEachWasChecked(m, spec.features, store),
   );
   return 0;
+}
+
+/** Whether a check of the project's own was run for the feature, from its last `deliverable.checked` event: "passed", "failed" or nothing. */
+function projectChecksOf(events: MissionEvent[], featureId: string): "passed" | "failed" | undefined {
+  for (const e of events.toReversed()) {
+    if (e.type !== "deliverable.checked" || e.data.feature !== featureId) continue;
+    if (e.data.projectChecks === "passed" || e.data.projectChecks === "failed") return e.data.projectChecks;
+  }
+  return undefined;
+}
+
+const SHOW_CHECK_CHARS = 120;
+const SHOW_PROBLEMS = 3;
+
+/**
+ * The last section of `mc plan show`, only for a plan with a feature that no test checks: for each feature, in plan order,
+ * how it was checked and what was found, check by check (docs/modes-spec.md 9.4). Evidence is AI-written text and goes through `shown`.
+ */
+function howEachWasChecked(m: Mission, planned: readonly SpecFeature[], store: MissionStore): string[] {
+  if (!hasModeFeature(planned)) return [];
+  let events: MissionEvent[] = [];
+  try {
+    events = store.readEvents(m.id);
+  } catch {
+    // the record of events could not be read: the section is shown without what it would add
+  }
+  // In the order of the plan. A feature the team has not taken up yet (a mission that was only queued) is one that nothing has checked.
+  const features = planned.map((sf): Feature => m.features.find((f) => f.id === sf.id) ?? { ...sf, status: "pending", rung: 0, attempts: [], frozenTests: [], reviewRounds: 0, openFindings: [] });
+  return ["", "How each feature was checked:", ...features.flatMap((f) => featureCheckLines(m, f, events))];
+}
+
+function featureCheckLines(m: Mission, f: Feature, events: MissionEvent[]): string[] {
+  const title = `“${shown(typeof f.title === "string" ? f.title : String(f.id))}”`;
+  const notDone = f.status === "blocked" || f.status === "skipped" ? "not finished, so it was not checked." : "not checked yet.";
+  if (f.mode === undefined) {
+    if (f.status !== "done") return [`- ${title}: ${notDone}`];
+    const h = howChecked(m, f);
+    const words = h.row === 2 ? "checked by the project's own checks only; no tests were written for it." : "checked by tests.";
+    return [`- ${title}: ${words}`, ...ownerSentences(h).map((line) => `  ${line}`)];
+  }
+  const c = f.checked;
+  if (c === undefined && f.status !== "done") return [`- ${title}: ${notDone}`];
+  const h = howChecked(m, f);
+  if (c === undefined || c.unfinished === true) {
+    // The second AI's answer never came: only Mission Control's own checks ran, and the sentences below say so.
+    return [`- ${title}: checked by Mission Control's own checks only.`, ...(c ? scriptedLines(f, c, events) : []), ...ownerSentences(h).map((line) => `  ${line}`)];
+  }
+  const round = Number.isInteger(c.round) && c.round > 1 ? c.round : 1;
+  const times = round === 1 ? "once" : `${round} times`;
+  const lines = [`- ${title}: a second AI checked it against your list (checked ${times}). ${h.passed} passed, ${h.failed} failed, ${h.unjudged} could not be judged.`];
+  const results = Array.isArray(c.results) ? c.results : [];
+  (Array.isArray(f.acceptance) ? f.acceptance : []).forEach((check, i) => {
+    const r = results.find((x) => x?.n === i + 1);
+    const word = r?.result === "pass" ? "passed" : r?.result === "fail" ? "failed" : "not judged";
+    const evidence = typeof r?.evidence === "string" && r.evidence.trim() !== "" ? `Evidence: ${shown(r.evidence)}` : "";
+    lines.push(`    ${i + 1}. ${[`${word}:`, shown(typeof check === "string" ? check : "", SHOW_CHECK_CHARS), evidence].filter((part) => part !== "").join(" ")}`);
+  });
+  lines.push(...scriptedLines(f, c, events), ...ownerSentences(h).map((line) => `  ${line}`));
+  return lines;
+}
+
+/** Mission Control's own checks, the project's own checks (when they ran) and the pictures of one checked feature. */
+function scriptedLines(f: Feature, c: NonNullable<Feature["checked"]>, events: MissionEvent[]): string[] {
+  const problems = Array.isArray(c.scripted?.problems) ? c.scripted.problems.filter((p): p is string => typeof p === "string") : [];
+  const shownProblems = problems.slice(0, SHOW_PROBLEMS).map((p) => shown(p, 200));
+  const more = problems.length > SHOW_PROBLEMS ? ` and ${problems.length - SHOW_PROBLEMS} more` : "";
+  const own = shownProblems.length === 0 ? "passed." : `found: ${shownProblems.join("; ")}${more}.`;
+  const project = projectChecksOf(events, f.id);
+  const taken = c.pictures?.taken ?? 0;
+  const why: PictureWhy | undefined = c.pictures?.why;
+  return [
+    `  Mission Control's own checks: ${own}${project === undefined ? "" : ` The project's own checks ${project}.`}`,
+    taken > 0 ? `  Pictures: ${taken} taken (phone and desktop width).` : `  Pictures: none (${pictureReason(why)}).`,
+  ];
 }
 
 // ───────────────────────────── run / stop ─────────────────────────────
@@ -1145,7 +1296,7 @@ function reportCommand(io: CliIO, id: string | undefined): number {
   if (id !== undefined) findMission(store, id);
   const latest = id === undefined ? latestReport(store) : undefined;
   // After a run that worked on several missions, its summary lists them all, with what each needs from you.
-  const summary = id === undefined ? latestNightSummary(store, latest?.at) : undefined;
+  const summary = id === undefined ? latestRunSummary(store, latest?.at) : undefined;
   if (summary !== undefined) {
     printPreview(io, "Run summary", summary.path);
     say(io.stdout, "", `Each mission's own report: mc report <mission>, for example: mc report ${summary.missions[0]}`);
@@ -1180,14 +1331,14 @@ function latestReport(store: MissionStore): { path: string; at: number } | undef
 }
 
 /**
- * The latest run summary (<home>/reports/night-*.md; the file names keep their older word), when it was written after the
+ * The latest run summary (<home>/reports/run-*.md, or night-*.md as earlier runs named it), when it was written after the
  * latest mission report and that run worked on several missions: the missions it links, in order.
  */
-function latestNightSummary(store: MissionStore, latestReportAt: number | undefined): { path: string; missions: string[] } | undefined {
+function latestRunSummary(store: MissionStore, latestReportAt: number | undefined): { path: string; missions: string[] } | undefined {
   const dir = join(store.home, "reports");
   let names: string[];
   try {
-    names = readdirSync(dir).filter((name) => /^night-.*\.md$/.test(name));
+    names = readdirSync(dir).filter((name) => /^(?:run|night)-.*\.md$/.test(name));
   } catch {
     return undefined;
   }
@@ -1347,11 +1498,40 @@ export function describeEvent(event: MissionEvent): string {
       return `you sent ${checkpointWords(d)} back twice before, so the work stops there`;
     case "checkpoint.rejected":
       return `an answer to the check ${text(d.id)} was ignored (${text(d.reason)}); the check is still waiting`;
+    case "deliverable.checked": {
+      const found = typeof d.problems === "number" && Number.isFinite(d.problems) ? d.problems : 0;
+      const project = d.projectChecks === "passed" || d.projectChecks === "failed" ? `. The project's own checks ${d.projectChecks}.` : "";
+      return `${feature}Mission Control's own checks ${d.ok === true ? "passed" : `found ${found} ${found === 1 ? "problem" : "problems"}`} (${attemptWords(d.label)})${project}`;
+    }
+    case "pictures.taken": {
+      const taken = typeof d.taken === "number" && Number.isFinite(d.taken) ? d.taken : 0;
+      if (taken > 0) return `${feature}took ${taken} ${taken === 1 ? "picture" : "pictures"} of the page`;
+      return `${feature}no pictures were taken (${pictureReason(isPictureWhy(d.why) ? d.why : undefined)})`;
+    }
+    case "rubric.checked": {
+      const n = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+      const downgraded = n(d.downgraded);
+      const trust = downgraded > 0 ? ` (${downgraded} ${downgraded === 1 ? "answer was" : "answers were"} not trusted)` : "";
+      return `${feature}a second AI checked it against the list (round ${n(d.round)}): ${n(d.pass)} passed, ${n(d.fail)} failed, ${n(d.unjudged)} could not be judged${trust}`;
+    }
     default: {
       const details = Object.entries(d).map(([key, value]) => `${key}=${text(value)}`);
       return details.length > 0 ? `${event.type}: ${details.join(", ")}` : event.type;
     }
   }
+}
+
+/** "attempt 2" for the label `a2`, "fix round 1" for `fix1`; anything else as written. */
+function attemptWords(label: unknown): string {
+  const text = typeof label === "string" ? label : "";
+  const attempt = /^a([0-9]{1,3})$/.exec(text);
+  if (attempt) return `attempt ${attempt[1]}`;
+  const fix = /^fix([0-9]{1,3})$/.exec(text);
+  return fix ? `fix round ${fix[1]}` : `attempt ${text === "" ? "?" : text.slice(0, 20)}`;
+}
+
+function isPictureWhy(x: unknown): x is PictureWhy {
+  return x === "no_tool" || x === "no_browser" || x === "start_failed" || x === "too_slow" || x === "reviewer" || x === "not_plain_file";
 }
 
 /** What a checkpoint event is about, from its data: the plan, a feature, the finished app. Never the owner's note. */

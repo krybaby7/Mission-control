@@ -1,0 +1,118 @@
+{
+  "plan": {
+    "keys": [
+      "agentRuns",
+      "baseBranch",
+      "baselineBroken",
+      "baselineFailures",
+      "checkpoints",
+      "createdAt",
+      "decisionsNeeded",
+      "features",
+      "gateCRounds",
+      "id",
+      "integrationBranch",
+      "kind",
+      "notes",
+      "plan",
+      "profile",
+      "repoPath",
+      "request",
+      "roleOverrides",
+      "stage",
+      "status",
+      "title",
+      "updatedAt"
+    ],
+    "planKeys": [
+      "at",
+      "sha256",
+      "spec"
+    ],
+    "specKeys": [
+      "appName",
+      "assumptions",
+      "features",
+      "summary",
+      "uiContract"
+    ],
+    "featureKeys": [
+      "acceptance",
+      "deps",
+      "id",
+      "kind",
+      "story",
+      "title"
+    ]
+  },
+  "plan-checkpoints": {
+    "keys": [
+      "agentRuns",
+      "baseBranch",
+      "baselineBroken",
+      "baselineFailures",
+      "checkpoints",
+      "createdAt",
+      "decisionsNeeded",
+      "features",
+      "gateCRounds",
+      "id",
+      "integrationBranch",
+      "kind",
+      "notes",
+      "plan",
+      "profile",
+      "repoPath",
+      "request",
+      "roleOverrides",
+      "stage",
+      "status",
+      "title",
+      "updatedAt"
+    ],
+    "planKeys": [
+      "at",
+      "sha256",
+      "spec"
+    ],
+    "specKeys": [
+      "appName",
+      "assumptions",
+      "features",
+      "summary",
+      "uiContract"
+    ],
+    "featureKeys": [
+      "acceptance",
+      "deps",
+      "id",
+      "kind",
+      "story",
+      "title"
+    ]
+  },
+  "new": {
+    "keys": [
+      "agentRuns",
+      "baseBranch",
+      "baselineBroken",
+      "baselineFailures",
+      "createdAt",
+      "decisionsNeeded",
+      "features",
+      "gateCRounds",
+      "id",
+      "integrationBranch",
+      "kind",
+      "notes",
+      "profile",
+      "repoPath",
+      "request",
+      "roleOverrides",
+      "stage",
+      "status",
+      "title",
+      "updatedAt"
+    ]
+  }
+}

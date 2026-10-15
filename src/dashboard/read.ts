@@ -8,7 +8,7 @@
 import { closeSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync, type Stats } from "node:fs";
 import { join, resolve } from "node:path";
 import { MissionStore, planOf } from "../state.js";
-import type { Attempt, CheckpointKind, CheckpointRecord, Feature, Mission, MissionEvent, PendingCheckpoint, PlanSource } from "../types.js";
+import type { Attempt, CheckedResult, CheckpointKind, CheckpointRecord, Feature, FeatureChecked, Mission, MissionEvent, PendingCheckpoint, PlanSource } from "../types.js";
 import {
   CHECKPOINT_LINES_MAX,
   CHECKPOINT_LOG_MAX,
@@ -387,6 +387,8 @@ function cleanMission(m: Mission): Mission | null {
     ...(checkpoint !== undefined && { checkpoint }),
     ...(checkpointLog.length > 0 && { checkpointLog }),
     ...(plan !== undefined && { plan }),
+    // Only ever `false` (docs/modes-spec.md, M4): the owner queued the plan without the stops for their look at features checked by reading.
+    ...(raw.ownerStops === false && { ownerStops: false as const }),
   };
 }
 
@@ -484,6 +486,7 @@ function cleanFeature(f: Record<string, unknown>): Feature {
     }
   }
   const blocked = isString(f.blockedReason) ? clean(f.blockedReason, REASON_MAX_CHARS) : "";
+  const checked = cleanChecked(f.checked);
   return {
     id,
     title: clean(f.title, TITLE_MAX_CHARS) || id,
@@ -498,6 +501,40 @@ function cleanFeature(f: Record<string, unknown>): Feature {
     reviewRounds: isNumber(f.reviewRounds) ? f.reviewRounds : 0,
     openFindings: [],
     ...(blocked !== "" && { blockedReason: blocked }),
+    // How the feature is checked (docs/modes-spec.md, 11.1). Only the two words each of them can have are kept; `expect` is plan text and stays out.
+    ...((f.mode === "review" || f.mode === "owner") && { mode: f.mode }),
+    ...((f.effort === "light" || f.effort === "deep") && { effort: f.effort }),
+    ...(checked !== undefined && { checked }),
+  };
+}
+
+const CHECK_RESULTS = new Set<string>(["pass", "fail", "cannot_judge"]);
+/** A feature has a handful of written checks; the page needs only how many of them failed, so a damaged list cannot grow the snapshot. */
+const CHECKED_RESULTS_MAX = 200;
+
+/**
+ * The record of the second AI's last answer, cut down to what the page needs (docs/modes-spec.md, 11.1): how many checks nobody
+ * judged, whether the review did not finish, and which result each check got, as the code `pass`, `fail` or `cannot_judge` only.
+ * The check text, the evidence, the pictures and Mission Control's own findings are never read. undefined when the value is not a record.
+ */
+function cleanChecked(v: unknown): FeatureChecked | undefined {
+  if (!isRecord(v)) return undefined;
+  const results: CheckedResult[] = [];
+  if (Array.isArray(v.results)) {
+    for (const r of v.results.slice(0, CHECKED_RESULTS_MAX)) {
+      if (isRecord(r) && isString(r.result) && CHECK_RESULTS.has(r.result)) {
+        results.push({ n: results.length + 1, result: r.result as CheckedResult["result"], evidence: "", basis: "text" });
+      }
+    }
+  }
+  return {
+    round: 0,
+    reviewer: "claude",
+    results,
+    unjudged: isNumber(v.unjudged) && v.unjudged > 0 ? Math.min(Math.floor(v.unjudged), CHECKED_RESULTS_MAX) : 0,
+    ...(v.unfinished === true && { unfinished: true as const }),
+    scripted: { problems: [], facts: [] },
+    pictures: { taken: 0 },
   };
 }
 
@@ -569,6 +606,25 @@ function readTail(file: string, bytes: number): string {
 const EVENT_TEXT_KEYS = ["stage", "status", "from", "to", "action", "outcome", "role", "until", "kind", "decision"] as const;
 const EVENT_LIST_KEYS = ["files", "features"] as const;
 
+/**
+ * The three event types a feature checked by reading writes (docs/modes-spec.md, 5.5) and what the timeline takes from them: whole
+ * numbers, and two short codes. No file name, check text or AI word is part of any of the three events, and none is read.
+ */
+const MODE_EVENT_TYPES = new Set(["deliverable.checked", "pictures.taken", "rubric.checked"]);
+const MODE_EVENT_COUNTS = ["pass", "fail", "unjudged", "downgraded", "taken", "round", "problems"] as const;
+const MODE_EVENT_COUNT_MAX = 100_000;
+const PICTURE_WHY = new Set(["no_tool", "no_browser", "start_failed", "too_slow", "reviewer", "not_plain_file"]);
+const PROJECT_CHECKS = new Set(["passed", "failed"]);
+
+function pickModeEventData(d: Record<string, unknown>, data: Record<string, unknown>): void {
+  for (const key of MODE_EVENT_COUNTS) {
+    const n = d[key];
+    if (isNumber(n) && n >= 0) data[key] = Math.min(Math.floor(n), MODE_EVENT_COUNT_MAX);
+  }
+  if (isString(d.why) && PICTURE_WHY.has(d.why)) data.why = d.why;
+  if (isString(d.projectChecks) && PROJECT_CHECKS.has(d.projectChecks)) data.projectChecks = d.projectChecks;
+}
+
 function pickEvent(v: unknown, folder: string): MissionEvent | null {
   if (!isRecord(v) || !isString(v.at) || !Number.isFinite(Date.parse(v.at)) || !isString(v.type) || !isRecord(v.data)) return null;
   const d = v.data;
@@ -585,6 +641,7 @@ function pickEvent(v: unknown, folder: string): MissionEvent | null {
     // Only how many there are is shown, never the names (they are paths).
     if (Array.isArray(d[key])) data[key] = d[key].slice(0, EVENT_LIST_MAX_ITEMS).map(() => "");
   }
+  if (MODE_EVENT_TYPES.has(v.type)) pickModeEventData(d, data);
   return { at: new Date(Date.parse(v.at)).toISOString(), missionId: isString(v.missionId) ? cleanId(v.missionId) : folder, type: clean(v.type, ID_MAX_CHARS), data };
 }
 

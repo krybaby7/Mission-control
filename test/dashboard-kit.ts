@@ -123,6 +123,7 @@ export const FIXTURE_CASES: Record<string, FixtureCase> = {
   "trouble-wait": { now: MID, lockAt: "2026-10-11T09:58:00.000Z" },
   "unknown-wait": { now: MID, lockAt: "2026-10-11T09:58:00.000Z" },
   "feature-mission-labels": { now: MID, lockAt: "2026-10-11T09:58:00.000Z" },
+  "modes-review-round": { now: Date.parse("2026-10-11T09:58:30.000Z"), lockAt: "2026-10-11T09:58:00.000Z" },
   "waiting-then-running": { now: Date.parse("2026-10-11T12:59:40.000Z"), lockAt: "2026-10-11T09:58:25.597Z" },
   "stale-busy-under-live-run": { now: MID, lockAt: "2026-10-11T09:50:00.000Z" },
   "restart-midnight": { now: Date.parse("2026-10-12T03:20:00.000Z"), lockAt: "2026-10-12T03:10:00.000Z" },

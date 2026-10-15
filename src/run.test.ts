@@ -1,11 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "./config.js";
 import { Dispatcher } from "./dispatcher.js";
 import { type MockBehavior, MockRunner, type MockScript } from "./runners/mock.js";
-import { parseUntil, rebaseLinks, runNight } from "./run.js";
+import { missionOutcome, parseUntil, rebaseLinks, runNight } from "./run.js";
 import { MissionStore } from "./state.js";
 import type { AgentJob, Config, Mission, MissionStatus, RoleOverride } from "./types.js";
 import { FakeClock } from "./util/clock.js";
@@ -122,10 +122,52 @@ describe("runNight", () => {
     const r = runners(loggedOut);
     const result = await runNight({ config: testConfig(), logger: nullLogger, runners: r });
     expect(result.missions).toEqual([]);
-    expect(result.summaryPath).toMatch(/reports\/night-\d{4}-\d{2}-\d{2}\.md$/);
+    expect(result.summaryPath).toMatch(/reports\/run-\d{4}-\d{2}-\d{2}\.md$/);
     expect(readFileSync(result.summaryPath, "utf8")).toContain("Nothing was queued");
     expect(allCalls(r)).toHaveLength(0);
     expect(notifications()).toEqual([expect.objectContaining({ title: "Run finished", priority: "3" })]);
+  });
+
+  it("names the summary and the log of a run run-<date>, a second summary of the same day with -2, and leaves night-<date> files of earlier runs alone", async () => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true); // the run's own log lines
+    const clock = new FakeClock(new Date(2026, 9, 10, 12, 0).getTime());
+    mkdirSync(join(home, "reports"), { recursive: true });
+    mkdirSync(join(home, "logs"), { recursive: true });
+    writeFileSync(join(home, "reports", "night-2026-10-10.md"), "an earlier run\n");
+    writeFileSync(join(home, "logs", "night-2026-10-10.log"), "an earlier log\n");
+    const first = await runNight({ config: testConfig(), clock, runners: runners(loggedOut) });
+    const second = await runNight({ config: testConfig(), clock, runners: runners(loggedOut) });
+    expect(first.summaryPath).toBe(join(home, "reports", "run-2026-10-10.md"));
+    expect(second.summaryPath).toBe(join(home, "reports", "run-2026-10-10-2.md"));
+    expect(readFileSync(join(home, "logs", "run-2026-10-10.log"), "utf8")).toContain("Run finished. Summary:");
+    expect(existsSync(join(home, "logs", "night-2026-10-10.log"))).toBe(true);
+    expect(readFileSync(join(home, "reports", "night-2026-10-10.md"), "utf8")).toBe("an earlier run\n");
+  });
+
+  it("puts curly quote marks around a mission's title in the log", async () => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const clock = new FakeClock(new Date(2026, 9, 10, 12, 0).getTime());
+    const m = queue("Habit tracker");
+    await runNight({ config: testConfig(), clock, runners: runners(loggedOut) });
+    const log = readFileSync(join(home, "logs", "run-2026-10-10.log"), "utf8");
+    expect(log).toContain(`Working on “Habit tracker” (${m.id})`);
+    expect(log).toContain("“Habit tracker”: Stopped, needs your help, no features planned yet");
+    expect(log).not.toMatch(/Working on "|"Habit tracker":/);
+  });
+
+  it("says one feature, not 1 features, in the summary and in the phone notice", async () => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const m = queue("One feature app", { status: "stopped", stage: "features" });
+    const waiting = store().load(m.id);
+    waiting.features = [{ id: "only", title: "Only", story: "s", acceptance: ["a"], kind: "standard", deps: [], status: "pending", rung: 0, attempts: [], frozenTests: [], reviewRounds: 0, openFindings: [] }];
+    store().save(waiting);
+    const result = await runNight({ config: testConfig(), runners: runners(loggedOut) });
+    expect(readFileSync(result.summaryPath, "utf8")).toMatch(/- \*\*One feature app\*\*: [A-Za-z, ]+, 0 of 1 feature done\. /);
+    const finished = notifications().find((n) => n.title === "Run finished");
+    expect(finished?.body).toMatch(/One feature app: [A-Za-z, ]+, 0 of 1 feature done/);
+    expect(finished?.body).not.toContain("1 features");
+    expect(missionOutcome({ ...waiting, status: "done", features: [{ ...waiting.features[0]!, status: "done" }] })).toBe("Done, 1 of 1 feature done");
+    expect(missionOutcome({ ...waiting, features: [waiting.features[0]!, { ...waiting.features[0]!, id: "second" }] })).toMatch(/, 0 of 2 features done$/);
   });
 
   it("works through resumable missions in creation order and leaves finished ones alone", async () => {
@@ -299,7 +341,7 @@ describe("runNight", () => {
 
     expect(statusOf(m.id)).toBe("stopped");
     expect(readFileSync(result.summaryPath, "utf8")).toContain("Stopped at 07:00 as planned.");
-    expect(result.summaryPath).toContain("night-2026-10-10");
+    expect(result.summaryPath).toContain("run-2026-10-10");
   });
 
   it("refuses a stop time that passed a little while ago, instead of working about 24 hours through the day", async () => {

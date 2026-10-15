@@ -2,6 +2,7 @@ import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildReportFacts, collectScreenshots, howToRun, renderReport, usageSummary } from "./report.js";
 import type { Feature, Mission, ReportProseOutput, UsageRecord } from "./types.js";
@@ -801,6 +802,211 @@ describe("renderReport", () => {
     m.features = [m.features[1]!];
     m.decisionsNeeded = [];
     expect(render(m, { prose: null })).toContain("The feature is built and checked.");
+  });
+});
+
+// ───────────────────────────── Compatibility: a mission with no mode is reported as it was ─────────────────────────────
+
+describe("a mission with no feature that a test does not check", () => {
+  const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "report");
+  const missionFile = JSON.parse(readFileSync(join(FIXTURES, "legacy-mission.json"), "utf8")) as Mission;
+  const parked = (kind: "plan" | "feature" | "final", featureId?: string): NonNullable<Mission["checkpoint"]> => ({
+    id: kind === "feature" ? `feature:${featureId}#1` : `${kind}#1`,
+    scope: kind === "feature" ? `feature:${featureId}` : kind,
+    kind,
+    ...(featureId ? { featureId } : {}),
+    round: 1,
+    state: "pending",
+    parkedAt: "2026-10-10T04:00:00.000Z",
+    look: { headline: "Check it", lines: ["a line of the look"], ...(kind === "feature" ? { branch: "mc/2026-10-09-habit-tracker--tick-habit", files: ["src/tick.ts"] } : {}) },
+  });
+  const variants: Record<string, Mission> = {
+    complete: missionFile,
+    "done-single": { ...missionFile, status: "done", decisionsNeeded: [], features: [missionFile.features[0]!] },
+    "done-all": { ...missionFile, status: "done", decisionsNeeded: [], features: missionFile.features.slice(0, 2) },
+    "parked-feature": { ...missionFile, status: "stopped", stage: "features", checkpoints: ["plan", "feature", "final"], checkpoint: parked("feature", "tick-habit"), features: [missionFile.features[0]!, { ...missionFile.features[1]!, status: "reviewing" }] },
+    "parked-plan-leader": { ...missionFile, status: "stopped", stage: "init", plan: { spec: missionFile.spec!, sha256: `a4adaca5${"0".repeat(56)}`, at: "2026-10-12T09:00:00.000Z" }, checkpoints: ["plan"], checkpoint: parked("plan"), features: [] },
+    "parked-final": { ...missionFile, status: "stopped", stage: "gate_c", checkpoints: ["final"], checkpoint: parked("final"), features: missionFile.features.slice(0, 2), checkpointLog: [] },
+  };
+  const prose: ReportProseOutput = { narrative: "Your habit tracker is up and running. You can add habits and tick them off.", whatYouCanDo: ["Add a habit by typing its name", "Tick off a habit when you've done it today"] };
+  // The local time of the report differs with the time zone; the one change on purpose since the golden files were made is the singular.
+  const normal = (text: string): string => text.replace(/report written \d{4}-\d\d-\d\d \d\d:\d\d/g, "report written <time>").replaceAll("1 of 1 features done", "1 of 1 feature done");
+  const golden = (name: string): string => normal(readFileSync(join(FIXTURES, name), "utf8"));
+
+  it.each(Object.keys(variants))("%s: the report is the same text as the one the end of wave 1 wrote, word for word", (name) => {
+    const text = renderReport(variants[name]!, { prose, usage: [], screenshots: [], generatedAt: "2026-10-10T05:00:00.000Z", inContainer: false });
+    expect(normal(text)).toBe(golden(`legacy-${name}.report.md`));
+  });
+
+  it.each(Object.keys(variants))("%s: the facts for the summary writer are the same text", (name) => {
+    expect(normal(buildReportFacts(variants[name]!, []))).toBe(golden(`legacy-${name}.facts.txt`));
+  });
+
+  it("the fixtures hold no feature with a mode, so these are the old words", () => {
+    for (const m of Object.values(variants)) expect(m.features.some((f) => f.mode !== undefined)).toBe(false);
+  });
+});
+
+// ───────────────────────────── A mission with a feature that no test checks (docs/modes-spec.md 10.1 and 8.5) ─────────────────────────────
+
+describe("a report for a mission that has a feature no test checks", () => {
+  const result = (n: number, r: "pass" | "fail" | "cannot_judge") => ({ n, result: r, evidence: "e", basis: "text" as const });
+  const checked = (results: ("pass" | "fail" | "cannot_judge")[], extra = {}): Feature["checked"] => ({
+    round: 1,
+    reviewer: "claude",
+    results: results.map((r, i) => result(i + 1, r)),
+    unjudged: results.filter((r) => r === "cannot_judge").length,
+    scripted: { problems: [], facts: [] },
+    pictures: { taken: 0 },
+    ...extra,
+  });
+  const log = (scope: string, decision: "approve" | "send_back") => ({ id: `${scope}#1`, scope, kind: "feature" as const, round: 1, decision, at: "2026-10-10T03:00:00.000Z" });
+
+  /** A finished mission: one feature with tests, one checked by a second AI, one the plan marked for the owner's look and the owner approved. */
+  function mixed(): Mission {
+    const m = realisticMission();
+    m.status = "done";
+    m.decisionsNeeded = [];
+    m.features = [
+      feature({ id: "add-habit", title: "Add a habit", status: "done", acceptance: ["a", "b", "c"], frozenTests: [{ path: "a.test.ts", sha256: "x" }] }),
+      feature({ id: "guide", title: "Setup guide", status: "done", acceptance: ["a", "b", "c"], mode: "review", checked: checked(["pass", "pass", "pass"]) }),
+      feature({ id: "landing", title: "Landing page", status: "done", acceptance: ["a", "b", "c"], mode: "owner", checked: checked(["pass", "pass", "pass"]) }),
+    ];
+    m.checkpointLog = [log("feature:landing", "approve")];
+    return m;
+  }
+
+  it("adds a Checked line under the title, after the Plan line, counting the finished features by how each was checked", () => {
+    const report = render(mixed(), { prose: null });
+    expect(report).toContain(
+      "Checked: 1 feature by tests; 1 feature by a second AI against your list; 1 feature by a second AI against your list and approved by you.\n",
+    );
+    const lines = report.split("\n");
+    const at = lines.findIndex((l) => l.startsWith("Checked:"));
+    expect(lines[at - 2]).toMatch(/^\*\*Done\*\* · 3 of 3 features done/);
+    expect(at).toBeLessThan(10);
+    // with a plan from the leader, the Checked line follows the Plan line
+    const withPlan = render({ ...mixed(), plan: { spec: mixed().spec as never, sha256: `a4adaca5${"0".repeat(56)}`, at: "2026-10-12T09:00:00.000Z" } }, { prose: null }).split("\n");
+    const planAt = withPlan.findIndex((l) => l.startsWith("Plan: written by the leader"));
+    expect(withPlan[planAt + 2]).toMatch(/^Checked: /);
+  });
+
+  it("adds no line, and changes no word, when no finished feature has a mode", () => {
+    const m = realisticMission();
+    expect(render(m)).not.toContain("Checked:");
+    const stuck = mixed();
+    stuck.features[1] = feature({ id: "guide", title: "Setup guide", status: "blocked", mode: "review", blockedReason: "x" });
+    stuck.features.splice(2, 1);
+    expect(render(stuck, { prose: null })).not.toContain("Checked:");
+    expect(render(stuck, { prose: null })).toContain("| ✅ | Add a habit | Built and checked |");
+  });
+
+  it("says in the Features table how each finished feature was checked, for each row of the table", () => {
+    const m = mixed();
+    const rows: [Partial<Feature>, string][] = [
+      [{ mode: undefined, frozenTests: [] }, "Built; checked by the project's own checks only, because no tests were written for it"],
+      [{ mode: "review", checked: undefined }, "Built; the second AI's check did not finish, so only Mission Control's own checks ran"],
+      [{ mode: "review", checked: checked(["pass", "fail", "fail"]) }, "Built, but 2 of 3 checks were not met (see the review notes)"],
+      [{ mode: "review", checked: checked(["pass", "cannot_judge", "pass"]) }, "Built; 1 check was not judged by anyone"],
+      [{ mode: "review", checked: checked(["pass", "pass", "pass"]) }, "Built; a second AI checked it against your list (3 of 3 passed)"],
+    ];
+    for (const [fields, words] of rows) {
+      m.features[1] = { ...m.features[1]!, ...fields };
+      expect(render(m, { prose: null })).toContain(`| ✅ | Setup guide | ${words} |`);
+    }
+    expect(render(m, { prose: null })).toContain("| ✅ | Add a habit | Built and checked |");
+    expect(render(m, { prose: null })).toContain("| ✅ | Landing page | Built; a second AI checked it against your list (3 of 3 passed); approved by you |");
+  });
+
+  it("adds the ending for a feature queued without a stop for the owner's look, and the one for an approval", () => {
+    const m = mixed();
+    m.ownerStops = false;
+    m.checkpointLog = [];
+    m.features[1] = { ...m.features[1]!, checked: checked(["pass", "cannot_judge", "pass"]) };
+    const report = render(m, { prose: null });
+    expect(report).toContain("| ✅ | Landing page | Built; a second AI checked it against your list (3 of 3 passed); it was queued without a stop for your look |");
+    expect(report).toContain("| ✅ | Setup guide | Built; 1 check was not judged by anyone; it was queued without a stop for your look |");
+    expect(report).toContain(
+      "Checked: 1 feature by tests; 1 feature by a second AI against your list, except 1 check it could not judge (it was queued without a stop for your look); 1 feature by a second AI against your list (it was queued without a stop for your look).",
+    );
+  });
+
+  it("counts the review notes only where the words do not already point to them", () => {
+    const m = mixed();
+    const note = { severity: "major" as const, file: null, description: "Check 2 is not met.", suggestedTest: null };
+    m.features[1] = { ...m.features[1]!, checked: checked(["pass", "fail", "pass"]), openFindings: [note] };
+    m.features[2] = { ...m.features[2]!, openFindings: [note] };
+    const report = render(m, { prose: null });
+    expect(report).toContain("| ✅ | Setup guide | Built, but 1 of 3 checks were not met (see the review notes) |");
+    expect(report).toContain("| ✅ | Landing page | Built; a second AI checked it against your list (3 of 3 passed); approved by you (1 review note below) |");
+  });
+
+  it("does not say built and checked in the plain narrative, and sends the reader to the Checked line and the table", () => {
+    const m = mixed();
+    const report = render(m, { prose: null });
+    expect(report).toContain("All 3 features are built. The “Checked” line and the Features table say how each was checked. The final checks of the whole app passed.");
+    expect(report).not.toContain("built and checked.");
+    expect(report).not.toContain("Everything passed the final checks.");
+    // one feature, and a partly done mission
+    const one = mixed();
+    one.features = [one.features[1]!];
+    expect(render(one, { prose: null })).toContain("The feature is built. The Features table says how it was checked. The final checks of the whole app passed.");
+    const part = mixed();
+    part.status = "partial";
+    part.features[2] = feature({ id: "landing", title: "Landing page", status: "blocked", mode: "owner", blockedReason: "x" });
+    expect(render(part, { prose: null })).toContain("2 of the 3 features are built.");
+    expect(render(part, { prose: null })).not.toContain("are built and checked.");
+  });
+
+  it("puts how a finished feature was checked in the facts for the summary writer, only for a feature that has a mode", () => {
+    const facts = buildReportFacts(mixed(), []);
+    expect(facts).toContain('- add-habit "Add a habit" [done]: You can add a habit.\n');
+    expect(facts).toContain('- guide "Setup guide" [done]: You can setup guide. Checked by: a second AI against your list. No tests were written for it.\n');
+    expect(facts).toContain('- landing "Landing page" [done]: You can landing page. Checked by: a second AI against your list and approved by you. No tests were written for it.\n');
+    expect(buildReportFacts(realisticMission(), [])).not.toContain("Checked by:");
+  });
+
+  it("leaves out the AI-written summary and list when they talk about tests, and says so in the technical details", () => {
+    const talks: ReportProseOutput[] = [
+      { narrative: "All the features were tested and pass.", whatYouCanDo: ["Read the guide"] },
+      { narrative: "The guide and the page are ready.", whatYouCanDo: ["Read the guide", "Everything is tested"] },
+      { narrative: "It passed its tests.", whatYouCanDo: [] },
+      { narrative: "We are testing it.", whatYouCanDo: [] },
+      { narrative: "TEST results are in.", whatYouCanDo: [] },
+    ];
+    for (const prose of talks) {
+      const report = render(mixed(), { prose });
+      expect(report).not.toContain(prose.narrative);
+      expect(report).toContain("All 3 features are built. The “Checked” line");
+      expect(sectionText(report, "What you can do now")).toContain("**Setup guide**: You can setup guide.");
+      expect(sectionText(report, "Technical details")).toContain("The AI-written summary was left out, because it described how the work was checked in words that do not match Mission Control's records.");
+      expect(sectionText(report, "What you can do now")).not.toContain("Everything is tested");
+    }
+    // a summary that says nothing about tests is kept
+    const clean: ReportProseOutput = { narrative: "The guide and the page are ready.", whatYouCanDo: ["Read the guide"] };
+    const report = render(mixed(), { prose: clean });
+    expect(report).toContain("The guide and the page are ready.");
+    expect(sectionText(report, "What you can do now")).toBe("- Read the guide");
+    expect(sectionText(report, "Technical details")).not.toContain("left out");
+    // words that only contain test, like "latest" and "contest", are not the word
+    expect(render(mixed(), { prose: { narrative: "The latest guide won the contest.", whatYouCanDo: [] } })).toContain("The latest guide won the contest.");
+  });
+
+  it("keeps the AI-written summary of a mission with no mode feature, whatever it says about tests", () => {
+    const m = realisticMission();
+    const prose: ReportProseOutput = { narrative: "Every feature was tested.", whatYouCanDo: ["Run the tests"] };
+    const report = render(m, { prose });
+    expect(report).toContain("Every feature was tested.");
+    expect(sectionText(report, "Technical details")).not.toContain("left out");
+  });
+
+  it("says nothing of tests about a feature that no test checked, anywhere in a report of only such features", () => {
+    const m = mixed();
+    m.features = m.features.slice(1);
+    const report = render(m, { prose: null });
+    const allowed = /No tests were written for it|by tests/g;
+    const text = report.slice(0, report.indexOf("## Usage"));
+    expect(text.replace(allowed, "")).not.toMatch(/\btest(s|ed|ing)?\b/i);
   });
 });
 

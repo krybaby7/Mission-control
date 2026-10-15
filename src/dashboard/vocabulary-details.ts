@@ -1,6 +1,7 @@
 // The words of the detail modules: the wait text, the timeline, the allowance and the debrief (the results).
 // vocabulary.ts re-exports this file, so there is still one vocabulary. Nothing in here reads a file or a clock; times
 // arrive already formatted, so these functions are plain string builders.
+import type { CheckedFacts } from "./modes.js";
 import type { PillStateId, Said, TickId, Tone, VerdictId, WaitInfo } from "./types.js";
 
 const open = "“";
@@ -221,6 +222,19 @@ export const DEBRIEF_ALLOWANCE_NOTE =
   "The AI work runs on your existing Claude and Codex plans, so there is no separate bill. This page cannot show your share of the week yet.";
 export const DEBRIEF_HONESTY_NOTE = "These are the AI team's own checks, not a human review.";
 
+/**
+ * The honesty note when the checkpoint log of a mission with a feature checked by a second AI holds the owner's approval of one or
+ * more features (docs/modes-spec.md, 11.4). `titles` are those features' titles, in file order. It says what the log holds, never that
+ * the owner opened anything (M26). With no title the note is the constant above.
+ */
+export function honestyNoteFor(titles: readonly string[]): string {
+  const [first, second] = titles;
+  if (first === undefined) return DEBRIEF_HONESTY_NOTE;
+  const one = titles.length === 1;
+  const who = one ? name(first) : titles.length === 2 && second !== undefined ? `${name(first)} and ${name(second)}` : `${name(first)}, ${name(second ?? "")} and ${titles.length - 2} more`;
+  return `These are the AI team's own checks. You were asked to look at ${who} and approved ${one ? "it" : "them"}.`;
+}
+
 export interface VerdictFacts {
   /** Features done, and all features. */
   done: number;
@@ -229,15 +243,22 @@ export interface VerdictFacts {
   leftOut: number;
   /** Question cards of the mission. */
   questions: number;
+  /**
+   * True only for a mission that has a feature checked by a second AI. Its sentences then say "built", and the list of results says
+   * how each feature was checked, because "built and checked" would claim tests for a feature that no test checked. Absent otherwise.
+   */
+  modes?: boolean;
 }
 
 export function verdictSentence(id: VerdictId, v: VerdictFacts): string {
   switch (id) {
     case "done":
       if (v.total === 0) return "No features were planned.";
+      if (v.modes === true) return v.total === 1 ? "The feature is built. The list below says how it was checked." : `All ${v.total} features are built. The list below says how each was checked.`;
       return v.total === 1 ? "The feature is built and checked." : `All ${v.total} features are built and checked.`;
     case "partly_done": {
-      const parts = [v.done === v.total ? "Every feature is built, but the final check left something open." : `${v.done} of ${v.total} features are built and checked.`];
+      const built = v.modes === true ? `${v.done} of ${v.total} features are built.` : `${v.done} of ${v.total} features are built and checked.`;
+      const parts = [v.done === v.total ? "Every feature is built, but the final check left something open." : built];
       if (v.stuck > 0) parts.push(`${v.stuck} ${v.stuck === 1 ? "feature is" : "features are"} stuck.`);
       if (v.stuck === 0 && v.leftOut > 0) parts.push(`${v.leftOut} ${v.leftOut === 1 ? "feature was" : "features were"} left out.`);
       if (v.questions > 0) parts.push(`${v.questions} ${v.questions === 1 ? "question is" : "questions are"} waiting for you.`);
@@ -269,12 +290,24 @@ export interface DeliveredFacts extends VerdictFacts {
   /** Features not built yet in a paused mission. */
   unbuilt: number;
   paused: boolean;
+  /** How each finished feature was checked; only for a mission that has a feature checked by a second AI (then `modes` is true). */
+  checked?: readonly CheckedFacts[];
 }
 
 export function deliveredWhy(yes: boolean, v: DeliveredFacts): string {
   if (v.total === 0) return "No features were planned.";
-  if (yes) return v.total === 1 ? "The feature was built and checked." : `All ${v.total} features were built and checked.`;
-  const parts = [`${v.done} of ${v.total} features were built and checked.`];
+  const how = v.modes === true && v.checked !== undefined ? v.checked : null;
+  if (yes) {
+    if (how !== null && how.length > 0) {
+      const [only] = how;
+      return only !== undefined && how.length === 1 && v.total === 1
+        ? `The feature was built. It was checked ${checkedGroupWords(only)}.`
+        : `All ${v.total} features were built. How they were checked: ${checkedSummary(how)}.`;
+    }
+    return v.total === 1 ? "The feature was built and checked." : `All ${v.total} features were built and checked.`;
+  }
+  const parts = [v.modes === true ? `${v.done} of ${v.total} features were built.` : `${v.done} of ${v.total} features were built and checked.`];
+  if (how !== null && how.length > 0) parts.push(`How the finished ones were checked: ${checkedSummary(how)}.`);
   if (v.stuck > 0) parts.push(`${v.stuck} ${v.stuck === 1 ? "is" : "are"} stuck.`);
   if (v.leftOut > 0) parts.push(`${v.leftOut} ${v.leftOut === 1 ? "was" : "were"} left out.`);
   if (v.paused && v.unbuilt > 0) parts.push(`${v.unbuilt} not finished yet.`);
@@ -289,7 +322,8 @@ export type FinalReviewWhy =
   | { kind: "tests_failed"; baselineBroken: boolean }
   | { kind: "blocking"; count: number };
 
-export function finalReviewWhy(w: FinalReviewWhy): string {
+/** `noTests`: no finished feature of the mission is checked by tests, so the final check is not told as one of tests (docs/modes-spec.md, 10.3). */
+export function finalReviewWhy(w: FinalReviewWhy, noTests = false): string {
   switch (w.kind) {
     case "passed":
       return "The final review ran and found no serious problem.";
@@ -301,22 +335,32 @@ export function finalReviewWhy(w: FinalReviewWhy): string {
       return "The final review did not finish, so nobody reviewed the whole app.";
     case "tests_failed":
       // With a red baseline the engine judges the final check by the regression run of the new features' tests.
+      if (noTests) return w.baselineBroken ? "The project's checks did not all pass together on the final result." : "The final checks of the whole app did not all pass.";
       return w.baselineBroken ? "The new features' tests did not all pass together on the final result." : "The final tests of the whole app did not all pass.";
     case "blocking":
       return `The final review found ${w.count} serious ${w.count === 1 ? "problem that was" : "problems that were"} not fixed.`;
   }
 }
 
-/** The caveat on the Final review passed tick; null when no part applies. `unreviewed` is the count of features merged without their own review. */
-export function finalReviewCaveat(unreviewed: number, coveredOnly: number | null): string | null {
+/**
+ * The caveat on the Final review passed tick; null when no part applies. `unreviewed` is the count of features merged without their own
+ * review. `noTests` is how many finished features no test checked, counted only for a mission that has a feature checked by a second AI
+ * (docs/modes-spec.md, 11.4); it adds the sentence that sends the reader to the list of results.
+ */
+export function finalReviewCaveat(unreviewed: number, coveredOnly: number | null, noTests = 0): string | null {
   const parts: string[] = [];
   if (unreviewed > 0) parts.push(`${unreviewed} ${unreviewed === 1 ? "feature was" : "features were"} merged without ${unreviewed === 1 ? "its" : "their"} own review.`);
   if (coveredOnly !== null) parts.push(`It covered only the ${coveredOnly} ${coveredOnly === 1 ? "feature" : "features"} that ${coveredOnly === 1 ? "was" : "were"} built.`);
+  if (noTests > 0) parts.push(noTests === 1 ? "1 feature has no tests. The list below says how it was checked." : `${noTests} features have no tests. The list below says how each was checked.`);
   return parts.length === 0 ? null : parts.join(" ");
 }
 
-/** The notes the engine writes when a feature's own review did not finish (src/dispatcher.ts). */
-export const UNFINISHED_REVIEW_NOTE = /^The review of ".*" did not finish, so it was merged after passing its checks\.$/;
+/**
+ * The notes the engine writes when a feature's own review did not finish (src/dispatcher.ts): "The review of “Title” did not finish, so
+ * it was merged after passing its checks." and, for a feature checked by a second AI, "... after passing Mission Control's own checks
+ * only." Straight or curly marks around the title, either ending (docs/modes-spec.md, 11.1).
+ */
+export const UNFINISHED_REVIEW_NOTE = /^The review of ["\u201C].*["\u201D] did not finish, so it was merged after passing (?:its checks|Mission Control's own checks only)\.$/;
 
 export function nothingOpenWhy(openItems: number, baselineBroken: boolean): string {
   if (openItems === 0 && !baselineBroken) return "Nothing is waiting for you.";
@@ -342,12 +386,89 @@ export function agentTimeLine(ms: number): string {
   return m === 0 ? `about ${h} h of AI work` : `about ${h} h ${m} min of AI work`;
 }
 
+// ───────────────────────────── How a feature was checked (docs/modes-spec.md, 10.1 and 11.4) ─────────────────────────────
+// The dashboard's own copy of the engine's table (src/checked-by.ts), in shorter words. The rule for every line: never "tested" or
+// "passed its tests" for a feature that no test checked; "approved by you" is what the checkpoint log holds, never "you looked at it";
+// "a second AI", never "a different AI"; "Mission Control's own checks" for the scripts and "the project's own checks" for the app's.
+
+const QUEUED_WITHOUT_LOOK = "queued without a stop for your look";
+
+/** The line under a finished feature in "What you got". */
+export function checkedByWords(h: CheckedFacts): string {
+  const ending = h.approved ? "; approved by you" : h.queuedWithoutLook ? `; ${QUEUED_WITHOUT_LOOK}` : "";
+  switch (h.row) {
+    case 1:
+      return "Checked by tests; approved by you";
+    case 2:
+      return `Checked by the project's own checks only; no tests were written${h.approved ? "; approved by you" : ""}`;
+    case 3:
+      return "Checked by tests";
+    case 4:
+      return `Checked by Mission Control's own checks only; the second AI's check did not finish${ending}`;
+    case 5:
+      return `Checked by a second AI against your list; ${count(h.unmet, "check was", "checks were")} not met${ending}`;
+    case 6:
+      return `Checked by a second AI against your list; ${count(h.unjudged, "check was", "checks were")} not judged${ending}`;
+    case 7:
+      return `Checked by a second AI against your list${ending}`;
+  }
+}
+
+/**
+ * The same facts as a phrase that follows "It was checked" or a count ("2 by tests"): no semicolon and no comma inside, so a list of
+ * groups reads cleanly. A row 7 feature that the owner approved is "by a second AI and approved by you".
+ */
+export function checkedGroupWords(h: CheckedFacts): string {
+  const approved = h.approved ? " and approved by you" : "";
+  const queued = !h.approved && h.queuedWithoutLook ? QUEUED_WITHOUT_LOOK : null;
+  const inBrackets = (...parts: (string | null)[]): string => {
+    const kept = parts.filter((p): p is string => p !== null);
+    return kept.length === 0 ? "" : ` (${kept.join("; ")})`;
+  };
+  switch (h.row) {
+    case 1:
+      return "by tests and approved by you";
+    case 2:
+      return `by the project's own checks only${approved}`;
+    case 3:
+      return "by tests";
+    case 4:
+      return `by Mission Control's own checks only${inBrackets(queued)}${approved}`;
+    case 5:
+      return `by a second AI against your list${inBrackets(`${count(h.unmet, "check", "checks")} not met`, queued)}${approved}`;
+    case 6:
+      return `by a second AI against your list${inBrackets(`${count(h.unjudged, "check", "checks")} not judged`, queued)}${approved}`;
+    case 7:
+      return h.approved ? "by a second AI and approved by you" : `by a second AI against your list${inBrackets(queued)}`;
+  }
+}
+
+/**
+ * "1 by tests, 1 by a second AI against your list, 1 by a second AI and approved by you": the groups of equal words with their counts,
+ * in the order of the rows (an approved group of row 1 sits with its base, row 3; an approved group follows its unapproved one).
+ */
+export function checkedSummary(list: readonly CheckedFacts[]): string {
+  const groups = new Map<string, { rank: number; approved: boolean; n: number }>();
+  for (const h of list) {
+    const words = checkedGroupWords(h);
+    const group = groups.get(words);
+    if (group === undefined) groups.set(words, { rank: h.row === 1 ? 3 : h.row, approved: h.approved, n: 1 });
+    else group.n += 1;
+  }
+  return [...groups.entries()]
+    .sort(([wa, a], [wb, b]) => a.rank - b.rank || Number(a.approved) - Number(b.approved) || (wa < wb ? -1 : wa > wb ? 1 : 0))
+    .map(([words, g]) => `${g.n} ${words}`)
+    .join(", ");
+}
+
 // ───────────────────────────── Reasons (spec 4.5, 9.2, 9.3) ─────────────────────────────
 // The timeline shows why a feature is stuck and why a mission failed. A text is the engine's only when it matches a
 // string the engine writes in full; the default is `ai`, which the page labels.
 
 const FEATURE_REASONS: { exact?: string; start?: RegExp; shown: string }[] = [
   { exact: "tried every escalation step, but its checks still failed", shown: "The AI team tried every step it has, and the checks still failed." },
+  // A feature checked by a second AI (docs/modes-spec.md, 5.2 and 11.1). The first problem that follows the colon is plan or file text and is never shown.
+  { start: /^tried every escalation step, but Mission Control's own checks still failed/, shown: "The AI team tried every step it has, and Mission Control's own checks still failed." },
   {
     exact: "no acceptance tests could be written for it, and the project's own checks were already failing, so nothing could check it",
     shown: "It could not be checked: no tests could be written, and the project's own checks were already failing.",
@@ -497,8 +618,16 @@ export const TL = {
   baselineSuiteFailed: "The project's own full test suite failed. It was already failing before this work started.",
   newFeatureTestsPassed: "The tests of the new features passed together on the final result.",
   newFeatureTestsFailed: "The tests of the new features did not all pass together on the final result.",
+  // The same final steps for a mission that has features checked by a second AI and none checked by tests (docs/modes-spec.md, 11.5).
+  finalChecksPassed: "The final checks of the whole app passed.",
+  finalChecksFailed: "The final checks of the whole app failed.",
+  baselineChecksFailed: "The project's own full check failed. It was already failing before this work started.",
+  projectChecksPassed: "The project's checks passed on the final result.",
+  projectChecksFailed: "The project's checks did not all pass together on the final result.",
   checkTimedOut: (f: string | null) => (f === null ? "A check took too long and was stopped." : `A check on ${name(f)} took too long and was stopped.`),
   merged: (f: string) => `${name(f)} is built and checked.`,
+  /** A feature checked by a second AI: it was not checked by tests, so the row only says it was added. */
+  mergedByReading: (f: string) => `${name(f)} is added.`,
   aiStepUnfinished: (f: string | null) =>
     f === null ? "An AI step did not finish. It ran too long or stopped working." : `An AI step on ${name(f)} did not finish. It ran too long or stopped working.`,
   loginExpired: "A login has expired.",
@@ -534,4 +663,15 @@ export const TL = {
   checkpointLimit: (t: string, kind?: string, f?: string | null) =>
     kind === "feature" && f != null ? `You sent ${name(f)} back twice before, so it is set aside. The rest carries on. The report says what to do.` : `You sent this back twice before, so ${name(t)} stops here. The report says what to do.`,
   checkpointRejected: (t: string) => `An answer to the check of ${name(t)} was ignored because it did not match. The check is still waiting.`,
+  // A feature checked by a second AI (docs/modes-spec.md, 11.2). Counts only, never a check, a file name or the AI's words.
+  deliverableProblems: (f: string) => `Mission Control's own checks of ${name(f)} found problems. The AI is asked to fix them.`,
+  rubricAnswered(f: string, pass: number, fail: number, unjudged: number): { text: string; tone: Tone } {
+    const total = pass + fail + unjudged;
+    let text = `A second AI checked ${name(f)} against your list: ${pass} of ${total} ${total === 1 ? "check" : "checks"} passed.`;
+    if (fail > 0) text += ` ${fail} ${fail === 1 ? "needs" : "need"} a fix.`;
+    if (unjudged > 0) text += ` ${unjudged} could not be judged.`;
+    return { text, tone: fail === 0 && unjudged === 0 && total > 0 ? "good" : "warn" };
+  },
+  picturesTaken: (f: string) => `Pictures of ${name(f)} were taken at phone width and desktop width.`,
+  picturesNone: (f: string) => `No pictures of ${name(f)} could be taken.`,
 } as const;

@@ -600,6 +600,12 @@ export interface DebriefFeature {
   note: Said | null;
   /** Ladder steps used (see FeatureView.steps). */
   attempts: number;
+  /**
+   * How the feature was checked, in one short line (docs/modes-spec.md, 11.4): "Checked by tests", "Checked by a second AI against
+   * your list; 1 check was not judged; approved by you". Only on the items of "What you got" of a mission that has a feature
+   * checked by a second AI, and then on every item, so the list reads evenly. The key is absent for every other mission. Engine.
+   */
+  checkedBy?: string;
 }
 
 export interface MissionDebrief {
@@ -630,7 +636,11 @@ export interface Debrief {
   missions: MissionDebrief[];
   /** The allowance sentence. The share of the week cannot be shown (the engine keeps it in memory only). Engine. */
   allowanceNote: string;
-  /** "These are the AI team's own checks, not a human review." Constant. */
+  /**
+   * "These are the AI team's own checks, not a human review." Constant, except that it says so when the checkpoint log of a mission
+   * with a feature checked by a second AI holds the owner's approval of a feature: "These are the AI team's own checks. You were
+   * asked to look at “A” and approved it." (docs/modes-spec.md, 11.4).
+   */
   honestyNote: string;
 }
 

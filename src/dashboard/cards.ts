@@ -2,6 +2,7 @@
 // Pure: it reads the mission views and the cleaned mission files. The words are in vocabulary.ts.
 import { CHECKPOINT_LINES_MAX, CHECKPOINT_SEND_BACK_CAP, MAX_DECISIONS_SHOWN } from "./constants.js";
 import type { MissionFacts } from "./missions.js";
+import { lookWhy, noTestsDone } from "./modes.js";
 import type { CardKind, FeatureView, NeedsYouCard, Said } from "./types.js";
 import { CARD_KINDS } from "./types.js";
 import {
@@ -176,6 +177,8 @@ function checkpointCard(x: MissionFacts, names: LeaderNames): NeedsYouCard | nul
   const sentBack = (mission.checkpointLog ?? []).filter((r) => r.scope === cp.scope && r.decision === "send_back").length;
   // A plan stop of a mission whose plan came in with `mc plan queue`: it stops by default, not because the owner asked to.
   const leaderPlan = cp.kind === "plan" && mission.plan !== undefined;
+  // A stop at a feature checked by a second AI that the owner did not ask for: the card says why the team stopped (docs/modes-spec.md, 11.3).
+  const why = cp.kind === "feature" && feature !== undefined ? lookWhy(mission, feature, sentBack) : undefined;
   return {
     id: `checkpoint:${x.view.id}:0`,
     kind: "checkpoint",
@@ -185,8 +188,8 @@ function checkpointCard(x: MissionFacts, names: LeaderNames): NeedsYouCard | nul
     fromEarlier: false,
     featureId: cp.kind === "feature" && feature !== undefined ? feature.id : null,
     title: CARD_TEXT.checkpointTitle(x.view.title, cp.kind, facts.featureTitle),
-    happened: engineSays(leaderPlan ? CARD_TEXT.checkpointHappenedLeaderPlan : CARD_TEXT.checkpointHappened),
-    summary: checkpointSummary(cp.kind, cp.look.branch ?? null, sentBack, CHECKPOINT_SEND_BACK_CAP, leaderPlan),
+    happened: engineSays(why !== undefined ? CARD_TEXT.checkpointHappenedLook[why] : leaderPlan ? CARD_TEXT.checkpointHappenedLeaderPlan : CARD_TEXT.checkpointHappened),
+    summary: checkpointSummary(cp.kind, cp.look.branch ?? null, sentBack, CHECKPOINT_SEND_BACK_CAP, leaderPlan, why !== undefined),
     ifNothing: CARD_TEXT.checkpointIfNothing,
     whatToDo: engineSays(CARD_TEXT.checkpointWhatToDo),
     tellLeader: LEADER.checkpoint(names, ref),
@@ -293,7 +296,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
         severity: "look",
         fromEarlier: false,
         title: CARD_TEXT.checksTitle(view.title),
-        happened: { text: CARD_TEXT.checksHappened, author: "engine" },
+        happened: { text: x.data.mission !== null && noTestsDone(x.data.mission) ? CARD_TEXT.checksHappenedByReading : CARD_TEXT.checksHappened, author: "engine" },
         ifNothing: CARD_TEXT.checksIfNothing,
         whatToDo: null,
         tellLeader: LEADER.checks(names, ref),

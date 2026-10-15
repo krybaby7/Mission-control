@@ -146,6 +146,8 @@ const done = features.filter((f) => f.status === "done");
 put("features_total", features.length);
 put("features_done", done.length);
 put("features_tested", done.filter((f) => Array.isArray(f.frozenTests) && f.frozenTests.length > 0).length);
+// Features checked by a second AI and not by tests (docs/modes-spec.md, 10.5): only these change the words of "What was checked".
+put("features_modes", done.filter((f) => f.mode === "review" || f.mode === "owner").length);
 for (const f of features.filter((x) => x.status !== "done").slice(0, 20)) put("open", plain(f.status, 20), plain(f.title || f.id, 100));
 if (m.baselineBroken === true) put("baseline_broken", "1");
 const notes = Array.isArray(m.notes) ? m.notes : [];
@@ -167,8 +169,14 @@ try {
     let skipping = false;
     let lastBlank = true;
     let kept = 0;
+    let checked = "";
     for (const raw of fs.readFileSync(file, "utf8").split("\n").slice(0, 120)) {
       const line = raw.replace(/\r$/, "");
+      // The report's own "Checked:" line (in its header), copied as the report wrote it.
+      if (checked === "" && /^Checked: /.test(line)) {
+        checked = plain(line, 600);
+        put("checked", checked);
+      }
       if (/^#{1,2} /.test(line)) skipping = /^## (How to try it|Usage|Technical details)\b/.test(line);
       if (skipping || line.trim().startsWith("![")) continue;
       const text = reportLine(line);
@@ -882,7 +890,7 @@ read_mission_facts() {
 # Sets the F_* variables from FACTS_SCRIPT's lines. A value is data: it is only compared, counted and checked later.
 parse_mission_facts() {
   F_ID="" F_KIND="" F_STATUS="" F_TITLE="" F_REPO="" F_BASE="" F_BRANCH="" F_BASESHA="" F_PLAN=""
-  F_TOTAL=0 F_DONE=0 F_TESTED=0 F_UNFINISHED_REVIEWS=0 F_BASELINE_BROKEN=""
+  F_TOTAL=0 F_DONE=0 F_TESTED=0 F_MODES=0 F_UNFINISHED_REVIEWS=0 F_BASELINE_BROKEN="" F_CHECKED=""
   F_OPEN=() F_ASKED=() F_ANSWERS=() F_REPORT=()
   local line key rest
   while IFS= read -r line; do
@@ -904,6 +912,8 @@ parse_mission_facts() {
       features_total) F_TOTAL="$rest" ;;
       features_done) F_DONE="$rest" ;;
       features_tested) F_TESTED="$rest" ;;
+      features_modes) F_MODES="$rest" ;;
+      checked) F_CHECKED="$rest" ;;
       unfinished_reviews) F_UNFINISHED_REVIEWS="$rest" ;;
       baseline_broken) F_BASELINE_BROKEN="$rest" ;;
       open) F_OPEN+=("$rest") ;;
@@ -917,7 +927,7 @@ parse_mission_facts() {
     greenfield | feature) ;;
     *) F_KIND="" ;;
   esac
-  for key in F_TOTAL F_DONE F_TESTED F_UNFINISHED_REVIEWS; do
+  for key in F_TOTAL F_DONE F_TESTED F_MODES F_UNFINISHED_REVIEWS; do
     [[ "${!key}" =~ ^[0-9]{1,6}$ ]] || printf -v "$key" '%s' 0
   done
 }
@@ -950,16 +960,40 @@ write_pull_request_body() {
     printf '\n'
     printf '%s\n' "## What was checked"
     printf '\n'
+    local by_reading=""
+    if [ "$F_DONE" -gt 0 ] && [ "$F_MODES" -gt 0 ]; then
+      by_reading=1
+    fi
     if [ "$F_DONE" -eq 0 ]; then
       printf '%s\n' "- Tests: no feature was finished, so there is no test result to show."
+    elif [ -n "$by_reading" ]; then
+      # Some finished features were checked by a second AI and not by tests: no sentence may claim a test for them (spec 10.3).
+      local checked_text
+      checked_text="$(body_safe "${F_CHECKED#Checked: }")"
+      printf '%s\n' "- Tests: the team wrote tests before the code for $F_TESTED of $F_DONE finished features. The features on the Checked line below were not checked by tests."
+      if [ "${F_CHECKED:0:9}" = "Checked: " ] && [ -n "$checked_text" ]; then
+        printf '%s\n' "- Checked: $checked_text"
+      else
+        printf '%s\n' "- Checked: the report says how each feature was checked."
+      fi
     else
       printf '%s\n' "- Tests: the team wrote tests before the code for $F_TESTED of $F_DONE finished features. A feature counts as finished only when its tests and the app's own checks pass."
     fi
     if [ -n "$F_BASELINE_BROKEN" ]; then
-      printf '%s\n' "- The app's own checks were already failing before this work started, so only the new tests judged the new work."
+      if [ -z "$by_reading" ]; then
+        printf '%s\n' "- The app's own checks were already failing before this work started, so only the new tests judged the new work."
+      elif [ "$F_TESTED" -gt 0 ]; then
+        printf '%s\n' "- The app's own checks were already failing before this work started, so they could not be used to judge the new work. The features checked by tests were judged by their new tests only."
+      else
+        printf '%s\n' "- The app's own checks were already failing before this work started, so they could not be used to judge the new work."
+      fi
     fi
     if [ "$F_UNFINISHED_REVIEWS" -gt 0 ]; then
-      printf '%s\n' "- Review: a separate AI reviewer reads each feature before it is added. $F_UNFINISHED_REVIEWS review(s) did not finish. Those features were added after their tests passed."
+      local added_after="their tests passed"
+      if [ -n "$by_reading" ]; then
+        added_after="Mission Control's own checks passed"
+      fi
+      printf '%s\n' "- Review: a separate AI reviewer reads each feature before it is added. $F_UNFINISHED_REVIEWS review(s) did not finish. Those features were added after $added_after."
     else
       printf '%s\n' "- Review: a separate AI reviewer reads each feature before it is added. The first lines of the report are below. The whole report, with what the reviewers left open, is in the mission's report.md."
     fi

@@ -19,6 +19,10 @@ function strArray(description?: string): JsonSchema {
   return withDescription({ type: "array", items: { type: "string" } }, description);
 }
 
+function integer(description?: string): JsonSchema {
+  return withDescription({ type: "integer" }, description);
+}
+
 function arrayOf(items: JsonSchema, description?: string): JsonSchema {
   return withDescription({ type: "array", items }, description);
 }
@@ -123,6 +127,31 @@ export const SCHEMAS = {
   reportProse: obj({
     narrative: str("3-8 plain-language sentences for a non-programmer"),
     whatYouCanDo: strArray("Things the user can now do in the app, in plain language"),
+  }),
+  rubric: obj({
+    verdict: enumOf(["approve", "changes"], "approve only when every check passes"),
+    results: arrayOf(
+      obj({
+        number: integer("The number of the check in the list"),
+        check: str("The check, copied from the list"),
+        result: enumOf(["pass", "fail", "cannot_judge"]),
+        evidence: str(
+          "An exact quote in quotation marks with the file name, or what a picture shows, or where you looked and found nothing. One or two sentences",
+        ),
+        basis: enumOf(
+          ["text", "picture"],
+          "text when the judgement rests on the words of the files, picture when it rests on a picture you opened",
+        ),
+      }),
+    ),
+    seen: strArray("The files and pictures you really opened, as the brief names them"),
+    notes: arrayOf(
+      obj({
+        severity: enumOf(["major", "minor"]),
+        file: nullableStr("The file, or null"),
+        description: str("A problem outside the list that would mislead or hurt a reader"),
+      }),
+    ),
   }),
 };
 

@@ -3,6 +3,7 @@
 // mission: the state machine the dispatcher follows at a gate, the one function that records an answer, and the
 // plain-language texts the command line, the report and the phone notices share. The dispatcher (dispatcher.ts)
 // does the stopping, the reworking and the carrying on.
+import { isDerivedFeature, lookReason, stoppedBecause } from "./checked-by.js";
 import { type MissionStore, planOf } from "./state.js";
 import type { CheckpointAnswer, CheckpointKind, CheckpointRecord, Mission, MissionEvent, PendingCheckpoint, PlanReview } from "./types.js";
 import { stripControlChars } from "./util/terminal.js";
@@ -14,9 +15,11 @@ export const MAX_SEND_BACKS = 2;
 export const MAX_NOTE_CHARS = 2000;
 /** The log keeps this many entries (see trimLog). */
 export const MAX_LOG_ENTRIES = 50;
-/** Features the engine adds by itself: the owner is not asked about them. */
-const DERIVED_FEATURE = /^(?:gate-c-fix|owner-change)-/;
 const MAX_TEXT_CHARS = 300;
+
+// Features the engine adds by itself (the owner is not asked about them) are told apart in checked-by.ts, which holds the
+// one rule for who is asked; it is exported from here as before.
+export { isDerivedFeature };
 
 export function isCheckpointKind(x: unknown): x is CheckpointKind {
   return CHECKPOINT_KINDS.includes(x as CheckpointKind);
@@ -30,10 +33,6 @@ export function scopeOf(kind: CheckpointKind, featureId?: string): string {
 /** "<scope>#<round>", for example "feature:add-shout#2". */
 export function checkpointId(scope: string, round: number): string {
   return `${scope}#${round}`;
-}
-
-export function isDerivedFeature(id: string): boolean {
-  return DERIVED_FEATURE.test(id);
 }
 
 /** The owner's note as stored: one line, no control characters. */
@@ -142,15 +141,18 @@ export type GateStep =
 
 /**
  * The state machine at a gate, as a pure function of the mission. `recorded` is `answerIsRecorded(...)` (the caller reads
- * the events only when a checkpoint is answered).
+ * the events only when a checkpoint is answered). `asked` says whether this gate stops at all. It defaults to the old rule,
+ * that the owner chose this kind of check; a feature gate passes `asksForLook(m, f)`, which also covers the features the
+ * plan marks for the owner's look (docs/modes-spec.md 5.2, step 8).
  */
 export function nextCheckpointState(
   m: Pick<Mission, "checkpoints" | "checkpoint" | "checkpointLog">,
   kind: CheckpointKind,
   featureId: string | undefined,
   recorded: boolean,
+  asked: boolean = m.checkpoints?.includes(kind) === true,
 ): GateStep {
-  if (!m.checkpoints?.includes(kind)) return { step: "go" };
+  if (!asked) return { step: "go" };
   if (kind === "feature" && (featureId === undefined || isDerivedFeature(featureId))) return { step: "go" };
   const scope = scopeOf(kind, featureId);
   if (isPassed(m, scope)) return { step: "go" };
@@ -276,8 +278,18 @@ export function isLeaderPlanStop(m: Pick<Mission, "plan">, cp: Pick<PendingCheck
  * the caller), or the leader wrote this plan. The second names the command that prints all of the plan, because
  * `mc report` shows only its first 40 lines.
  */
-export function whyStopped(m: Pick<Mission, "id" | "plan" | "features">, cp: Pick<PendingCheckpoint, "kind" | "featureId">, what = lookAt(m, cp)): string {
+export function whyStopped(
+  m: Pick<Mission, "id" | "plan" | "features"> & Partial<Pick<Mission, "ownerStops" | "checkpoints" | "checkpointLog">>,
+  cp: Pick<PendingCheckpoint, "kind" | "featureId">,
+  what = lookAt(m, cp),
+): string {
   if (isLeaderPlanStop(m, cp)) return `the leader wrote this plan, and you look at such a plan first. Read all of it with: mc plan show ${m.id}`;
+  // A feature stop the owner did not ask for with `--checkpoint feature` says why it stops: the plan marks the feature, the second AI could not judge it, ...
+  if (cp.kind === "feature" && m.checkpoints?.includes("feature") !== true) {
+    const f = m.features.find((x) => x.id === cp.featureId);
+    const reason = f ? lookReason(m, f) : undefined;
+    if (reason !== undefined) return stoppedBecause(reason, featureTitle(m, cp.featureId));
+  }
   return `you asked to look at ${what} first`;
 }
 

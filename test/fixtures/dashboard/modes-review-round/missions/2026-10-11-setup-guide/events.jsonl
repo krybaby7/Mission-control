@@ -1,0 +1,20 @@
+{"at":"2026-10-11T09:58:00.000Z","missionId":"2026-10-11-setup-guide","type":"mission.start","data":{"stage":"spec"}}
+{"at":"2026-10-11T09:58:03.000Z","missionId":"2026-10-11-setup-guide","type":"spec","data":{"appName":"Habit tracker","features":["setup-guide"]}}
+{"at":"2026-10-11T09:58:05.000Z","missionId":"2026-10-11-setup-guide","type":"stage","data":{"from":"gate_a","to":"features"}}
+{"at":"2026-10-11T09:58:06.000Z","missionId":"2026-10-11-setup-guide","type":"feature.status","data":{"feature":"setup-guide","from":"pending","to":"building"}}
+{"at":"2026-10-11T09:58:07.000Z","missionId":"2026-10-11-setup-guide","type":"run.start","data":{"label":"build-setup-guide","jobId":"build-setup-guide-1","provider":"claude","model":"model-x","role":"engineer","effort":"medium"}}
+{"at":"2026-10-11T09:58:08.000Z","missionId":"2026-10-11-setup-guide","type":"run.end","data":{"label":"build-setup-guide","jobId":"build-setup-guide-1","provider":"claude","model":"model-x","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:08.500Z","missionId":"2026-10-11-setup-guide","type":"deliverable.checked","data":{"feature":"setup-guide","label":"a1","ok":false,"problems":1}}
+{"at":"2026-10-11T09:58:09.000Z","missionId":"2026-10-11-setup-guide","type":"attempt","data":{"feature":"setup-guide","rung":0,"action":"build","outcome":"fail"}}
+{"at":"2026-10-11T09:58:10.000Z","missionId":"2026-10-11-setup-guide","type":"run.start","data":{"label":"build-setup-guide","jobId":"build-setup-guide-2","provider":"claude","model":"model-x","role":"engineer","effort":"medium"}}
+{"at":"2026-10-11T09:58:11.000Z","missionId":"2026-10-11-setup-guide","type":"run.end","data":{"label":"build-setup-guide","jobId":"build-setup-guide-2","provider":"claude","model":"model-x","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:11.500Z","missionId":"2026-10-11-setup-guide","type":"deliverable.checked","data":{"feature":"setup-guide","label":"a2","ok":true,"problems":0}}
+{"at":"2026-10-11T09:58:12.000Z","missionId":"2026-10-11-setup-guide","type":"attempt","data":{"feature":"setup-guide","rung":1,"action":"build","outcome":"pass"}}
+{"at":"2026-10-11T09:58:12.100Z","missionId":"2026-10-11-setup-guide","type":"feature.status","data":{"feature":"setup-guide","from":"building","to":"reviewing"}}
+{"at":"2026-10-11T09:58:13.000Z","missionId":"2026-10-11-setup-guide","type":"run.start","data":{"label":"review-setup-guide","jobId":"review-setup-guide-1","provider":"claude","model":"model-x","role":"reviewer","effort":"medium"}}
+{"at":"2026-10-11T09:58:19.000Z","missionId":"2026-10-11-setup-guide","type":"run.end","data":{"label":"review-setup-guide","jobId":"review-setup-guide-1","provider":"claude","model":"model-x","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:19.500Z","missionId":"2026-10-11-setup-guide","type":"rubric.checked","data":{"feature":"setup-guide","round":1,"pass":3,"fail":1,"unjudged":0,"downgraded":0,"reviewer":"claude"}}
+{"at":"2026-10-11T09:58:20.000Z","missionId":"2026-10-11-setup-guide","type":"run.start","data":{"label":"fix-setup-guide","jobId":"fix-setup-guide-1","provider":"claude","model":"model-x","role":"engineer","effort":"medium"}}
+{"at":"2026-10-11T09:58:22.000Z","missionId":"2026-10-11-setup-guide","type":"run.end","data":{"label":"fix-setup-guide","jobId":"fix-setup-guide-1","provider":"claude","model":"model-x","outcome":"ok","durationMs":40}}
+{"at":"2026-10-11T09:58:22.500Z","missionId":"2026-10-11-setup-guide","type":"deliverable.checked","data":{"feature":"setup-guide","label":"fix1","ok":true,"problems":0}}
+{"at":"2026-10-11T09:58:24.000Z","missionId":"2026-10-11-setup-guide","type":"run.start","data":{"label":"review-setup-guide","jobId":"review-setup-guide-2","role":"reviewer","provider":"claude","model":"model-x","effort":"medium"}}

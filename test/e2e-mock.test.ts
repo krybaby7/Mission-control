@@ -170,7 +170,7 @@ describe("e2e: a new app, start to finish", () => {
     expect(sectionOf(report, "Technical details")).toContain(m.integrationBranch);
 
     // The night summary links the report relatively; latest.md is the last mission's report.
-    expect(night.summaryPath).toBe(join(w.home, "reports", "night-2026-10-10.md"));
+    expect(night.summaryPath).toBe(join(w.home, "reports", "run-2026-10-10.md"));
     const summary = read(night.summaryPath);
     expect(summary).toContain(`- **Fixture app**: Done, 2 of 2 features done. [Read the report](../missions/${m.id}/report.md)`);
     expect(summary).toContain("Every queued mission was worked on.");
@@ -731,7 +731,7 @@ describe("e2e: a feature for an existing project", () => {
     expect(w.gitOut(repo, ["diff", base, m.integrationBranch, "--", "lib.mjs", "tests/lib.test.mjs"])).toBe(""); // nobody "fixed" the old test
 
     const report = w.report(m.id);
-    expect(report).toContain("**Done** · 1 of 1 features done");
+    expect(report).toContain("**Done** · 1 of 1 feature done");
     expect(sectionOf(report, "Needs your decision")).toContain("already failing before I started");
     expect(report).toContain("### Checks failing before the mission");
     expect(sectionOf(report, "How to try it")).toContain(`git checkout ${m.integrationBranch}`);
@@ -787,7 +787,7 @@ describe("e2e: --until while waiting for limits", () => {
     const night2 = await w.night({ until: "07:00" });
 
     expect(night2.missions.map((m) => [m.id, m.status])).toEqual([[queued.id, "done"]]);
-    expect(night2.summaryPath).toBe(join(w.home, "reports", "night-2026-10-11.md"));
+    expect(night2.summaryPath).toBe(join(w.home, "reports", "run-2026-10-11.md"));
     expect(runsOf(w.labeled("build-greet")).at(-1)).toEqual(["build-greet", "codex", SOL, "medium"]);
     expect(["gate-a", "init", "test-greet"].map((l) => w.labeled(l).length)).toEqual([1, 1, 1]);
     expect(attemptsOf(w.mission(queued.id), "greet")).toEqual([[0, "build", "codex", SOL, "medium", "pass"]]);
@@ -862,7 +862,7 @@ describe("e2e: every login has expired", () => {
     const m = w.mission(queued.id);
     expect(m.status).toBe("done");
     const report = w.report(m.id);
-    expect(report).toContain("**Done** · 1 of 1 features done");
+    expect(report).toContain("**Done** · 1 of 1 feature done");
     // The login problem was solved: the morning report and the night summary must not tell the user to log in again.
     expect(sectionOf(report, "Needs your decision")).not.toContain("Log in again");
     expect(read(night.summaryPath)).not.toContain("Log in again");

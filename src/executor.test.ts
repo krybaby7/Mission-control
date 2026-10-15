@@ -186,6 +186,16 @@ describe("RoleExecutor: running a job", () => {
     expect(r.claude.calls[0]).toMatchObject({ outputSchema: schema, noTools: true, access: "read-only", limits: { maxTurns: 40, timeoutMs: 5_000 } });
   });
 
+  it("passes the folders a read-only run may open files from to the job, and nothing when there are none", async () => {
+    const r = runners();
+    await executor(r).exec(request({ family: "claude", role: "reviewer", access: "read-only", readDirs: ["/home/u/missions/m1/screenshots"] }));
+    expect(r.claude.calls[0]?.readDirs).toEqual(["/home/u/missions/m1/screenshots"]);
+    const none = runners();
+    await executor(none).exec(request({ family: "claude", role: "reviewer", access: "read-only" }));
+    await executor(none).exec(request({ family: "claude", role: "reviewer", access: "read-only", readDirs: [] }));
+    for (const call of none.claude.calls) expect(Object.keys(call)).not.toContain("readDirs");
+  });
+
   it("records usage and run events in the mission", async () => {
     clock = new FakeClock(Date.UTC(2026, 9, 10, 2, 0, 0));
     quota = new QuotaGovernor({ clock, config });

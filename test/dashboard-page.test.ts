@@ -593,6 +593,20 @@ describe("T-PAGE a list that the snapshot cut says so (counts.missionsNotShown a
   });
 });
 
+describe("T-PAGE how a feature was checked (docs/modes-spec.md, 11.4)", () => {
+  it("draws the snapshot's checkedBy line under each finished feature, as plain text, and only when the snapshot has it", () => {
+    const list = functionSource("featureList");
+    expect(list).toContain("f.checkedBy");
+    expect(list).toMatch(/if \(f\.checkedBy\) li\.appendChild\(el\("p", "small muted", f\.checkedBy\)\);/);
+    // the line is text from the snapshot: it is never turned into markup
+    expect(list).not.toMatch(/innerHTML|insertAdjacentHTML|outerHTML/);
+  });
+
+  it("adds no new look to the page: the line uses the classes of the planned-features line", () => {
+    expect(functionSource("resultsMission")).toContain('el("p", "small muted", d.plannedLine)');
+  });
+});
+
 describe("T-PAGE the page and the server agree", () => {
   it("has a policy with the hash of its one script and its one style and no 'unsafe-inline'", () => {
     const policy = contentSecurityPolicy(html);

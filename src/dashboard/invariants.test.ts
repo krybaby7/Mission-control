@@ -183,6 +183,87 @@ function check(s: Snapshot, label: string): void {
   if (s.lamp.state !== "on_track") expect(s.lamp.sentence, label).not.toContain("Nothing needs you");
 }
 
+/**
+ * The same random homes, with work modes put on top (docs/modes-spec.md, 11): features that carry a mode, an effort and a record of the
+ * second AI's answer, some of them damaged, the three new event types with odd values, an ownerStops flag and approvals in the log.
+ * A seed of its own keeps `home(seed)` as it was, so the homes of the first test do not change.
+ */
+function withModes(parts: HomeParts, seed: number): HomeParts {
+  const r = random(seed * 7919 + 13);
+  const checked = (): unknown =>
+    r.pick([
+      undefined,
+      "yes",
+      { unjudged: r.int(0, 3), results: [{ result: "pass", evidence: "SECRET-EVIDENCE" }, { result: r.pick(["fail", "cannot_judge", "maybe"]) }], scripted: { problems: ["SECRET-PROBLEM"], facts: [] } },
+      { unjudged: -2, unfinished: true, results: "none" },
+      { unjudged: "7", results: [null, 4, { result: 5 }] },
+    ]);
+  for (const mp of parts.missions ?? []) {
+    const m = mp.mission as Mission & Record<string, unknown>;
+    for (const f of m.features as (Feature & Record<string, unknown>)[]) {
+      if (!r.chance(0.6)) continue;
+      f.mode = r.pick(["review", "owner", "tests", "banana", 3]) as never;
+      f.effort = r.pick(["light", "deep", "standard", "huge", undefined]) as never;
+      f.checked = checked() as never;
+      f.expect = { headings: ["SECRET-HEADING"] } as never;
+      f.acceptance = ["SECRET-CHECK-TEXT"];
+    }
+    if (r.chance(0.3)) m.ownerStops = r.pick([false, true, "no"]) as never;
+    if (r.chance(0.4)) {
+      m.checkpointLog = m.features.map((f) => ({ id: `feature:${f.id}#1`, scope: `feature:${f.id}`, kind: "feature", featureId: f.id, round: 1, decision: r.pick(["approve", "send_back"]), at: iso(MID - HOUR) })) as never;
+    }
+    if (r.chance(0.3) && m.features[0] !== undefined) {
+      const f = m.features[0];
+      m.status = "stopped";
+      m.checkpoint = { id: `feature:${f.id}#1`, scope: `feature:${f.id}`, kind: "feature", featureId: f.id, round: 1, state: "pending", parkedAt: iso(MID - 5000), look: { headline: "Check", lines: ["x"], branch: "mc/x" } } as never;
+      if (r.chance(0.5)) m.checkpoints = ["feature"];
+    }
+    const extra: MissionEvent[] = [];
+    for (let i = r.int(0, 6); i > 0; i--) {
+      const feature = r.pick([...m.features.map((f) => f.id), "ghost"]);
+      const num = () => r.pick([0, 1, 2, 3, -1, 2.5, 1e12, "4", null, Number.NaN]);
+      extra.push(
+        r.pick([
+          makeEvent(m.id, MID - r.int(1, 50) * SECOND, "rubric.checked", { feature, round: num(), pass: num(), fail: num(), unjudged: num(), downgraded: num(), reviewer: "SECRET-REVIEWER" }),
+          makeEvent(m.id, MID - r.int(1, 50) * SECOND, "pictures.taken", { feature, taken: num(), why: r.pick(["no_tool", "no_browser", "too_slow", "<script>", 7, undefined]) }),
+          makeEvent(m.id, MID - r.int(1, 50) * SECOND, "deliverable.checked", { feature, label: "a1", ok: r.pick([true, false, "no"]), problems: num(), projectChecks: r.pick(["passed", "failed", "maybe", undefined]) }),
+        ]),
+      );
+    }
+    mp.events = [...(mp.events ?? []), ...extra];
+  }
+  return parts;
+}
+
+describe("invariants over random homes with work modes", () => {
+  it("builds a valid snapshot for 300 random homes, never a calm one while something is wrong, and never shows a check text or evidence", () => {
+    for (let seed = 1; seed <= 300; seed++) {
+      const s = snap(buildHome(withModes(home(seed), seed), MID), MID);
+      check(s, `modes seed ${seed}`);
+      expect(JSON.stringify(s), `modes seed ${seed}`).not.toMatch(/SECRET/);
+    }
+  });
+
+  it("says how a feature was checked only for a mission that has a feature with a real mode", () => {
+    for (let seed = 1; seed <= 200; seed++) {
+      const parts = withModes(home(seed), seed);
+      const s = snap(buildHome(parts, MID), MID);
+      for (const d of s.debrief?.missions ?? []) {
+        const source = (parts.missions ?? []).find((mp) => mp.mission.id === d.missionId)?.mission;
+        const real = (source?.features ?? []).some((f) => f.mode === "review" || f.mode === "owner");
+        for (const g of d.got) expect("checkedBy" in g, `modes seed ${seed}: ${d.missionId}/${g.featureId}`).toBe(real);
+      }
+    }
+  });
+
+  it("the same random home gives the same snapshot twice", () => {
+    for (const seed of [3, 17, 99, 250]) {
+      const dir = buildHome(withModes(home(seed), seed), MID);
+      expect(JSON.stringify(snap(dir, MID))).toBe(JSON.stringify(snap(dir, MID)));
+    }
+  });
+});
+
 describe("invariants over random homes", () => {
   it("builds a valid snapshot for 400 random homes, and never a calm one while something is wrong", () => {
     for (let seed = 1; seed <= 400; seed++) {

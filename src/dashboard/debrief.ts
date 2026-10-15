@@ -2,23 +2,26 @@
 // (docs/dashboard-spec.md, section 11). Pure: it only reads what the other modules already built.
 import { REASON_MAX_CHARS } from "./constants.js";
 import type { MissionFacts } from "./missions.js";
+import { approvedTitles, checkedFacts, checkedList, hasModeFeature, hasNoTests, noTestsDone } from "./modes.js";
 import type { UsageRecord } from "./read.js";
 import { clean } from "./sanitize.js";
 import type { Debrief, DebriefFeature, FeatureView, MissionDebrief, NeedsYouCard, Said, Tick, TickState, Verdict, VerdictId } from "./types.js";
 import {
   agentTimeLine,
+  checkedByWords,
   DEBRIEF_ALLOWANCE_NOTE,
-  DEBRIEF_HONESTY_NOTE,
   deliveredWhy,
   finalReviewCaveat,
   type FinalReviewWhy,
   finalReviewWhy,
+  honestyNoteFor,
   overallSentence,
   noReworkWhy,
   nothingOpenWhy,
   plannedLine,
   TICK_LABELS,
   UNFINISHED_REVIEW_NOTE,
+  type VerdictFacts,
   verdictSentence,
   VERDICT_WORDS,
 } from "./vocabulary-details.js";
@@ -65,7 +68,12 @@ export function buildDebrief(m: MissionFacts[], cards: NeedsYouCard[], usage: Us
   const worst = WORST_FIRST.find((id) => counts[id] > 0) ?? "done";
   const [only] = missions;
   const sentence = only !== undefined && missions.length === 1 ? only.verdict.sentence : overallSentence(counts);
-  return { verdict: verdict(worst, sentence), missions, allowanceNote: DEBRIEF_ALLOWANCE_NOTE, honestyNote: DEBRIEF_HONESTY_NOTE };
+  // The owner's approvals that the checkpoint logs hold, for the missions that have a feature checked by a second AI (docs/modes-spec.md, 11.4).
+  const approved = entries.flatMap(({ facts }) => {
+    const mission = facts.data.mission;
+    return mission !== null && hasModeFeature(mission) ? approvedTitles(mission) : [];
+  });
+  return { verdict: verdict(worst, sentence), missions, allowanceNote: DEBRIEF_ALLOWANCE_NOTE, honestyNote: honestyNoteFor(approved) };
 }
 
 function missionDebrief(facts: MissionFacts, id: VerdictId, cards: NeedsYouCard[], usage: UsageRecord[] | null): MissionDebrief {
@@ -81,6 +89,13 @@ function missionDebrief(facts: MissionFacts, id: VerdictId, cards: NeedsYouCard[
   const recovered = view.features.filter((x) => x.recovered);
 
   const stories = new Map((mission?.features ?? []).map((x) => [x.id, x.story]));
+  // A mission with a feature checked by a second AI says how each finished feature was checked (11.4). Every other mission is shown as before.
+  const modes = mission !== null && hasModeFeature(mission);
+  const byId = new Map((mission?.features ?? []).map((x) => [x.id, x]));
+  const checkedBy = (x: FeatureView): { checkedBy?: string } => {
+    const source = byId.get(x.id);
+    return modes && mission !== null && source !== undefined ? { checkedBy: checkedByWords(checkedFacts(mission, source)) } : {};
+  };
   const feature = (x: FeatureView, note: Said | null): DebriefFeature => ({ featureId: x.id, title: x.title, note, attempts: x.steps.used });
   const storyOf = (x: FeatureView): Said | null => {
     const story = stories.get(x.id);
@@ -88,7 +103,7 @@ function missionDebrief(facts: MissionFacts, id: VerdictId, cards: NeedsYouCard[
     return text === "" ? null : { text, author: "ai" };
   };
 
-  const facts4 = { done, total, stuck, leftOut, questions };
+  const facts4: VerdictFacts = { done, total, stuck, leftOut, questions, ...(modes && { modes: true }) };
   const ticks = [
     deliveredTick(facts, facts4),
     finalReviewTick(facts, done, total),
@@ -104,7 +119,7 @@ function missionDebrief(facts: MissionFacts, id: VerdictId, cards: NeedsYouCard[
     title: view.title,
     verdict: verdict(id, verdictSentence(id, facts4)),
     plannedLine: plannedLine(total),
-    got: view.features.filter((x) => x.state === "done").map((x) => feature(x, storyOf(x))),
+    got: view.features.filter((x) => x.state === "done").map((x) => ({ ...feature(x, storyOf(x)), ...checkedBy(x) })),
     leftOut: view.features.filter((x) => x.state === "stuck" || x.state === "left_out").map((x) => feature(x, x.reason)),
     recovered: recovered.map((x) => feature(x, storyOf(x))),
     ticks,
@@ -118,14 +133,16 @@ function tickState(yes: boolean): TickState {
   return yes ? "yes" : "no";
 }
 
-function deliveredTick(facts: MissionFacts, v: { done: number; total: number; stuck: number; leftOut: number; questions: number }): Tick {
+function deliveredTick(facts: MissionFacts, v: VerdictFacts): Tick {
   const yes = v.total > 0 && v.done === v.total;
   const paused = facts.view.state === "paused";
+  const mission = facts.data.mission;
+  const checked = v.modes === true && mission !== null ? checkedList(mission) : undefined;
   return {
     id: "delivered",
     label: TICK_LABELS.delivered,
     state: tickState(yes),
-    why: deliveredWhy(yes, { ...v, unbuilt: facts.unbuilt, paused }),
+    why: deliveredWhy(yes, { ...v, unbuilt: facts.unbuilt, paused, ...(checked !== undefined && { checked }) }),
     caveat: null,
   };
 }
@@ -168,5 +185,15 @@ function finalReviewTick(facts: MissionFacts, done: number, total: number): Tick
 
   const unreviewed = (mission?.notes ?? []).filter((n) => UNFINISHED_REVIEW_NOTE.test(n)).length;
   const coveredOnly = finalVerify !== null && done > 0 && done < total ? done : null;
-  return { id: "final_review", label: TICK_LABELS.final_review, state, why: finalReviewWhy(why), caveat: finalReviewCaveat(unreviewed, coveredOnly) };
+  // For a mission with a feature checked by a second AI, the final check is not told as one of tests, and the caveat counts the finished
+  // features that no test checked (11.4). Any other mission keeps its old words.
+  const modes = mission !== null && hasModeFeature(mission);
+  const noTests = mission !== null && modes ? checkedList(mission).filter(hasNoTests).length : 0;
+  return {
+    id: "final_review",
+    label: TICK_LABELS.final_review,
+    state,
+    why: finalReviewWhy(why, mission !== null && noTestsDone(mission)),
+    caveat: finalReviewCaveat(unreviewed, coveredOnly, noTests),
+  };
 }

@@ -536,3 +536,79 @@ describe("a plan written outside the team", () => {
     expect(render(mission({ plan, checkpoint: feature, features: [stage] }))).toContain("because you asked to look at “Add shout”, before it is added first.");
   });
 });
+
+// ───────────────────────────── Stops the plan asks for (docs/modes-spec.md 5.2 step 8 and 10.2 line 8) ─────────────────────────────
+
+describe("a stop at a feature that the plan marks for the owner's look", () => {
+  const all: CheckpointKind[] = ["plan", "feature", "final"];
+  const feature = (id: string, fields: Partial<Feature> = {}): Feature => ({
+    id,
+    title: `Title of ${id}`,
+    story: "s",
+    acceptance: ["a", "b"],
+    kind: "standard",
+    deps: [],
+    status: "reviewing",
+    rung: 0,
+    attempts: [],
+    frozenTests: [],
+    reviewRounds: 0,
+    openFindings: [],
+    ...fields,
+  });
+
+  it("the fifth parameter of nextCheckpointState says whether the gate stops, and defaults to the old rule", () => {
+    // the default is the owner's choice of this kind of check, exactly as before
+    expect(nextCheckpointState({}, "feature", "a", false)).toEqual({ step: "go" });
+    expect(nextCheckpointState({ checkpoints: all }, "feature", "a", false)).toEqual({ step: "ask", round: 1 });
+    expect(nextCheckpointState({ checkpoints: ["plan"] }, "feature", "a", false)).toEqual({ step: "go" });
+    // a gate that the plan asks for, with no choice of the owner's
+    expect(nextCheckpointState({}, "feature", "a", false, true)).toEqual({ step: "ask", round: 1 });
+    expect(nextCheckpointState({ checkpoints: all }, "feature", "a", false, false)).toEqual({ step: "go" });
+    // the rest of the machine is the same: waiting, approved, sent back, the limit, a feature the engine added itself
+    const waiting = { checkpoint: pending("feature", 1, "a") };
+    expect(nextCheckpointState(waiting, "feature", "a", false, true)).toEqual({ step: "stay" });
+    expect(nextCheckpointState({ checkpoint: answered(pending("feature", 1, "a")) }, "feature", "a", true, true)).toEqual({ step: "pass" });
+    expect(nextCheckpointState({ checkpointLog: [record("feature:a", "approve")] }, "feature", "a", false, true)).toEqual({ step: "go" });
+    expect(nextCheckpointState({ checkpoint: answered(pending("feature", 1, "a"), "send_back", "x") }, "feature", "a", true, true)).toEqual({ step: "rework", change: 1 });
+    expect(nextCheckpointState({}, "feature", "gate-c-fix-1", false, true)).toEqual({ step: "go" });
+  });
+
+  it("says why the team stopped in the words of that stop, for the plan's mark, a check not judged, a review that did not finish, and a send-back", () => {
+    const base = { id: "2026-10-12-guide", plan: undefined };
+    const stop = (f: Feature, fields: Partial<Mission> = {}): string => whyStopped({ ...base, features: [f], ...fields }, pending("feature", 1, f.id));
+    const judged = (results: ("pass" | "fail" | "cannot_judge")[], extra = {}): Feature["checked"] => ({
+      round: 1,
+      reviewer: "claude",
+      results: results.map((result, i) => ({ n: i + 1, result, evidence: "e", basis: "text" as const })),
+      unjudged: results.filter((r) => r === "cannot_judge").length,
+      scripted: { problems: [], facts: [] },
+      pictures: { taken: 0 },
+      ...extra,
+    });
+    expect(stop(feature("guide", { mode: "owner", checked: judged(["pass", "pass"]) }))).toBe("the plan marks “Title of guide” for your look");
+    expect(stop(feature("guide", { mode: "review", checked: judged(["pass", "cannot_judge"]) }))).toBe("the second AI could not judge every check of “Title of guide”");
+    expect(stop(feature("guide", { mode: "review" }))).toBe("the second AI's check of “Title of guide” did not finish");
+    expect(stop(feature("guide", { mode: "review", checked: judged([], { unfinished: true, unjudged: 2 }) }))).toBe("the second AI's check of “Title of guide” did not finish");
+    expect(stop(feature("guide", { mode: "review", checked: judged(["pass", "pass"]) }), { checkpointLog: [record("feature:guide", "send_back")] })).toBe("you sent “Title of guide” back and it is shown again");
+  });
+
+  it("builds the phone notice and the report's waiting block from those words", () => {
+    const f = feature("guide", { mode: "owner" });
+    const m = { ...mission({ features: [f], checkpoint: pending("feature", 1, "guide") }), checkpoints: undefined } as Mission;
+    expect(parkedNotice(m, pending("feature", 1, "guide")).message).toContain("The team stopped because the plan marks “Title of guide” for your look. Read it with:");
+    expect(parkedNotice(m, pending("feature", 1, "guide")).message).not.toContain("you asked to look");
+    const report = renderReport(m, { usage: [], screenshots: [], generatedAt: "2026-10-12T14:00:00.000Z", inContainer: false });
+    expect(report).toContain("The team stopped here on purpose, because the plan marks “Title of guide” for your look. Nothing else is waiting on this mission; other work carries on.");
+  });
+
+  it("keeps the old words when the owner asked to look at each feature, for a feature with a mode as for any other", () => {
+    const owner = feature("guide", { mode: "owner" });
+    const old = whyStopped({ id: "m", plan: undefined, features: [owner], checkpoints: all }, pending("feature", 1, "guide"));
+    expect(old).toBe("you asked to look at “Title of guide” before it is added first");
+    expect(whyStopped({ id: "m", plan: undefined, features: [feature("guide")] }, pending("feature", 1, "guide"))).toBe("you asked to look at “Title of guide” before it is added first");
+    // a feature with a mode that stops for no reason of the plan's (the flag is set) also keeps them, and so do the plan and the final stop
+    expect(whyStopped({ id: "m", plan: undefined, ownerStops: false, features: [owner] }, pending("feature", 1, "guide"))).toBe(old);
+    expect(whyStopped({ id: "m", plan: undefined, features: [owner] }, pending("final"))).toBe("you asked to look at the finished app first");
+  });
+});

@@ -321,7 +321,7 @@ describe("T-RO-3: a snapshot is built with every write blocked", () => {
     guard.calls.length = 0;
   });
 
-  it.each(["multi-mission", "midrun-building", "limit-waiting", "failed-auth", "hostile-strings", "scope-mix", "unreadable-mission"])("%s", (name) => {
+  it.each(["multi-mission", "midrun-building", "limit-waiting", "failed-auth", "hostile-strings", "scope-mix", "unreadable-mission", "modes-review-round", "modes-owner-stop", "modes-mixed-done"])("%s", (name) => {
     const home = copyHome(name);
     withLock(home, { at: "2026-10-11T09:50:00.000Z", ageMs: 15_000, now: MID });
     withStop(home);

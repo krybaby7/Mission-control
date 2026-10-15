@@ -104,6 +104,8 @@ export interface ExecRequest {
   outputSchema?: JsonSchema;
   access: Access;
   noTools?: boolean;
+  /** Extra folders a read-only run may open files from (pictures of a page, outside its working folder). Claude only; other runners ignore it. */
+  readDirs?: string[];
   maxTurns: number;
   timeoutMs?: number;
 }
@@ -352,6 +354,7 @@ export class RoleExecutor {
     };
     if (req.outputSchema) job.outputSchema = req.outputSchema;
     if (req.noTools) job.noTools = true;
+    if (req.readDirs && req.readDirs.length > 0) job.readDirs = [...req.readDirs];
     return job;
   }
 

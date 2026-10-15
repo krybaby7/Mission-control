@@ -150,7 +150,7 @@ ${BLOCK_ONE}${NEXT("It will stop for your check: the plan.")}`,
     const printed = err.trimEnd().split("\n");
     expect(printed[0]).toBe("This plan can't be used yet. Fix these and preview it again:");
     expect(printed).toHaveLength(14);
-    expect(printed[1]).toBe("- Line 6: “colour0” is not a key that can be used. For the whole plan: name, request, folder, base, app-name, summary, assumption, contract. For each feature: feature, title, story, kind, needs, check.");
+    expect(printed[1]).toBe("- Line 6: “colour0” is not a key that can be used. For the whole plan: name, request, folder, base, app-name, summary, assumption, contract. For each feature: feature, title, story, kind, mode, effort, needs, check, heading, mention, words, columns, rows.");
     expect(printed[13]).toBe("- ... and 3 more."); // 14 unknown keys and the feature with no check make 15 problems
     expect(noMissionFolder()).toBe(true);
   });

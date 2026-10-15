@@ -1,0 +1,21 @@
+mc-plan 1
+name: Setup guide
+request: Write a short setup guide for the habit tracker. A new user should be able to follow it in five minutes.
+folder: habit-tracker
+base: main
+app-name: Habit tracker
+summary: Adds a short setup guide for new users to the habit tracker's documents.
+assumption: The guide is written in English for someone who has never used the app.
+
+feature: setup-guide
+title: Setup guide for new users
+story: As a new user I can follow a short guide to install the app and add my first habit.
+mode: review
+check: The guide is a list of numbered steps, and each step is one action.
+check: The guide says how to start the app and what the reader should see when it works.
+check: The guide explains how to add a first habit.
+check: The guide does not name any file or setting that the project does not have.
+heading: Install
+heading: Add your first habit
+mention: Habit tracker
+words: 200-500

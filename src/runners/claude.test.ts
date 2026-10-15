@@ -259,6 +259,32 @@ describe("buildArgs", () => {
     expect(args.slice(14)).toEqual(["--resume", "sess-9", ...writeTail("bypassPermissions")]);
   });
 
+  it("passes --add-dir once for each folder a read-only job may open files from, before the permission mode", () => {
+    const job = makeJob({ access: "read-only", readDirs: ["/home/u/.mc/missions/m1/screenshots", "/home/u/other"] });
+    const args = makeRunner("success").buildArgs(job, "/tmp/sp.md");
+    expect(args).toEqual([...head("/tmp/sp.md"), "--add-dir", "/home/u/.mc/missions/m1/screenshots", "--add-dir", "/home/u/other", ...tail("dontAsk", "Read,Grep,Glob")]);
+    expect(args.indexOf("--add-dir")).toBeLessThan(args.indexOf("--permission-mode"));
+    // after the session to resume, as the other options are
+    const resumed = makeRunner("success").buildArgs(makeJob({ access: "read-only", readDirs: ["/a"], resumeSessionId: "sess-9" }), "/tmp/sp.md");
+    expect(resumed.slice(12)).toEqual(["--resume", "sess-9", "--add-dir", "/a", ...tail("dontAsk", "Read,Grep,Glob")]);
+  });
+
+  it("builds the old argument list when readDirs is absent or empty", () => {
+    const base = makeRunner("success").buildArgs(makeJob({ access: "read-only" }), "/tmp/sp.md");
+    expect(makeRunner("success").buildArgs(makeJob({ access: "read-only", readDirs: [] }), "/tmp/sp.md")).toEqual(base);
+    expect(base).not.toContain("--add-dir");
+    expect(base).toEqual([...head("/tmp/sp.md"), ...tail("dontAsk", "Read,Grep,Glob")]);
+  });
+
+  it("passes only absolute folders: a relative one could be read as a flag", () => {
+    const job = makeJob({ access: "read-only", readDirs: ["--dangerously-skip-permissions", "-x", "relative/dir", "", "/ok/dir"] });
+    const args = makeRunner("success").buildArgs(job, "/tmp/sp.md");
+    expect(args.filter((a) => a === "--add-dir")).toHaveLength(1);
+    expect(args).toContain("/ok/dir");
+    expect(args).not.toContain("--dangerously-skip-permissions");
+    expect(args).not.toContain("relative/dir");
+  });
+
   it("never passes the prompt or --bare on the command line", () => {
     const args = makeRunner("success").buildArgs(makeJob({ prompt: "SECRET PROMPT" }), "/tmp/sp.md");
     expect(args).not.toContain("SECRET PROMPT");
@@ -464,6 +490,62 @@ describe("ClaudeRunner.run: stream parsing", () => {
     const { result } = await play("no-result-text");
     expect(result).toMatchObject({ outcome: "failed", text: "Final words from the assistant." });
     expect(result.error).toBe("claude finished with error_during_execution");
+  });
+});
+
+describe("ClaudeRunner.run: the files a run opened", () => {
+  /** A fake CLI that plays the events in $FAKE_STREAM, as the real one prints them. */
+  let streamCli: string;
+  beforeAll(() => {
+    streamCli = join(suiteDir, "claude-stream");
+    writeFileSync(
+      streamCli,
+      '#!/usr/bin/env node\nprocess.stdin.resume();\nprocess.stdin.on("end", () => {\n  for (const e of JSON.parse(process.env.FAKE_STREAM ?? "[]")) process.stdout.write(JSON.stringify(e) + "\\n");\n});\n',
+    );
+    chmodSync(streamCli, 0o755);
+  });
+
+  const init = { type: "system", subtype: "init", session_id: "s1", model: "m", tools: [] };
+  const done = { type: "result", subtype: "success", is_error: false, num_turns: 1, result: "Done.", total_cost_usd: 0, usage: { input_tokens: 1, output_tokens: 1 }, session_id: "s1" };
+  const assistant = (...content: unknown[]) => ({ type: "assistant", message: { content }, session_id: "s1" });
+  const read = (file_path: unknown) => ({ type: "tool_use", id: "t", name: "Read", input: { file_path } });
+
+  async function opened(events: unknown[]): Promise<RunResult> {
+    const runner = new ClaudeRunner({ command: streamCli, writeMode: "bypassPermissions", tmpDir: promptTmp, env: { PATH: NODE_PATH, FAKE_STREAM: JSON.stringify([init, ...events, done]) } });
+    return runner.run(makeJob({ access: "read-only" }));
+  }
+
+  it("keeps the file_path of each Read call, and nothing from Bash, Grep, Glob, Edit or a text block", async () => {
+    const result = await opened([
+      assistant({ type: "text", text: "I read /etc/passwd and /secret.txt" }, read("/work/docs/setup.md")),
+      assistant({ type: "tool_use", id: "b", name: "Bash", input: { command: "cat /work/other.md", file_path: "/work/bash.md" } }),
+      assistant({ type: "tool_use", id: "g", name: "Grep", input: { pattern: "TODO", path: "/work/grep" } }, { type: "tool_use", id: "e", name: "Edit", input: { file_path: "/work/edit.md" } }),
+      assistant(read("/work/screenshots/look__a__1__index__phone.png")),
+    ]);
+    expect(result.outcome).toBe("ok");
+    expect(result.opened).toEqual(["/work/docs/setup.md", "/work/screenshots/look__a__1__index__phone.png"]);
+  });
+
+  it("is absent when the run opened nothing, so a result is as it was", async () => {
+    const result = await opened([assistant({ type: "text", text: "Nothing to read." }), assistant({ type: "tool_use", id: "g", name: "Glob", input: { pattern: "*.md" } })]);
+    expect(Object.keys(result)).not.toContain("opened");
+    const bare = await opened([]);
+    expect(Object.keys(bare)).not.toContain("opened");
+    // the old scenario that reads one file still gives its path, and the Bash and Grep calls of it add nothing
+    expect((await play("success")).result.opened).toEqual(["src/app.ts"]);
+  });
+
+  it("lists a file once, ignores a Read without a usable path, and cuts a long path at 300 characters", async () => {
+    const long = `/${"d".repeat(400)}`;
+    const result = await opened([assistant(read("/a.md"), read("/a.md"), read(""), read(42), read(undefined), { type: "tool_use", id: "x", name: "Read" }, read(long))]);
+    expect(result.opened).toEqual(["/a.md", long.slice(0, 300)]);
+  });
+
+  it("keeps at most 200 paths", async () => {
+    const result = await opened([assistant(...Array.from({ length: 260 }, (_, i) => read(`/f/${i}.md`)))]);
+    expect(result.opened).toHaveLength(200);
+    expect(result.opened?.[0]).toBe("/f/0.md");
+    expect(result.opened?.[199]).toBe("/f/199.md");
   });
 });
 
