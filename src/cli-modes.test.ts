@@ -489,6 +489,34 @@ describe("mc plan show: how each feature was checked", () => {
     expect(lines.slice(5, 7)).toEqual(["  Mission Control's own checks: found: “a.md” is empty.; b; c and 1 more.", "  Pictures: none (no browser was found in the container)."]);
   });
 
+  it("V2-13: a feature that changed only a picture says the second AI was shown an image, not that the feature has no page", async () => {
+    for (const [pictures, line] of [
+      [{ taken: 0, images: 1 }, "  Pictures: The second AI was shown 1 changed image."],
+      [{ taken: 0, images: 3 }, "  Pictures: The second AI was shown 3 changed images."],
+      [{ taken: 2, images: 1 }, "  Pictures: 2 taken (phone and desktop width). The second AI was shown 1 changed image."],
+      [{ taken: 2 }, "  Pictures: 2 taken (phone and desktop width)."],
+      [{ taken: 0 }, "  Pictures: none (this feature has no page)."],
+      [{ taken: 0, why: "reviewer" as const }, "  Pictures: none (the second AI could not look at the pictures, because it runs on a different tool)."],
+    ] as const) {
+      const m = await salesMission((_m, notes) => {
+        notes.status = "done";
+        notes.checked = checked([result(1, "pass", "a quote"), result(2, "pass", "a quote")], { pictures: { ...pictures } });
+      });
+      expect(await mc(["plan", "show", m.id])).toBe(0);
+      expect(section().filter((l) => l.startsWith("  Pictures:")), JSON.stringify(pictures)).toEqual([line]);
+      rmSync(store().missionDir(m.id), { recursive: true, force: true });
+    }
+  });
+
+  it("V2-13: an odd number of images in a damaged record is read as none", async () => {
+    const m = await salesMission((_m, notes) => {
+      notes.status = "done";
+      notes.checked = checked([result(1, "pass", "a quote"), result(2, "pass", "a quote")], { pictures: { taken: 0, images: "many" } as unknown as FeatureChecked["pictures"] });
+    });
+    expect(await mc(["plan", "show", m.id])).toBe(0);
+    expect(section()).toContain("  Pictures: none (this feature has no page).");
+  });
+
   it("shows evidence as one safe line: control characters and new lines are gone, and it is cut", async () => {
     const m = await salesMission((_m, notes) => {
       notes.status = "done";
@@ -512,6 +540,32 @@ describe("mc plan show: how each feature was checked", () => {
     expect(section().join("\n")).toContain("1. passed: Fine.\n");
     expect(section().join("\n")).toContain("2. not judged: Evidence: ok\n");
     expect(section().join("\n")).toContain("Mission Control's own checks: found: a real one.");
+  });
+
+  it("a mission file whose plan is damaged still prints the plan header and exits 0, as it did before ways of checking existed (V1-4)", async () => {
+    // `spec` is not a plan: no features, a list with a hole, a bare word. Wave 1 printed what it could and exited 0; nothing here may print a raw error.
+    for (const spec of [{ results: "x" }, [null], "owner ", { features: "owner" }, { features: {} }]) {
+      const m = await salesMission();
+      writeFileSync(join(store().missionDir(m.id), "mission.json"), JSON.stringify({ ...m, spec }));
+      const code = await mc(["plan", "show", m.id]);
+      expect(err, JSON.stringify(spec)).toBe("");
+      expect(code, JSON.stringify(spec)).toBe(0);
+      expect(out, JSON.stringify(spec)).toContain(`Plan for “${m.title}” (mission ${m.id})`);
+      expect(out, JSON.stringify(spec)).not.toContain("How each feature was checked");
+      rmSync(store().missionDir(m.id), { recursive: true, force: true });
+    }
+  });
+
+  it("a plan with holes in its list of features exits 1 with a plain sentence, never the text of a program error (V1-4)", async () => {
+    for (const features of [[null, 5, { id: "a", mode: "owner" }], [null]]) {
+      const m = await salesMission();
+      writeFileSync(join(store().missionDir(m.id), "mission.json"), JSON.stringify({ ...m, spec: { ...m.spec, features } }));
+      const code = await mc(["plan", "show", m.id]);
+      expect(code, JSON.stringify(features)).toBe(1);
+      expect(out, JSON.stringify(features)).toBe("");
+      expect(err, JSON.stringify(features)).toBe(`The plan of “${m.title}” (mission ${m.id}) cannot be shown, because its file is damaged. Fix the file, or remove the mission's folder.\n`);
+      rmSync(store().missionDir(m.id), { recursive: true, force: true });
+    }
   });
 
   it("adds the sentences from the log: asked and approved, sent back and then approved", async () => {

@@ -11,6 +11,7 @@ import {
   fakeRenderer,
   feature,
   finding,
+  FIXTURE_VERIFY,
   type HarnessOptions,
   labelOf,
   MissionHarness,
@@ -238,7 +239,7 @@ describe("a feature checked by a second AI (mode review)", () => {
     expect(featureOf(m).openFindings.map((x) => [x.severity, x.description.startsWith("Check 1 is not met: The guide says how to start the app.")])).toEqual([["major", true]]);
     expect(m.status).toBe("partial");
     expect(m.decisionsNeeded.join(" ")).toContain("serious finding");
-    expect(reportOf(hh, id)).toContain("Built, but 1 of 3 checks were not met (see the review notes)");
+    expect(reportOf(hh, id)).toContain("Built, but 1 of 3 checks was not met (see the review notes)");
     expect(reportOf(hh, id)).toContain("Checked: 1 feature by a second AI against your list (1 check not met).");
 
     const deep = harness({ agents: { reviewer: checkerTweaked(fails(1)) } });
@@ -836,6 +837,76 @@ describe("the project's own checks", () => {
   });
 });
 
+// ───────────────────────────── A red project and no way to run single test files (the fixer's finding) ─────────────────────────────
+
+describe("(16b) the project's own checks already fail and the architect finds no command for single test files", () => {
+  const noTestsCommand = (): AgentHandler => (job, call) =>
+    call.label === "onboard" ? { structured: { stackSummary: "Node", verify: { ...FIXTURE_VERIFY, tests: null }, notes: [] } } : h!.defaults.architect(job, call);
+
+  it("a plan whose features are all checked by a second AI does not fail at onboarding: nobody asks for the command, no test is frozen, and a note says so", async () => {
+    const hh = harness({ agents: { architect: noTestsCommand() } });
+    const repo = join(hh.workspace, "existing");
+    await createFixtureRepo(hh.git, repo, { broken: true });
+    const id = hh.createMission("feature", { repoPath: repo, baseBranch: "main", plan: planSource(plan(guide())) }).id;
+    const m = await hh.run(id);
+    expect(m.status).toBe("done");
+    expect(m.baselineBroken).toBe(true);
+    expect(m.verify?.tests).toBeUndefined();
+    expect(hh.jobsLabeled("onboard")).toHaveLength(1); // the question about single test files is not asked
+    expect(featureOf(m).frozenTests).toEqual([]);
+    expect(count(hh, "test-guide")).toBe(0);
+    expect(m.notes).toContain("The team did not look for a way to run single files of the project's own checks, because every feature of this plan is checked by a second AI.");
+    const report = reportOf(hh, id);
+    expect(report).toContain("Your project's own checks were already failing before I started, so they could not be used to check my work. Mission Control's own checks and a second AI checked it instead.");
+    expect(report).toContain("The team did not look for a way to run single files of the project's own checks, because every feature of this plan is checked by a second AI.");
+    expect(report).toContain("Checked: 1 feature by a second AI against your list.");
+  });
+
+  it("the same for an owner feature and several features", async () => {
+    const hh = harness({ agents: { architect: noTestsCommand() } });
+    const repo = join(hh.workspace, "existing");
+    await createFixtureRepo(hh.git, repo, { broken: true });
+    const id = hh.createMission("feature", { repoPath: repo, baseBranch: "main", plan: planSource(plan(guide("mode: review", "guide"), guide("mode: owner", "second", "needs: guide\n"))), ownerStops: false }).id;
+    const m = await hh.run(id);
+    expect(m.status).toBe("done");
+    expect(hh.jobsLabeled("onboard")).toHaveLength(1);
+    expect(m.features.map((f) => f.status)).toEqual(["done", "done"]);
+  });
+
+  it("a plan with any feature checked by tests behaves exactly as before: the question is asked, and the mission fails when there is no answer", async () => {
+    const hh = harness({ agents: { architect: noTestsCommand() } });
+    const repo = join(hh.workspace, "existing");
+    await createFixtureRepo(hh.git, repo, { broken: true });
+    const id = hh.createMission("feature", { repoPath: repo, baseBranch: "main", plan: planSource(plan(guide(), greet())) }).id;
+    const m = await hh.run(id);
+    expect(m).toMatchObject({ status: "failed", stage: "onboard" });
+    expect(m.decisionsNeeded).toEqual([expect.stringContaining("I found no way to run single test files")]);
+    expect(hh.jobs.map(labelOf)).toEqual(["onboard", "onboard"]);
+    expect(m.notes.some((n) => n.startsWith("The team did not look for a way to run single files"))).toBe(false);
+  });
+
+  it("a mission whose plan the team wrote (no plan from outside) behaves exactly as before", async () => {
+    const hh = harness({ features: [feature("greet")], agents: { architect: noTestsCommand() } });
+    const repo = join(hh.workspace, "existing");
+    await createFixtureRepo(hh.git, repo, { broken: true });
+    const m = await hh.run(hh.createMission("feature", { repoPath: repo }).id);
+    expect(m).toMatchObject({ status: "failed", stage: "onboard" });
+    expect(hh.jobs.map(labelOf)).toEqual(["onboard", "onboard"]);
+  });
+
+  it("with a project whose checks are green nothing changes: no note, the command is not asked for", async () => {
+    const hh = harness({ agents: { architect: noTestsCommand() } });
+    const repo = join(hh.workspace, "existing");
+    await createFixtureRepo(hh.git, repo);
+    const id = hh.createMission("feature", { repoPath: repo, baseBranch: "main", plan: planSource(plan(guide())) }).id;
+    const m = await hh.run(id);
+    expect(m.status).toBe("done");
+    expect(m.baselineBroken).toBe(false);
+    expect(hh.jobsLabeled("onboard")).toHaveLength(1);
+    expect(m.notes.some((n) => n.startsWith("The team did not look for a way to run single files"))).toBe(false);
+  });
+});
+
 // ───────────────────────────── A send-back at a review stop (spec 5.2 step 8, rule c) ─────────────────────────────
 
 describe("(17) a send-back at the stop of a feature checked by a second AI", () => {
@@ -981,6 +1052,32 @@ describe("which files are pictured", () => {
     expect(hh.jobsLabeled("review-guide")[0]?.readDirs).toBeUndefined(); // it opens the file where it is
     expect((hh.renderer as FakeRenderer).requests).toEqual([]); // a picture needs no drawing
     expect(parked.checkpoint?.look.screenshots).toEqual(["screenshots/look__guide__image1__images-logo.png"]);
+  });
+
+  it("V2-13: a feature that changes only a picture says that the second AI was shown an image, and not that the feature has no page", async () => {
+    const hh = harness({
+      agents: { engineer: (job, call) => (call.label === "build-guide" ? { edit: (cwd) => { writeBytes(cwd, "images/logo.png", PNG); writeBytes(cwd, "images/banner.png", PNG); writeDeliverable(cwd, "guide", checksInBrief(job.prompt)); }, structured: buildOutput("pictures") } : hh.defaults.engineer(job, call)) } });
+    const id = hh.createMission("greenfield", { plan: planSource(plan(guide("mode: owner"))) }).id;
+    const parked = await hh.run(id);
+    // Nothing was drawn, and two changed images were copied for the owner and offered to the second AI: the record says so.
+    expect(featureOf(parked).checked?.pictures).toEqual({ taken: 0, images: 2 });
+    const lines = parked.checkpoint?.look.lines ?? [];
+    expect(lines).toContain("The second AI was shown 2 changed images. To see them in Windows, run mc copy-reports in Ubuntu, then open the screenshots folder.");
+    expect(lines.join("\n")).not.toMatch(/no pictures were taken|has no page/i);
+    // No page was expected to be drawn, and the second AI was given pictures: nothing makes the owner look for a missing picture.
+    expect(lines.join("\n")).not.toContain("You are asked because the second AI was shown no picture of the page.");
+  });
+
+  it("V2-13: one image reads in the singular, and a feature with no picture at all keeps its record and its look as before", async () => {
+    const one = harness({
+      agents: { engineer: (job, call) => (call.label === "build-guide" ? { edit: (cwd) => { writeBytes(cwd, "images/logo.png", PNG); writeDeliverable(cwd, "guide", checksInBrief(job.prompt)); }, structured: buildOutput("a logo") } : one.defaults.engineer(job, call)) } });
+    const parkedOne = await one.run(one.createMission("greenfield", { plan: planSource(plan(guide("mode: owner"))) }).id);
+    expect(parkedOne.checkpoint?.look.lines).toContain("The second AI was shown 1 changed image. To see it in Windows, run mc copy-reports in Ubuntu, then open the screenshots folder.");
+    one.cleanup();
+    const hh = harness();
+    const parked = await hh.run(hh.createMission("greenfield", { plan: planSource(plan(guide("mode: owner"))) }).id);
+    expect(featureOf(parked).checked?.pictures).toEqual({ taken: 0 });
+    expect((parked.checkpoint?.look.lines ?? []).join("\n")).not.toContain("changed image");
   });
 
   it("draws the page of the project that nothing changed in when the feature changed a style sheet, and then a problem of that page is only a fact", async () => {

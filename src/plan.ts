@@ -102,8 +102,8 @@ const KEYS = new Map<string, KeyRule>([
 
 // ───────────────────────────── Plain words ─────────────────────────────
 
-/** Control, format, private-use, unassigned, surrogate and separator characters, odd spaces, variation selectors, blank-looking letters. */
-const HIDDEN = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]|(?! )\p{Zs}|[\uFE00-\uFE0F\u{E0100}-\u{E01EF}]|[\u115F\u1160\u3164\uFFA0\u2800\u034F\u17B4\u17B5\u180B-\u180D\u180F]/u;
+/** Control, format, private-use, unassigned, surrogate and separator characters, odd spaces, variation selectors, blank-looking letters. Exported so a test can compare it with util/ai-text.ts, which cleans a second AI's words by the same class. */
+export const HIDDEN = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]|(?! )\p{Zs}|[\uFE00-\uFE0F\u{E0100}-\u{E01EF}]|[\u115F\u1160\u3164\uFFA0\u2800\u034F\u17B4\u17B5\u180B-\u180D\u180F]/u;
 const MARK = /\p{M}/u;
 const LETTER_OR_NUMBER = /[\p{L}\p{N}]/u;
 const STARTS_WITH_WORD = /^[\p{L}\p{N}]/u;
@@ -617,7 +617,7 @@ export function describePlan(spec: Describable, opts: DescribeOptions): string[]
       for (const check of f.checks) fact(`Check for “${f.title}”:`, check);
       if (f.deps.length > 0) fact(`Needs first for “${f.title}”:`, `${needs(f.deps)}.`);
       if (f.routine) fact(`Marked as routine work for “${f.title}”:`, ROUTINE_WORK);
-      if (anyMode) fact(`Checked by for “${f.title}”:`, CHECKED_BY[howChecked(f)]);
+      if (anyMode) fact(`How “${f.title}” is checked:`, CHECKED_BY[howChecked(f)]);
       if (f.effort !== undefined) fact(`Effort for “${f.title}”:`, EFFORT_WORDS[f.effort]);
       for (const line of f.own) fact(`Mission Control's own check for “${f.title}”:`, line);
     }

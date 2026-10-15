@@ -940,6 +940,15 @@ describe("publish: the pull request", () => {
     expect(body).not.toContain("“Dark mode switch” (");
   });
 
+  it("V2-08: one feature of one is finished, in the singular", () => {
+    const world = setup();
+    writeMission(world, { status: "partial", features: [{ id: "a", title: "Dark mode switch", status: "done", frozenTests: [{ path: "t", sha256: "0" }] }] });
+    const r = run(["publish", ID, ...TO]);
+    expect(r.status).toBe(0);
+    expect(r.gh[0]!.body!).toContain("**This mission is only partly done.** 1 of 1 feature is finished.");
+    expect(r.gh[0]!.body!).not.toContain("1 of 1 features");
+  });
+
   it("puts the first lines of the report in the body, without the steps for this PC and without pictures, in a fence the text can't close", () => {
     const world = setup();
     const report = [

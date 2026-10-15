@@ -1,6 +1,7 @@
 // Tests of the pictures (docs/modes-spec.md section 7 and the matching tests of section 15). The one real render uses the
 // local Chromium only, and is skipped when no browser exists.
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -360,6 +361,77 @@ describe.skipIf(chromium === undefined || !haveTool)("a real render with the loc
     expect(facts.text).toContain("okLoaded=yes leaked=undefined");
     expect(facts.failedRequests.sort()).toEqual(["inner.html", "leak.js"]);
   }, 90_000);
+
+  // V1-7: every web request of a page is aborted, but a page that navigates to a web address (a script, a form, a link, a refresh tag) used to
+  // make the browser open a connection to that address before the request was aborted. A hostile page could use that to knock on an internal
+  // host and port. A listener on the loopback address counts the connections; there must be none, and the page itself is still drawn.
+  describe("a page that navigates to a web address", () => {
+    async function listener(): Promise<{ port: number; connections: () => number; bytes: () => number; close: () => Promise<void> }> {
+      const sockets: Socket[] = [];
+      let connections = 0;
+      let bytes = 0;
+      const server = createServer((socket) => {
+        connections++;
+        sockets.push(socket);
+        socket.on("data", (chunk) => (bytes += chunk.length));
+        socket.on("error", () => undefined);
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      return {
+        port,
+        connections: () => connections,
+        bytes: () => bytes,
+        close: () =>
+          new Promise<void>((resolve) => {
+            for (const socket of sockets) socket.destroy();
+            server.close(() => resolve());
+          }),
+      };
+    }
+
+    const pages = (url: string): [string, string][] => [
+      ["location assigned by a script", `<script>location.href = ${JSON.stringify(url)};</script>`],
+      ["a form sent with POST", `<form id="f" method="post" action="${url}"><input name="a" value="b"></form><script>document.getElementById("f").submit();</script>`],
+      ["a form sent with GET", `<form id="f" method="get" action="${url}"><input name="a" value="b"></form><script>document.getElementById("f").submit();</script>`],
+      ["a link that is clicked", `<a id="l" href="${url}">go</a><script>document.getElementById("l").click();</script>`],
+      ["a refresh tag", `<meta http-equiv="refresh" content="0;url=${url}">`],
+      ["a window that is opened", `<script>window.open(${JSON.stringify(url)});</script>`],
+      ["a frame", `<iframe src="${url}"></iframe>`],
+      ["an image", `<img src="${url}x.png">`],
+    ];
+
+    it.each(pages("http://127.0.0.1:0/").map(([label]) => label))("opens no connection for %s, and still draws the page at both widths", async (label) => {
+      const server = await listener();
+      try {
+        const body = pages(`http://127.0.0.1:${server.port}/`).find(([name]) => name === label)![1];
+        const dir = temp();
+        put(dir, "index.html", `<!doctype html><title>t</title><meta name="viewport" content="width=device-width"><h1>Still drawn</h1>${body}`);
+        const out = await playwrightRenderer({ env }).render({ worktree: dir, outDir: join(temp(), "s"), featureId: "f", pages: [{ path: "index.html", n: 1 }] });
+        // Whatever the page did, nothing reached the listener (and the browser had every chance: it was given seconds to do it).
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(server.connections(), `${label}: connections`).toBe(0);
+        expect(server.bytes()).toBe(0);
+        // A page that leaves for a web address cannot be drawn as it was meant; one that only tries is still drawn at both widths.
+        if (out.taken > 0) expect(out.taken).toBe(2);
+      } finally {
+        await server.close();
+      }
+    }, 90_000);
+
+    it("draws a page of the project with a link to another page of the project at both widths", async () => {
+      const dir = temp();
+      put(dir, "other.html", "<!doctype html><title>o</title><p>The other page</p>");
+      put(dir, "style.css", "h1 { color: rgb(1, 2, 3); }");
+      put(dir, "index.html", '<!doctype html><title>t</title><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="style.css"><h1>Home</h1><a href="other.html">other</a><iframe src="other.html"></iframe>');
+      const out = await playwrightRenderer({ env }).render({ worktree: dir, outDir: join(temp(), "s"), featureId: "f", pages: [{ path: "index.html", n: 1 }] });
+      expect(out.taken).toBe(2);
+      expect(out.pages[0]!.phone!.facts.text).toContain("Home");
+      expect(out.pages[0]!.phone!.facts.failedRequests).toEqual([]);
+      expect(out.pages[0]!.desktop!.facts.text).toContain("Home");
+    }, 90_000);
+  });
 
   it("gives up on a page that never finishes loading, with the reason too_slow", async () => {
     const dir = temp();

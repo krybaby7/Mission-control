@@ -182,26 +182,28 @@ describe("the three examples of the design", () => {
       "Check for “Setup guide for new users”: The guide says how to start the app and what the reader should see when it works.",
       "Check for “Setup guide for new users”: The guide explains how to add a first habit.",
       "Check for “Setup guide for new users”: The guide does not name any file or setting that the project does not have.",
-      "Checked by for “Setup guide for new users”: a second AI, against its list of checks. No tests are written for it.",
+      "How “Setup guide for new users” is checked: a second AI, against its list of checks. No tests are written for it.",
       "Mission Control's own check for “Setup guide for new users”: It has the headings “Install”, “Add your first habit”.",
       "Mission Control's own check for “Setup guide for new users”: Its visible text contains the words “Habit tracker”, written exactly like that.",
       "Mission Control's own check for “Setup guide for new users”: Its new text is 200 to 500 words long.",
       "Choice made for you: The guide is written in English for someone who has never used the app.",
     ]);
+    // V2-09: the lead reads as a sentence, and the older lead is gone
+    expect(look.join("\n")).not.toContain("Checked by for");
   });
 
   it("counts how the features of a mixed plan are checked, and names the way for the feature that has tests", () => {
     const parsed = accepted(SALES);
     const look = describePlan(parsed.spec, { request: parsed.envelope.request, style: "look" });
     expect(look[3]).toBe("How the features are checked: 1 by tests, 1 by a second AI.");
-    expect(look).toContain("Checked by for “Totals for each region”: tests, written first.");
+    expect(look).toContain("How “Totals for each region” is checked: tests, written first.");
     expect(look).toContain("Effort for “Description of each column”: light. The team's lightest AI builds it first and a lighter AI checks it.");
     expect(look).toContain("Mission Control's own check for “Description of each column”: The table has the columns Column, Meaning, Example.");
     expect(look).toContain("Mission Control's own check for “Description of each column”: The table has 4 to 12 rows.");
     const landing = accepted(LANDING);
     const owner = describePlan(landing.spec, { request: landing.envelope.request, style: "look" });
     expect(owner[3]).toBe("How the features are checked: 1 by a second AI and then by you.");
-    expect(owner).toContain("Checked by for “One-page landing page”: a second AI, against its list of checks, and then by you. No tests are written for it.");
+    expect(owner).toContain("How “One-page landing page” is checked: a second AI, against its list of checks, and then by you. No tests are written for it.");
     const three = accepted(plan(SALES.split("\n").slice(0, -1), "", "feature: third", "title: Third", "story: The third.", "mode: owner", "check: It reads well."));
     expect(describePlan(three.spec, { request: "x", style: "look" })[3]).toBe("How the features are checked: 1 by tests, 1 by a second AI, 1 by a second AI and then by you.");
   });

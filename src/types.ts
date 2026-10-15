@@ -423,8 +423,12 @@ export interface FeatureChecked {
   unfinished?: true;
   /** What Mission Control's own script found in the last attempt: the problems left (at most 10, each at most 200 characters) and the facts. */
   scripted: { problems: string[]; facts: string[] };
-  /** The pictures of the page as it first loads. `why` is set only when none were taken and a page was expected. */
-  pictures: { taken: number; why?: PictureWhy };
+  /**
+   * The pictures of the page as it first loads (`taken`). `why` is set only when none were taken and a page was expected.
+   * `images` is the number of changed raster images that were copied for the owner and given to the second AI; it is left out
+   * when there were none or the second AI was not given them.
+   */
+  pictures: { taken: number; images?: number; why?: PictureWhy };
 }
 
 export interface VerifyConfig {

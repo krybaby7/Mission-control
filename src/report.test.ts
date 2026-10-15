@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildReportFacts, collectScreenshots, howToRun, renderReport, usageSummary } from "./report.js";
+import { buildReportFacts, collectScreenshots, holdsNeverSay, howToRun, renderReport, usageSummary } from "./report.js";
 import type { Feature, Mission, ReportProseOutput, UsageRecord } from "./types.js";
 
 // ───────────────────────────── Fixtures ─────────────────────────────
@@ -937,7 +937,7 @@ describe("a report for a mission that has a feature no test checks", () => {
     m.features[1] = { ...m.features[1]!, checked: checked(["pass", "fail", "pass"]), openFindings: [note] };
     m.features[2] = { ...m.features[2]!, openFindings: [note] };
     const report = render(m, { prose: null });
-    expect(report).toContain("| ✅ | Setup guide | Built, but 1 of 3 checks were not met (see the review notes) |");
+    expect(report).toContain("| ✅ | Setup guide | Built, but 1 of 3 checks was not met (see the review notes) |");
     expect(report).toContain("| ✅ | Landing page | Built; a second AI checked it against your list (3 of 3 passed); approved by you (1 review note below) |");
   });
 
@@ -990,6 +990,70 @@ describe("a report for a mission that has a feature no test checks", () => {
     expect(sectionText(report, "Technical details")).not.toContain("left out");
     // words that only contain test, like "latest" and "contest", are not the word
     expect(render(mixed(), { prose: { narrative: "The latest guide won the contest.", whatYouCanDo: [] } })).toContain("The latest guide won the contest.");
+  });
+
+  // V2-06: the other words of the "Never say" column of docs/modes-spec.md 10.3 are caught as well.
+  const NEVER_SAY_TEXTS: [string, string][] = [
+    ["verified", "I built the guide, and it was verified and double checked by a person."],
+    ["verified, in a list line", "Everything is Verified."],
+    ["approved by AI", "The page was approved by AI before it was added."],
+    ["approved by a second AI", "The guide was approved by a second AI."],
+    ["approved by the AI", "Approved by the AI."],
+    ["guaranteed", "The steps are guaranteed to work."],
+    ["correct", "The steps are correct."],
+    ["you looked at it", "You looked at it and it was fine."],
+    ["reviewed by you", "The page was reviewed by you."],
+    ["signed off", "The guide is signed off."],
+    ["signed  off over two lines", "The guide was signed\noff."],
+    ["you chose not to look at it", "You chose not to look at it."],
+    ["passed with a warning", "It passed with a warning."],
+    ["probably fine", "It is probably fine."],
+    ["the engine", "The engine wrote the guide."],
+  ];
+
+  it.each(NEVER_SAY_TEXTS)("leaves out an AI-written summary that says %s, and says so in the technical details", (_label, text) => {
+    for (const prose of [{ narrative: text, whatYouCanDo: ["Read the guide"] }, { narrative: "The guide and the page are ready.", whatYouCanDo: ["Read the guide", text] }]) {
+      const report = render(mixed(), { prose });
+      expect(report).not.toContain(text);
+      expect(report).toContain("All 3 features are built. The “Checked” line");
+      expect(sectionText(report, "Technical details")).toContain("The AI-written summary was left out, because it described how the work was checked in words that do not match Mission Control's records.");
+    }
+  });
+
+  it("does not leave out a summary that only holds words which look like those of the list", () => {
+    for (const text of [
+      "The guide works correctly and was corrected twice.",
+      "The page was approved by you.",
+      "Read the guide, then verify the steps yourself.",
+      "The incorrect step was removed, and the page was approved by a person.",
+      "The latest guide won the contest.",
+      "The engines of the car are not part of this.",
+      "It passed without a warning sign.",
+    ]) {
+      const report = render(mixed(), { prose: { narrative: text, whatYouCanDo: ["Read the guide"] } });
+      expect(report, text).toContain(text);
+      expect(sectionText(report, "Technical details"), text).not.toContain("left out");
+    }
+  });
+
+  it("holdsNeverSay answers the same for every case of the list", () => {
+    for (const [label, text] of NEVER_SAY_TEXTS) expect(holdsNeverSay(text), label).toBe(true);
+    expect(holdsNeverSay("The guide and the page are ready.")).toBe(false);
+    expect(holdsNeverSay("")).toBe(false);
+  });
+
+  it("the plain narrative that stands in for it holds none of these words", () => {
+    const left = render(mixed(), { prose: { narrative: "It was verified and is correct.", whatYouCanDo: [] } });
+    const narrative = left.slice(left.indexOf("\n\n", left.indexOf("Checked:")), left.indexOf("## What you can do now"));
+    expect(holdsNeverSay(narrative.replace(/No tests were written for it\./g, "").replace(/\bby tests\b/g, "")), narrative).toBe(false);
+  });
+
+  it("keeps a summary with those words in a mission with no mode feature, as before", () => {
+    const m = realisticMission();
+    const prose: ReportProseOutput = { narrative: "Everything was verified and is correct, and it is guaranteed.", whatYouCanDo: ["You looked at it"] };
+    const report = render(m, { prose });
+    expect(report).toContain("Everything was verified and is correct, and it is guaranteed.");
+    expect(sectionText(report, "Technical details")).not.toContain("left out");
   });
 
   it("keeps the AI-written summary of a mission with no mode feature, whatever it says about tests", () => {

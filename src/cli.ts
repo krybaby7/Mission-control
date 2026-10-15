@@ -8,7 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError } from "commander";
 import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
-import { hasModeFeature, howChecked, isModeFeature, ownerSentences, pictureReason } from "./checked-by.js";
+import { hasModeFeature, howChecked, imagesShownWords, isModeFeature, ownerSentences, pictureReason } from "./checked-by.js";
 import { type AnswerInput, type AnswerProblem, answerNotice, answerProblem, applyAnswer, CHECKPOINT_KINDS, cleanNote, didWhat, endState, isCheckpointShape, isWaitingForCheck, localClock, lookCommand, MAX_NOTE_CHARS, MAX_SEND_BACKS, sendBacks, shown, waitingWhat } from "./checkpoint.js";
 import { parsePort, runDashboard } from "./dashboard/command.js";
 import { DEFAULT_PORT } from "./dashboard/constants.js";
@@ -23,6 +23,7 @@ import { renderReport } from "./report.js";
 import { findMission, missionOutcome, runNight } from "./run.js";
 import { MissionStore, planOf } from "./state.js";
 import type { CheckpointKind, Config, Feature, Mission, MissionEvent, MissionStatus, PictureWhy, RoleOverride, SpecFeature } from "./types.js";
+import { cleanAiText } from "./util/ai-text.js";
 import { ensureDir, expandHome } from "./util/fs.js";
 import { runProcess } from "./util/process.js";
 import { stripControlChars } from "./util/terminal.js";
@@ -922,15 +923,24 @@ function planShowCommand(io: CliIO, id: string): number {
     m.kind === "greenfield"
       ? "a new app"
       : `a change to ${m.repoPath.startsWith(`${apps}${sep}`) ? `~/mc-apps/${m.repoPath.slice(apps.length + 1)}` : shownPath(m.repoPath)}`;
-  say(
-    io.stdout,
-    `Plan for “${shown(m.title)}” (mission ${m.id}): ${where}.`,
-    plan ? `Written by the leader. Plan code ${plan.sha256.slice(0, 8)} (of the plan as the leader wrote it).` : "Written by the team's planner.",
-    ...reviewLines(plan?.review, sendBacks(m, "plan")),
-    "",
-    ...describePlan(spec, { request: m.request, style: "text", newApp: m.kind === "greenfield" && m.repoPath === "", ...(noOwnerLookIn(m) && { ownerStops: false as const }) }),
-    ...howEachWasChecked(m, spec.features, store),
-  );
+  // A mission file can be damaged (by hand, or by a program that crashed): the plan is shown as far as it can be, as it always was,
+  // and what cannot be shown is said in a plain sentence, never as the text of a program error.
+  const planned = Array.isArray(spec.features) ? spec.features.filter((f): f is SpecFeature => typeof f === "object" && f !== null) : [];
+  let lines: string[];
+  try {
+    lines = [
+      `Plan for “${shown(m.title)}” (mission ${m.id}): ${where}.`,
+      plan ? `Written by the leader. Plan code ${plan.sha256.slice(0, 8)} (of the plan as the leader wrote it).` : "Written by the team's planner.",
+      ...reviewLines(plan?.review, sendBacks(m, "plan")),
+      "",
+      ...describePlan(spec, { request: m.request, style: "text", newApp: m.kind === "greenfield" && m.repoPath === "", ...(noOwnerLookIn(m) && { ownerStops: false as const }) }),
+      ...howEachWasChecked(m, planned, store),
+    ];
+  } catch {
+    say(io.stderr, `The plan of “${shown(m.title)}” (mission ${m.id}) cannot be shown, because its file is damaged. Fix the file, or remove the mission's folder.`);
+    return 1;
+  }
+  say(io.stdout, ...lines);
   return 0;
 }
 
@@ -949,11 +959,12 @@ function projectChecksOf(events: MissionEvent[], featureId: string): "passed" | 
 }
 
 const SHOW_CHECK_CHARS = 120;
+const SHOW_EVIDENCE_CHARS = 300;
 const SHOW_PROBLEMS = 3;
 
 /**
  * The last section of `mc plan show`, only for a plan with a feature that no test checks: for each feature, in plan order,
- * how it was checked and what was found, check by check (docs/modes-spec.md 9.4). Evidence is AI-written text and goes through `shown`.
+ * how it was checked and what was found, check by check (docs/modes-spec.md 9.4). Evidence is AI-written text and goes through `cleanAiText`.
  */
 function howEachWasChecked(m: Mission, planned: readonly SpecFeature[], store: MissionStore): string[] {
   if (!hasModeFeature(planned)) return [];
@@ -991,7 +1002,7 @@ function featureCheckLines(m: Mission, f: Feature, events: MissionEvent[]): stri
   (Array.isArray(f.acceptance) ? f.acceptance : []).forEach((check, i) => {
     const r = results.find((x) => x?.n === i + 1);
     const word = r?.result === "pass" ? "passed" : r?.result === "fail" ? "failed" : "not judged";
-    const evidence = typeof r?.evidence === "string" && r.evidence.trim() !== "" ? `Evidence: ${shown(r.evidence)}` : "";
+    const evidence = typeof r?.evidence === "string" && r.evidence.trim() !== "" ? `Evidence: ${cleanAiText(r.evidence, SHOW_EVIDENCE_CHARS)}` : "";
     lines.push(`    ${i + 1}. ${[`${word}:`, shown(typeof check === "string" ? check : "", SHOW_CHECK_CHARS), evidence].filter((part) => part !== "").join(" ")}`);
   });
   lines.push(...scriptedLines(f, c, events), ...ownerSentences(h).map((line) => `  ${line}`));
@@ -1006,11 +1017,16 @@ function scriptedLines(f: Feature, c: NonNullable<Feature["checked"]>, events: M
   const own = shownProblems.length === 0 ? "passed." : `found: ${shownProblems.join("; ")}${more}.`;
   const project = projectChecksOf(events, f.id);
   const taken = c.pictures?.taken ?? 0;
+  const images = Number.isInteger(c.pictures?.images) ? (c.pictures?.images as number) : 0;
   const why: PictureWhy | undefined = c.pictures?.why;
-  return [
-    `  Mission Control's own checks: ${own}${project === undefined ? "" : ` The project's own checks ${project}.`}`,
-    taken > 0 ? `  Pictures: ${taken} taken (phone and desktop width).` : `  Pictures: none (${pictureReason(why)}).`,
-  ];
+  // A feature that changes only a picture file has no page to draw: the images are what the second AI was given.
+  const pictures =
+    images > 0
+      ? `  Pictures: ${taken > 0 ? `${taken} taken (phone and desktop width). ` : ""}${imagesShownWords(images)}`
+      : taken > 0
+        ? `  Pictures: ${taken} taken (phone and desktop width).`
+        : `  Pictures: none (${pictureReason(why)}).`;
+  return [`  Mission Control's own checks: ${own}${project === undefined ? "" : ` The project's own checks ${project}.`}`, pictures];
 }
 
 // ───────────────────────────── run / stop ─────────────────────────────

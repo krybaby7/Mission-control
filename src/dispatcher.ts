@@ -4,7 +4,7 @@
 // passing verify tail, unit installs, init attempts, the final verify result) live next to it in <missionDir>/dispatch.json.
 import { type Dirent, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { approvedWork, askedBecause, asksForLook, changedApprovedWork, hasModeFeature, isModeFeature, lookReason, pictureReason } from "./checked-by.js";
+import { approvedWork, askedBecause, asksForLook, changedApprovedWork, hasModeFeature, imagesShownWords, isModeFeature, lookReason, pictureReason } from "./checked-by.js";
 import {
   type Deliverables,
   type DeliverableSource,
@@ -110,6 +110,7 @@ import type {
   VerifyConfig,
   VerifyResult,
 } from "./types.js";
+import { cleanAiText } from "./util/ai-text.js";
 import { expandHome, readJsonOr, sha256, writeJsonAtomic } from "./util/fs.js";
 import { runProcess } from "./util/process.js";
 import { reapOrphans } from "./util/reap.js";
@@ -1133,7 +1134,14 @@ class MissionRun {
       this.save();
     }
     await this.checkBaseline(wt);
-    if (this.m.baselineBroken && !this.m.verify.tests) await this.askForTestsCommand(wt);
+    if (this.m.baselineBroken && !this.m.verify.tests) {
+      if (this.noFeatureUsesTests()) {
+        // No test will be frozen or run for any feature of this plan, so a command for single test files would never be used.
+        this.noteOnce("The team did not look for a way to run single files of the project's own checks, because every feature of this plan is checked by a second AI.");
+      } else {
+        await this.askForTestsCommand(wt);
+      }
+    }
     this.setStage("spec");
   }
 
@@ -1230,6 +1238,15 @@ class MissionRun {
     return features.every(isModeFeature)
       ? `${lead}, so they could not be used to judge the new work. Mission Control's own checks and a second AI judged it instead.`
       : `${lead}, so they could not be used to judge the new work. The features checked by tests were judged by tests alone, and the others by Mission Control's own checks and a second AI.`;
+  }
+
+  /**
+   * True when the plan came from outside (so it is known now) and every feature of it is checked by a second AI. A plan the team's
+   * planner writes later has features checked by tests, and a plan with one such feature still needs the command.
+   */
+  private noFeatureUsesTests(): boolean {
+    const features = planOf(this.m)?.spec.features;
+    return Array.isArray(features) && features.length > 0 && features.every((f) => isModeFeature(f));
   }
 
   /**
@@ -2497,7 +2514,7 @@ class MissionRun {
       unjudged: judged ? judged.unjudged : f.acceptance.length,
       ...(judged === undefined && { unfinished: true as const }),
       scripted: { problems: check.problems, facts: check.facts },
-      pictures: { taken: pictures.taken, ...(why !== undefined && { why }) },
+      pictures: { taken: pictures.taken, ...(answered.offered && pictures.images.length > 0 && { images: pictures.images.length }), ...(why !== undefined && { why }) },
     };
     if (judged) {
       this.lookNotes.set(f.id, judged.lookNotes);
@@ -3039,7 +3056,7 @@ class MissionRun {
       lines.push(`The second AI's answers: ${passed} passed, ${failedChecks.length} failed, ${c.unjudged} could not be judged.${c.round > 1 ? ` It checked ${c.round} times.` : ""}`);
       const open = [...failedChecks, ...notJudged];
       for (const r of open.slice(0, 3)) {
-        lines.push(`Check ${r.n} (${r.result === "fail" ? "failed" : "not judged"}): ${shown(feature.acceptance[r.n - 1] ?? "", 120)} ${shown(String(r.evidence ?? ""), 200)}`);
+        lines.push(`Check ${r.n} (${r.result === "fail" ? "failed" : "not judged"}): ${shown(feature.acceptance[r.n - 1] ?? "", 120)} ${cleanAiText(r.evidence, 200)}`);
       }
       const more = open.length - 3;
       if (more > 0) lines.push(`And ${more} more ${more === 1 ? "check" : "checks"} did not pass; mc plan show ${m.id} lists all of them.`);
@@ -3057,11 +3074,13 @@ class MissionRun {
       );
       const taken = c.pictures?.taken ?? 0;
       const why = c.pictures?.why;
+      const images = c.pictures?.images ?? 0;
       if (taken > 0) {
         lines.push(`Pictures of the page as it first loads: ${taken} taken, at phone width and desktop width. To see them in Windows, run mc copy-reports in Ubuntu, then open the screenshots folder.`);
       } else if (why !== undefined && why !== "reviewer") {
         lines.push(`No pictures were taken: ${pictureReason(why)}.`);
       }
+      if (images > 0) lines.push(`${imagesShownWords(images)} To see ${images === 1 ? "it" : "them"} in Windows, run mc copy-reports in Ubuntu, then open the screenshots folder.`);
       if (why === "reviewer") lines.push("The second AI could not look at the pictures (it runs on a different tool). Please look at them yourself.");
     }
     const reason = lookReason(m, feature);

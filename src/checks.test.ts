@@ -805,11 +805,23 @@ describe("table rules", () => {
     expect((await run([file("t.csv", "a,b,a\n1,2,3\n")])).problems).toEqual(["“t.csv” has two columns called “a”."]);
     const ragged = await run([file("t.csv", "a,b\n1\n2,3,4\n5\n6\n7,8\n9\n")]);
     expect(ragged.problems).toEqual([
-      "Row 2 of “t.csv” has 1 values, but the first row has 2.",
+      "Row 2 of “t.csv” has 1 value, but the first row has 2.",
       "Row 3 of “t.csv” has 3 values, but the first row has 2.",
-      "Row 4 of “t.csv” has 1 values, but the first row has 2.",
+      "Row 4 of “t.csv” has 1 value, but the first row has 2.",
       "2 more rows of “t.csv” have the wrong number of values.",
     ]);
+  });
+
+  it("V2-08: one value, one more row and one word are said in the singular", async () => {
+    const one = await run([file("t.csv", "a,b\n1\n2,3,4\n5\n6\n7,8\n")]);
+    expect(one.problems).toEqual([
+      "Row 2 of “t.csv” has 1 value, but the first row has 2.",
+      "Row 3 of “t.csv” has 3 values, but the first row has 2.",
+      "Row 4 of “t.csv” has 1 value, but the first row has 2.",
+      "1 more row of “t.csv” has the wrong number of values.",
+    ]);
+    expect((await run([file("a.md", "Word\n")], { words: [5, 9] })).problems).toEqual(["The new text has 1 word; it should have 5 to 9."]);
+    expect((await run([file("a.md", "# Hi\n\nTwo words\n")], { words: [5, 9] })).problems.some((p) => p.startsWith("The new text has 3 words;"))).toBe(true);
   });
 
   it("S16: the first row must be exactly the plan's names, in order; spaces at the ends do not matter", async () => {
@@ -1103,6 +1115,37 @@ describe("speed: each shape finishes in under 5 seconds and the event loop keeps
     expect(check.facts.some((f) => /more files changed and were not looked at/.test(f))).toBe(true);
   });
 
+  // V1-5: a file with hundreds of thousands of findings of one kind used to make the whole check throw a RangeError (the list of findings
+  // was handed to `push` as arguments), so the feature was blocked at once with `internal error: Maximum call stack size exceeded`.
+  const FLOOD = 300_000;
+  const PAGE = (body: string): string => `<!doctype html><title>t</title><meta name="viewport" content="x"><body>${body}</body>`;
+  const floods: [string, string, string, string][] = [
+    ["a blank to fill in", "a.md", "[name]\n".repeat(FLOOD), "“a.md” still has placeholder text (“[name]”)."],
+    ["a TODO line", "a.md", "TODO\n".repeat(FLOOD), "“a.md” still has placeholder text (“TODO”)."],
+    ["a TODO line", "a.txt", "TODO\n".repeat(FLOOD), "“a.txt” still has placeholder text (“TODO”)."],
+    ["a blank to fill in", "a.html", PAGE("<p>[name]</p>\n".repeat(FLOOD)), "“a.html” still has placeholder text (“[name]”)."],
+    ["a key-shaped string", "a.txt", 'password = "hunter2-hunter2"\n'.repeat(FLOOD), "“a.txt” has text that looks like a key or a password (line 1). Remove it."],
+  ];
+
+  it.each(floods)("a flood of %s (%#) in %s: a normal problem list, no internal error", async (_label, name, text, problem) => {
+    const r = await run([file(name, text)]);
+    expect(r.problems[0], r.problems.join("\n")).toBe(problem);
+    expect(r.problems.length).toBeLessThanOrEqual(11);
+  }, 60_000);
+
+  it("a file just under the 1 MB limit, with 209,000 TODO lines, read the way the engine reads it: a normal problem list", async () => {
+    const dir = tree({ "a.md": "TODO\n".repeat(209_000) });
+    const { check } = await scan(dir, ["a.md"]);
+    expect(check.problems).toEqual(["“a.md” still has placeholder text (“TODO”)."]);
+  }, 60_000);
+
+  it("140,000 links to a file that is not there, read the way the engine reads them: one problem for the link", async () => {
+    const dir = tree({ "a.md": "[a](g)\n".repeat(140_000), "b.html": PAGE('<a href="gone.html">x</a>\n'.repeat(30_000)) });
+    const { check } = await scan(dir, ["a.md", "b.html"]);
+    expect(check.problems).toContain("The link to “g” in “a.md” does not lead to a file in the project.");
+    expect(check.problems).toContain("The link to “gone.html” in “b.html” does not lead to a file in the project.");
+  }, 60_000);
+
   it("a very long markdown line is not scanned and a fact says so", async () => {
     const r = await run([file("a.md", `# A\n\n${"[a](x.md) ".repeat(500)}\n`)]);
     expect(r.facts).toContain("A very long line of “a.md” was not scanned (line 3).");
@@ -1132,13 +1175,13 @@ const SHAPES: RegExp[] = [
   /^The link to the heading “#[\s\S]*” in “[\s\S]*” \(from “[\s\S]*”\) does not lead to a heading\.$/,
   /^The text has no heading called “[\s\S]*”\.$/,
   /^The visible text does not contain “[\s\S]*”\.$/,
-  /^The new text has \d+ words; it should have \d+ to \d+\.$/,
+  /^The new text has \d+ words?; it should have \d+ to \d+\.$/,
   /^“[\s\S]*” is not a valid table: a quote mark is opened and never closed\.$/,
   /^“[\s\S]*” has no header row\.$/,
   /^“[\s\S]*” has a column with no name in its first row\.$/,
   /^“[\s\S]*” has two columns called “[\s\S]*”\.$/,
-  /^Row \d+ of “[\s\S]*” has \d+ values, but the first row has \d+\.$/,
-  /^\d+ more rows of “[\s\S]*” have the wrong number of values\.$/,
+  /^Row \d+ of “[\s\S]*” has \d+ values?, but the first row has \d+\.$/,
+  /^\d+ more rows? of “[\s\S]*” (?:has|have) the wrong number of values\.$/,
   /^“[\s\S]*” has the columns [\s\S]*, but the plan asks for [\s\S]*\.$/,
   /^“[\s\S]*” has \d+ rows?; it should have \d+ to \d+\.$/,
   /^The plan asks for a table with columns or rows, but no table file changed\.$/,
@@ -1409,10 +1452,43 @@ describe("judgeRubric", () => {
     });
     const j = ok(judgeRubric(input(a)));
     expect(j.findings).toEqual([
-      { severity: "major", file: null, description: "Check 1 is not met: The guide has numbered steps.. The second AI found: It never says what the reader should see.", suggestedTest: null },
+      { severity: "major", file: null, description: "Check 1 is not met: The guide has numbered steps. The second AI found: It never says what the reader should see.", suggestedTest: null },
       { severity: "major", file: "docs/setup.md", description: "A link is broken.", suggestedTest: null },
     ]);
     expect(j.minorFindings).toEqual([{ severity: "minor", file: null, description: "A comma is missing.", suggestedTest: null }]);
+  });
+
+  it("V2-07: the check, a full stop and the evidence read as two sentences, whether or not the check ends with a full stop", () => {
+    const fail = { result: "fail" as const, evidence: "It never says what the reader should see." };
+    const descriptions = (list: string[]): string[] =>
+      ok(judgeRubric(input(answer([fail]), { checks: list }))).findings.map((f) => f.description);
+    const tail = "The second AI found: It never says what the reader should see.";
+    expect(descriptions(["The guide has numbered steps.", "b", "c"])).toEqual([`Check 1 is not met: The guide has numbered steps. ${tail}`]);
+    expect(descriptions(["The guide has numbered steps", "b", "c"])).toEqual([`Check 1 is not met: The guide has numbered steps. ${tail}`]);
+    expect(descriptions(["Does the guide have steps?", "b", "c"])).toEqual([`Check 1 is not met: Does the guide have steps? ${tail}`]);
+    expect(descriptions(["It reads well and more…", "b", "c"])).toEqual([`Check 1 is not met: It reads well and more… ${tail}`]);
+    expect(descriptions(["  The guide has numbered steps.  ", "b", "c"])).toEqual([`Check 1 is not met: The guide has numbered steps. ${tail}`]);
+    for (const d of descriptions(["The guide has numbered steps.", "b", "c"])) expect(d).not.toContain("..");
+  });
+
+  it("V2-10: the evidence and the notes lose pictures, links and web addresses, and keep their words", () => {
+    const hostile = `It says “1. Run the installer.” ![chart](https://evil.example/x.png) and [click here](http://evil.example/p) or //evil.example/a, www.evil.example/b.`;
+    const j = ok(judgeRubric(input(answer([{ evidence: hostile }, { result: "fail", evidence: hostile }], { notes: [{ severity: "major", file: "docs/setup.md", description: hostile }, { severity: "minor", file: null, description: hostile }] }))));
+    const clean = "It says “1. Run the installer.” chart (web address removed) and click here (web address removed) or (web address removed), (web address removed).";
+    expect(j.results.map((r) => r.evidence).slice(0, 2)).toEqual([clean, clean]);
+    expect(j.findings.map((f) => f.description)).toEqual([`Check 2 is not met: The guide says how to start the app. The second AI found: ${clean}`, clean]);
+    expect(j.minorFindings.map((f) => f.description)).toEqual([clean]);
+    expect(JSON.stringify(j)).not.toMatch(/evil\.example|!\[|\]\(/u);
+  });
+
+  it("V2-10: a quote is still looked for in the files as the second AI wrote it, so cleaning does not change what passes", () => {
+    // The quote is real, and the evidence also holds an address: the pass stands.
+    const real = ok(judgeRubric(input(answer([{ evidence: "It says “1. Run the installer.” and links to https://evil.example/x" }]))));
+    expect(real.results[0]).toMatchObject({ result: "pass", evidence: "It says “1. Run the installer.” and links to (web address removed)" });
+    // The quote is made up: the pass is still turned down.
+    const made = ok(judgeRubric(input(answer([{ evidence: "It says “Install with the magic wand” and links to https://evil.example/x" }]))));
+    expect(made.results[0]).toMatchObject({ result: "cannot_judge" });
+    expect(made.results[0]!.evidence.startsWith("The quote was not found in the files.")).toBe(true);
   });
 
   it("cleans the evidence of control and hidden characters and cuts it at 300 characters", () => {

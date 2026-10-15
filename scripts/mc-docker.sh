@@ -954,8 +954,12 @@ write_pull_request_body() {
       printf '%s\n' "- Plan: written by the leader (plan code $F_PLAN)"
     fi
     if [ "$F_STATUS" = "partial" ]; then
+      local features_word="features are"
+      if [ "$F_TOTAL" -eq 1 ]; then
+        features_word="feature is"
+      fi
       printf '\n'
-      printf '%s\n' "**This mission is only partly done.** $F_DONE of $F_TOTAL features are finished."
+      printf '%s\n' "**This mission is only partly done.** $F_DONE of $F_TOTAL $features_word finished."
     fi
     printf '\n'
     printf '%s\n' "## What was checked"

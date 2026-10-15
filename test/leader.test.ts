@@ -613,8 +613,10 @@ describe("leader/CLAUDE.md: how a feature is checked (docs/modes-spec.md, 12)", 
     }
   });
 
-  it("calls a finished mission built and checked the way its plan said, not tested", () => {
-    expect(CLAUDE_MD).toContain("- done: finished, everything built. Each feature was checked the way its plan said: by tests, by a second AI, or by a second AI and then the CEO. The report says which.");
+  it("calls a finished mission built, and says the report holds how each feature was checked, including the features that had less", () => {
+    expect(CLAUDE_MD).toContain("- done: finished, everything built. The report says how each feature was checked: by tests, by a second AI, or by a second AI and then the CEO's approval. Some features have less than that. If the second AI's check did not finish, only Mission Control's own checks ran. A feature that was queued without the stop for the CEO's look may have checks that nobody judged. If the second AI was shown no picture of a page, the report says so. Say only what the report says.");
+    // the older sentence claimed more than the code does (V2-11): a feature whose second AI never finished, or that was queued without the stop, was not checked the way its plan said
+    expect(CLAUDE_MD).not.toContain("Each feature was checked the way its plan said");
   });
 });
 

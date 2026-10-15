@@ -18,6 +18,7 @@ import { lstat, open, realpath } from "node:fs/promises";
 import { join, posix, sep } from "node:path";
 import type { RenderedPage } from "./render.js";
 import type { CheckedResult, Family, FeatureExpect, Finding, RubricOutput } from "./types.js";
+import { cleanAiText, isHiddenChar } from "./util/ai-text.js";
 
 // ───────────────────────────── Limits ─────────────────────────────
 
@@ -47,13 +48,8 @@ const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve)
 
 // ───────────────────────────── Small helpers ─────────────────────────────
 
-/** Control, format, private-use, unassigned, surrogate and separator characters, odd spaces, variation selectors, blank-looking letters (the class the plan reader bans, plan.ts). */
-const HIDDEN = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]|(?! )\p{Zs}|[\p{Variation_Selector}]|[\p{Default_Ignorable_Code_Point}]/u;
-
-/** True for a character that cannot be seen (the class above, and the blank braille cell U+2800 that no property covers). */
-function isHidden(ch: string): boolean {
-  return HIDDEN.test(ch) || ch.codePointAt(0) === 0x2800;
-}
+/** True for a character that cannot be seen: the class the plan reader bans, in util/ai-text.ts. */
+const isHidden = isHiddenChar;
 
 function hex4(cp: number): string {
   return cp.toString(16).toUpperCase().padStart(4, "0");
@@ -104,6 +100,14 @@ function cut(s: string, max: number): string {
   const code = s.charCodeAt(end - 1);
   if (code >= 0xd800 && code <= 0xdbff) end--;
   return s.slice(0, end) + "…";
+}
+
+/**
+ * Adds every item of `list` to `target`, one by one. `target.push(...list)` hands the whole list to the call as arguments and throws
+ * a RangeError when the list holds more than about 125,000 items (a file with that many findings of one kind).
+ */
+function pushAll<T>(target: T[], list: readonly T[]): void {
+  for (const item of list) target.push(item);
 }
 
 function sameWords(n: number, one: string, many: string): string {
@@ -1452,13 +1456,13 @@ const MSG = {
   deadAnchorElsewhere: (anchor: string, target: string, f: string) => `The link to the heading “#${anchor}” in “${target}” (from “${f}”) does not lead to a heading.`,
   noHeading: (h: string) => `The text has no heading called “${h}”.`,
   noMention: (t: string) => `The visible text does not contain “${t}”.`,
-  words: (n: number, a: number, b: number) => `The new text has ${n} words; it should have ${a} to ${b}.`,
+  words: (n: number, a: number, b: number) => `The new text has ${n} ${sameWords(n, "word", "words")}; it should have ${a} to ${b}.`,
   csvQuote: (f: string) => `“${f}” is not a valid table: a quote mark is opened and never closed.`,
   csvNoHeader: (f: string) => `“${f}” has no header row.`,
   csvEmptyName: (f: string) => `“${f}” has a column with no name in its first row.`,
   csvDuplicate: (f: string, name: string) => `“${f}” has two columns called “${name}”.`,
-  csvRagged: (row: number, f: string, a: number, b: number) => `Row ${row} of “${f}” has ${a} values, but the first row has ${b}.`,
-  csvRaggedMore: (k: number, f: string) => `${k} more rows of “${f}” have the wrong number of values.`,
+  csvRagged: (row: number, f: string, a: number, b: number) => `Row ${row} of “${f}” has ${a} ${sameWords(a, "value", "values")}, but the first row has ${b}.`,
+  csvRaggedMore: (k: number, f: string) => `${k} more ${sameWords(k, "row", "rows")} of “${f}” ${sameWords(k, "has", "have")} the wrong number of values.`,
   csvColumns: (f: string, a: string, b: string) => `“${f}” has the columns ${a}, but the plan asks for ${b}.`,
   csvRows: (f: string, n: number, a: number, b: number) => `“${f}” has ${n} ${sameWords(n, "row", "rows")}; it should have ${a} to ${b}.`,
   noTable: "The plan asks for a table with columns or rows, but no table file changed.",
@@ -1863,13 +1867,13 @@ function viewOf(file: DeliverableFile, model: MdModel | undefined, needHeadings:
 async function fileFindings(ctx: Ctx, file: DeliverableFile, name: string, text: string, isOld: boolean, parsed?: MdModel): Promise<Found[]> {
   const found: Found[] = [];
   const kind = file.kind;
-  found.push(...secretFindings(name, text));
+  pushAll(found, secretFindings(name, text));
   await tick();
   if (kind === "markdown" || kind === "text" || kind === "page") {
     if (kind === "markdown") {
       const model = parsed ?? parseMarkdown(text);
       if (!isOld) for (const line of model.longLines.slice(0, 3)) ctx.facts.add(MSG.longLine(name, line));
-      found.push(...placeholderFindings(name, text, model));
+      pushAll(found, placeholderFindings(name, text, model));
       await tick();
       const refs: RefToCheck[] = [];
       let own: Set<string> | undefined;
@@ -1895,22 +1899,22 @@ async function fileFindings(ctx: Ctx, file: DeliverableFile, name: string, text:
         for (const id of html.summary.ids) own.add(id);
         return own;
       };
-      found.push(...(await linkFindings(ctx, file, name, refs, ownAnchors, isOld)));
+      pushAll(found, await linkFindings(ctx, file, name, refs, ownAnchors, isOld));
     } else if (kind === "text") {
-      found.push(...placeholderFindings(name, text, undefined));
+      pushAll(found, placeholderFindings(name, text, undefined));
     } else {
       const page = pageFindings(name, text, "page");
-      found.push(...placeholderFindings(name, text, undefined, page.visible));
+      pushAll(found, placeholderFindings(name, text, undefined, page.visible));
       await tick();
-      found.push(...page.found);
+      pushAll(found, page.found);
       await tick();
       const refs: RefToCheck[] = page.summary.refs
         .filter((r) => (r.tag === "link" ? r.attr === "href" : true) && r.attr !== "srcset")
         .map((r) => ({ value: r.value, anchors: false }));
-      found.push(...(await linkFindings(ctx, file, name, refs, () => new Set(), isOld)));
+      pushAll(found, await linkFindings(ctx, file, name, refs, () => new Set(), isOld));
     }
   } else if (kind === "drawing") {
-    found.push(...pageFindings(name, text, "drawing").found);
+    pushAll(found, pageFindings(name, text, "drawing").found);
   } else if (kind === "style") {
     const hosts = new Set<string>();
     for (const target of cssLoads(text)) {
@@ -2143,17 +2147,15 @@ const MIN_EVIDENCE = 12;
 const MIN_QUOTE = 8;
 const MAX_SEEN_READS = 20;
 
-/** Evidence is AI-written: control and hidden characters out, white space collapsed, at most 300 characters. */
+/** Evidence is AI-written, and may quote a hostile file: cleaned by `cleanAiText` (nothing hidden, no picture or link, no web address), one line, at most 300 characters. */
 function cleanEvidence(s: string): string {
-  let out = "";
-  let looked = 0;
-  for (const ch of s) {
-    if (++looked > 50_000) break;
-    if (ch === "\n" || ch === "\r" || ch === "\t") out += " ";
-    else if (!isHidden(ch)) out += ch;
-    if (out.length > EVIDENCE_MAX * 2) break;
-  }
-  return cut(collapse(out), EVIDENCE_MAX);
+  return cleanAiText(s, EVIDENCE_MAX);
+}
+
+/** `text` as a sentence: it gets a full stop unless it already ends with one (a check the leader wrote usually does), or with `!`, `?` or `…`. */
+function withFullStop(text: string): string {
+  const trimmed = text.trim();
+  return /[.!?…]$/u.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 /** The text a quote is looked for in, and the quote itself, made alike: marks of markdown and tags out, white space collapsed, NFC, one kind of quote mark. */
@@ -2355,7 +2357,7 @@ export function judgeRubric(input: RubricInput): RubricJudgement {
       findings.push({
         severity: "major",
         file: null,
-        description: `Check ${r.n} is not met: ${checks[r.n - 1] ?? ""}. The second AI found: ${r.evidence}`,
+        description: `Check ${r.n} is not met: ${withFullStop(checks[r.n - 1] ?? "")} The second AI found: ${r.evidence}`,
         suggestedTest: null,
       });
     }

@@ -10,6 +10,7 @@ import { endState, isCheckpointShape, isWaitingForCheck, localClock, MAX_SEND_BA
 import { inContainer } from "./config.js";
 import { planOf } from "./state.js";
 import type { Attempt, Feature, Finding, Mission, MissionStatus, PendingCheckpoint, Provider, ReportProseOutput, UsageRecord } from "./types.js";
+import { cleanAiText } from "./util/ai-text.js";
 import { stripControlChars } from "./util/terminal.js";
 import { featuresDone } from "./util/words.js";
 
@@ -224,7 +225,19 @@ function checkedByFact(m: Mission, f: Feature): string {
 
 function findingFact(f: Feature, finding: Finding): string {
   const where = finding.file ? ` (${finding.file})` : "";
-  return `[${finding.severity}] ${f.id}${where}: ${finding.description}`;
+  return `[${finding.severity}] ${f.id}${where}: ${findingText(f, finding)}`;
+}
+
+/** The longest finding the report prints: a check, then the evidence of the second AI, which is cut at 300 characters. */
+const FINDING_CHARS = 2000;
+
+/**
+ * What a finding says. The findings of a feature checked by a second AI quote files that AI read, so they are cleaned once
+ * more here (no hidden character, no picture or link, no web address; util/ai-text.ts): a mission file that holds older or
+ * hand-made text cannot put them in the report. Other findings are printed as they were.
+ */
+function findingText(feature: Feature, finding: Finding): string {
+  return isModeFeature(feature) ? cleanAiText(finding.description, FINDING_CHARS) : oneLine(finding.description);
 }
 
 // ───────────────────────────── The report ─────────────────────────────
@@ -287,18 +300,42 @@ function headerSection(m: Mission, generatedAt: string): string {
   return [header, line, checked].filter((part) => part !== "").join("\n\n");
 }
 
-/** Any form of the word "test": a sentence about work that no test checked must not use it (docs/modes-spec.md 10.3). */
-const TEST_WORD = /\btest(?:s|ed|ing)?\b/i;
+/**
+ * The words docs/modes-spec.md 10.3 says are never used for work that no test checked: any form of "test", and the claims
+ * of the "Never say" column (verified, approved by AI, guaranteed, correct; you looked at it, reviewed by you, signed off,
+ * you chose not to look at it; passed with a warning, probably fine; the engine). Case does not matter; white space between
+ * the words of a phrase may be any amount.
+ */
+const NEVER_SAY: readonly RegExp[] = [
+  /\btest(?:s|ed|ing)?\b/iu,
+  /\bverified\b/iu,
+  /\bapproved\s+by\s+(?:the\s+|a\s+|an\s+)?(?:second\s+)?AI\b/iu,
+  /\bguaranteed\b/iu,
+  /\bcorrect\b/iu,
+  /\byou\s+looked\s+at\s+it\b/iu,
+  /\breviewed\s+by\s+you\b/iu,
+  /\bsigned\s+off\b/iu,
+  /\byou\s+chose\s+not\s+to\s+look\s+at\s+it\b/iu,
+  /\bpassed\s+with\s+a\s+warning\b/iu,
+  /\bprobably\s+fine\b/iu,
+  /\bthe\s+engine\b/iu,
+];
+
+/** True when `text` holds a word or phrase of the never-say list. */
+export function holdsNeverSay(text: string): boolean {
+  return NEVER_SAY.some((re) => re.test(text));
+}
 
 /**
  * The AI-written narrative and "what you can do" lines, unless the mission has a feature that no test checked and the AI
- * talks about tests: then both are left out (the plain narrative and the feature list stand in) and `left` is true, so the
- * technical details can say so. A rule in the prompt asks the AI not to; this is the check that does not depend on it.
+ * uses a word of the never-say list (tests, verified, guaranteed, ...): then both are left out (the plain narrative and the
+ * feature list stand in) and `left` is true, so the technical details can say so. A rule in the prompt asks the AI not to;
+ * this is the check that does not depend on it.
  */
 function guardProse(m: Mission, prose: ReportProseOutput | null | undefined): { prose: ReportProseOutput | null | undefined; left: boolean } {
   if (!prose || !hasModeFeature(m.features)) return { prose, left: false };
   const texts = [prose.narrative, ...(Array.isArray(prose.whatYouCanDo) ? prose.whatYouCanDo : [])];
-  return texts.some((t) => typeof t === "string" && TEST_WORD.test(t)) ? { prose: null, left: true } : { prose, left: false };
+  return texts.some((t) => typeof t === "string" && holdsNeverSay(t)) ? { prose: null, left: true } : { prose, left: false };
 }
 
 /**
@@ -700,7 +737,7 @@ function reviewNotesSection(m: Mission): string {
   const items = openFindings(m).map(({ feature, finding }) => {
     const where = finding.file ? ` (in ${code(finding.file)})` : "";
     const check = finding.suggestedTest ? ` Suggested check: ${oneLine(finding.suggestedTest)}` : "";
-    return `**${oneLine(feature.title)}** · ${SEVERITY_WORD[finding.severity]}: ${oneLine(finding.description)}${where}${check}`;
+    return `**${oneLine(feature.title)}** · ${SEVERITY_WORD[finding.severity]}: ${findingText(feature, finding)}${where}${check}`;
   });
   return section("Review notes", bulletList(items, "No open review notes."));
 }

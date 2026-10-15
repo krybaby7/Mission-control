@@ -318,8 +318,10 @@ export function playwrightRenderer(options: { env?: Record<string, string | unde
       }
       let browser: PwBrowser;
       try {
-        // The second switch keeps the browser from running out of the small shared memory a container gives it by default.
-        browser = await pw.chromium.launch({ executablePath, args: ["--no-sandbox", "--disable-dev-shm-usage"], timeout: PAGE_LOAD_MS });
+        // The second switch keeps the browser from running out of the small shared memory a container gives it by default. The third
+        // lets no name or address be looked up: a page that sends the browser to a web address (a script, a form, a link, a refresh
+        // tag) made it open a connection to that address before the request was aborted. Pages and files of the project need no lookup.
+        browser = await pw.chromium.launch({ executablePath, args: ["--no-sandbox", "--disable-dev-shm-usage", "--host-resolver-rules=MAP * ~NOTFOUND"], timeout: PAGE_LOAD_MS });
       } catch {
         return { pages: [], taken: 0, why: "start_failed" };
       }

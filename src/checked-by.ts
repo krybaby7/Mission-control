@@ -21,13 +21,13 @@ export type CheckedMission = Pick<Mission, "features" | "ownerStops" | "checkpoi
  * Any other value is not a mode: a mission file that holds one is refused when it is loaded (`MissionStore.load`), so it never gets here,
  * and a value that did would be read as "checked by tests", which keeps the test author and the frozen tests, never as a quiet pass.
  */
-export function isModeFeature(f: Pick<SpecFeature, "mode">): boolean {
-  return f.mode === "review" || f.mode === "owner";
+export function isModeFeature(f: Pick<SpecFeature, "mode"> | null | undefined): boolean {
+  return f?.mode === "review" || f?.mode === "owner";
 }
 
 /** Whether any feature has a mode. Every change of wording or behaviour in this step is guarded by this. */
-export function hasModeFeature(features: readonly Pick<SpecFeature, "mode">[]): boolean {
-  return features.some(isModeFeature);
+export function hasModeFeature(features: readonly (Pick<SpecFeature, "mode"> | null | undefined)[] | null | undefined): boolean {
+  return Array.isArray(features) && features.some((f) => isModeFeature(f));
 }
 
 /** Features the engine adds by itself (gate C's repair, the change after a send-back at the final stop): the owner is not asked about them. */
@@ -170,7 +170,7 @@ export function tableWords(h: HowChecked): string {
       return `Built; the second AI's check did not finish, so only Mission Control's own checks ran${ending}`;
     case 5: {
       const left = h.unjudged > 0 ? `, and ${h.unjudged} ${h.unjudged === 1 ? "was" : "were"} not judged by anyone` : "";
-      return `Built, but ${h.failed} of ${plural(h.total, "check was", "checks were")} not met (see the review notes)${left}${ending}`;
+      return `Built, but ${h.failed} of ${h.total} ${h.total === 1 ? "check" : "checks"} ${h.failed === 1 ? "was" : "were"} not met (see the review notes)${left}${ending}`;
     }
     case 6:
       return `Built; ${plural(h.unjudged, "check was", "checks were")} not judged by anyone${ending}`;
@@ -244,6 +244,14 @@ export function pictureReason(why: PictureWhy | undefined): string {
     default:
       return "this feature has no page";
   }
+}
+
+/**
+ * What is said of the changed images that the second AI was given (a feature that changes a picture file has no page to draw,
+ * but its images are copied for the owner and offered to the second AI): `The second AI was shown 1 changed image.`
+ */
+export function imagesShownWords(n: number): string {
+  return `The second AI was shown ${n === 1 ? "1 changed image" : `${n} changed images`}.`;
 }
 
 // ───────────────────────────── Why the owner is asked (spec 5.2 step 8, and 10.2 line 8) ─────────────────────────────

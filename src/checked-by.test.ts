@@ -8,6 +8,7 @@ import {
   checkedWords,
   hasModeFeature,
   howChecked,
+  imagesShownWords,
   isDerivedFeature,
   isModeFeature,
   lookReason,
@@ -68,6 +69,20 @@ describe("the small predicates", () => {
     expect(hasModeFeature([{}, {}])).toBe(false);
     expect(hasModeFeature([{}, { mode: "owner" }])).toBe(true);
     expect(hasModeFeature([])).toBe(false);
+  });
+
+  it("a damaged file gives no mode and no error: a hole in the list, or a list that is not one (V1-4)", () => {
+    for (const hole of [null, undefined]) {
+      expect(isModeFeature(hole)).toBe(false);
+      expect(hasModeFeature([hole, { mode: "owner" }])).toBe(true);
+      expect(hasModeFeature([hole])).toBe(false);
+    }
+    for (const notAList of [undefined, null, "owner", 5, {}, { mode: "owner" }]) expect(hasModeFeature(notAList as never)).toBe(false);
+  });
+
+  it("says how many changed images the second AI was shown, in the singular and the plural", () => {
+    expect(imagesShownWords(1)).toBe("The second AI was shown 1 changed image.");
+    expect(imagesShownWords(2)).toBe("The second AI was shown 2 changed images.");
   });
 
   it("knows the features the engine adds by itself", () => {
@@ -174,10 +189,10 @@ describe("the words of the Checked: line and of the Features table", () => {
 
   it("row 5, with the plural and the singular", () => {
     expect(words(f(["pass", "fail", "fail"]))).toEqual({ line: "by a second AI against your list (2 checks not met)", table: "Built, but 2 of 3 checks were not met (see the review notes)" });
-    expect(words(f(["fail", "pass", "pass"]))).toEqual({ line: "by a second AI against your list (1 check not met)", table: "Built, but 1 of 3 checks were not met (see the review notes)" });
+    expect(words(f(["fail", "pass", "pass"]))).toEqual({ line: "by a second AI against your list (1 check not met)", table: "Built, but 1 of 3 checks was not met (see the review notes)" });
     expect(words(feature("a", { mode: "review", checked: checked(["fail"]) }, 1))).toEqual({ line: "by a second AI against your list (1 check not met)", table: "Built, but 1 of 1 check was not met (see the review notes)" });
-    expect(words(f(["fail", "cannot_judge", "pass"])).table).toBe("Built, but 1 of 3 checks were not met (see the review notes), and 1 was not judged by anyone");
-    expect(words(f(["fail", "cannot_judge", "cannot_judge"])).table).toBe("Built, but 1 of 3 checks were not met (see the review notes), and 2 were not judged by anyone");
+    expect(words(f(["fail", "cannot_judge", "pass"])).table).toBe("Built, but 1 of 3 checks was not met (see the review notes), and 1 was not judged by anyone");
+    expect(words(f(["fail", "cannot_judge", "cannot_judge"])).table).toBe("Built, but 1 of 3 checks was not met (see the review notes), and 2 were not judged by anyone");
   });
 
   it("row 6", () => {

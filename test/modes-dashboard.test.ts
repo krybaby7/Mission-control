@@ -114,7 +114,7 @@ describe("example B: a page marked for the owner's look, run to the owner's stop
     expect(missionJson(id).ownerStops).toBe(false);
     const planStop = await w.run(id); // the plan stop: the stop where the owner decides, so it must not promise a look that will not happen
     const planLines = (planStop.checkpoint?.look.lines ?? []).join("\n");
-    expect(planLines).toContain("Checked by for “One-page landing page”: a second AI, against its list of checks. It was queued without a stop for your look. No tests are written for it.");
+    expect(planLines).toContain("How “One-page landing page” is checked: a second AI, against its list of checks. It was queued without a stop for your look. No tests are written for it.");
     expect(planLines).toContain("How the features are checked: 1 by a second AI, queued without a stop for your look.");
     expect(planLines).not.toContain("and then by you");
     await w.approve(id);
