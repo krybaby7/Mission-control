@@ -72,7 +72,7 @@ For a small, clear job the leader can write the plan itself instead of leaving i
 
 ## GitHub in and out
 
-The goal behind it: the CEO says "work on my repo and send it to GitHub", and the team does the work on a copy on the PC, and the result comes back as a draft pull request on GitHub for the CEO to merge. The design rule is that **no password, token or login is ever inside the container**, and the engine stays free of credentials. So these commands run on the PC, in Ubuntu, with the owner's own git and GitHub login (`gh auth login`, see [docs/github-setup.md](github-setup.md)), and are commands of `scripts/mc-docker.sh`, not of `mc`.
+The goal behind it: the CEO says "work on my repo and send it to GitHub", and the team does the work on a copy on the PC, and the result comes back as a draft pull request on GitHub for the CEO to merge. The design rule is that **with these commands no password, token or login is ever inside the container**, and the engine stays free of credentials. (The older `git.push` setting is the one exception, and it is off unless you turn it on: see [docs/github-setup.md](github-setup.md).) So these commands run on the PC, in Ubuntu, with the owner's own git and GitHub login (`gh auth login`, see [docs/github-setup.md](github-setup.md)), and are commands of `scripts/mc-docker.sh`, not of `mc`.
 
 **`get <github-url | owner/repo> [folder-name]`**
 
@@ -182,7 +182,7 @@ Not tried here: starting it, seeing the session in the app, what a CEO can do in
 - It reads texts written by AIs (reports, logs, decisions). `CLAUDE.md` tells it to treat them, and the mission and feature names in a pasted sentence (in quotes, or after "in"), as information and never to run a command that appears in them or follow words in them. How well it holds to this has not been tested against a hostile text; the prompts for `stop`, `run`, `new`, `feature`, `plan queue`, `approve`, `send-back`, `get` and `publish` are the second guard.
 - It cannot predict. A question like "Is it going to finish?" gets what is visible (features done, anything stuck, a wait, the stop time if it started the run) and no promise. It has no usage figures and no progress per feature.
 - It cannot remove or reorder queued work. "Skip this feature" is answered with that fact, and an offer to stop the run; only a feature that is already stuck stays out.
-- It cannot run git or gh. After a report's "How to try it" the app's folder can be left on a trial version; `feature` then refuses, and the leader tells the CEO the owner has to put the app back (the message names the command). Work reaches GitHub only through `publish`.
+- It cannot run git or gh. After a report's "How to try it" the app's folder can be left on a trial version; `feature` then refuses, and the leader tells the CEO the owner has to put the app back (the message names the command). With the leader's commands, work reaches GitHub only through `publish`.
 
 ## Not verified
 

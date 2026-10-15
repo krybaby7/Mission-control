@@ -16,6 +16,8 @@ With these commands, the box where the team works (the Docker container) never g
 
 **Not tried:** a real GitHub. A real login. The real `gh` program opening a pull request. Private repositories. SSH keys. Git LFS (big-file storage). Windows, WSL and Docker Desktop. The steps for installing and logging in below come from GitHub's own documentation, not from anything run here. Real GitHub cannot be reached from the place this was built, so please try it once with a repository you can afford to experiment with.
 
+**Two limits to know about.** `mc publish` needs git version 2.29 or newer. Ubuntu 22.04 and newer have it; check with `git --version`. If you use an SSH address, `mc` asks SSH never to ask a question, and it uses its own SSH settings for that one command, so a special key set in your own git settings (`core.sshCommand`) is not used. Both were found by reading the script, and neither was tried.
+
 ## One-time setup: log in to GitHub on your PC
 
 Do this in your own Ubuntu window, not through the leader. Only you can log in.

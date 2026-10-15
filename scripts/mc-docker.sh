@@ -682,13 +682,20 @@ clean_git() {
 
 # parse_github_address <text>
 # Returns 0 and sets GH_OWNER, GH_REPO and GH_URL when <text> is one of the three forms that are accepted:
-#   https://github.com/<owner>/<repo>   (a trailing .git or / is fine)
+#   https://github.com/<owner>/<repo>   (a trailing .git or / is fine; the https:// may be left out)
 #   git@github.com:<owner>/<repo>.git   (the .git is optional)
 #   <owner>/<repo>
 # Returns 1 when it names another host, and 2 when it is not a GitHub address at all. It only looks at the text.
 parse_github_address() {
-  local text="$1" form owner repo
+  local text="$1" form owner repo lower
   GH_OWNER="" GH_REPO="" GH_URL=""
+  # A browser shows github.com/<owner>/<repo> without https://, and a host name may have capitals: accept both. The
+  # address that is used afterwards is always built again from the owner and the repository.
+  lower="${text,,}"
+  case "$lower" in
+    github.com/*) text="https://github.com/${text:11}" ;;
+    https://github.com/*) text="https://github.com/${text:19}" ;;
+  esac
   if [[ "$text" =~ ^https://github\.com/($GH_OWNER_RE)/($GH_REPO_RE)/?$ ]]; then
     form="https"
   elif [[ "$text" =~ ^git@github\.com:($GH_OWNER_RE)/($GH_REPO_RE)$ ]]; then
@@ -954,7 +961,7 @@ write_pull_request_body() {
     if [ "$F_UNFINISHED_REVIEWS" -gt 0 ]; then
       printf '%s\n' "- Review: a separate AI reviewer reads each feature before it is added. $F_UNFINISHED_REVIEWS review(s) did not finish. Those features were added after their tests passed."
     else
-      printf '%s\n' "- Review: a separate AI reviewer reads each feature before it is added. The report below lists what it left open."
+      printf '%s\n' "- Review: a separate AI reviewer reads each feature before it is added. The first lines of the report are below. The whole report, with what the reviewers left open, is in the mission's report.md."
     fi
     local -a stops=() unanswered=()
     local kind_name answered

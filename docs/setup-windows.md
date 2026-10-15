@@ -25,7 +25,7 @@ Mission Control lets AI agents run commands for as long as a run lasts, without 
 
 **It protects** your Windows files (Documents, Pictures, Desktop), your browsers and saved passwords, and everything else in Ubuntu. If an agent runs a harmful command such as "delete everything", the damage stays in the box and in `~/mc-apps`, where git keeps the history of each app. The box also has limits: it may use at most three quarters of Docker's memory and a few thousand programs at once, so an app build that runs out of control fails inside the box instead of freezing Docker Desktop.
 
-**It is not involved in GitHub.** `mc get`, `mc publish-preview` and `mc publish` run in your Ubuntu window, outside the box, with your own GitHub login. The box never sees that login. `mc publish` reads the app's folder, but it makes a clean copy of the one branch before it touches GitHub, so nothing the agents left in that folder can run with your login. It also uploads only to a repository you named (the preview shows it), and never to one that the app's folder was changed to. See [docs/github-setup.md](github-setup.md).
+**By default it is not involved in GitHub.** `mc get`, `mc publish-preview` and `mc publish` run in your Ubuntu window, outside the box, with your own GitHub login. The box never sees that login. `mc publish` reads the app's folder, but it makes a clean copy of the one branch before it touches GitHub, so nothing the agents left in that folder can run with your login. It also uploads only to a repository you named (the preview shows it), and never to one that the app's folder was changed to. See [docs/github-setup.md](github-setup.md).
 
 **It does not protect:**
 
@@ -428,7 +428,7 @@ If you ask the leader to start the team working, it runs `mc run` as a backgroun
 
 ## Optional: start the leader and the dashboard with one click
 
-Two small files open Ubuntu for you and start the leader or the dashboard, so you do not have to type anything. They are in the `scripts/windows` folder of Mission Control. **This part has not been tried here: there was no Windows PC, no WSL and no Claude Code to try it on.**
+Two small files open Ubuntu for you and start the leader or the dashboard, so you do not have to type anything. They are in the `scripts/windows` folder of Mission Control. **This part has not been tried here: there was no Windows PC and no WSL to try the shortcut files on.**
 
 1. In the Ubuntu window, once (it needs no Docker):
 

@@ -26,7 +26,7 @@ scripts/mc-docker.sh install-leader
 
 This saves where Mission Control is and needs no Docker. Do it once, and again if you move Mission Control or download it again. After that, there are two ways to start the leader:
 
-- Click the shortcut on your Windows desktop (see "Start the leader with one click" in [docs/setup-windows.md](../docs/setup-windows.md)). It opens Ubuntu and starts the leader inside this folder.
+- Click the shortcut on your Windows desktop (see "Optional: start the leader and the dashboard with one click" in [docs/setup-windows.md](../docs/setup-windows.md)). It opens Ubuntu and starts the leader inside this folder.
 - Or, in the Ubuntu window, type `mc leader`. It always starts the leader in this folder, wherever you are. Add `--no-remote` to start it without Remote Control.
 
 Claude Code asks you to log in the first time. Use the same Claude plan as the rest of Mission Control. The leader's chat uses that plan's usage too.

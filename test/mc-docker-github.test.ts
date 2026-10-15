@@ -237,6 +237,10 @@ describe("get: what it accepts", () => {
     ["https://github.com/acme/widgets/", "https://github.com/acme/widgets.git"],
     ["git@github.com:acme/widgets.git", "git@github.com:acme/widgets.git"],
     ["git@github.com:acme/widgets", "git@github.com:acme/widgets.git"],
+    // What a browser's address bar shows, and a host name written with capitals. The address that is used is built again.
+    ["github.com/acme/widgets", "https://github.com/acme/widgets.git"],
+    ["https://GITHUB.com/acme/widgets", "https://github.com/acme/widgets.git"],
+    ["HTTPS://GitHub.Com/acme/widgets.git", "https://github.com/acme/widgets.git"],
   ];
 
   it.each(GOOD)("downloads %s with the owner's own git settings and prints the next steps", (input, url) => {
@@ -386,7 +390,6 @@ describe("get: what it refuses", () => {
     ["~/widgets", /I don't understand/],
     ["ext::sh -c touch% /tmp/pwned", /I don't understand/],
     ["fd::17/foo", /I don't understand/],
-    ["github.com/acme/widgets", /I don't understand/],
     ["www.github.com/acme/widgets", /I don't understand/],
     ["https://github.com/acme", /I don't understand/],
     ["https://github.com/acme/widgets/tree/main", /I don't understand/],
@@ -407,7 +410,6 @@ describe("get: what it refuses", () => {
     ["https://user:secret@github.com/acme/widgets", /only works with github\.com/],
     ["https://token@github.com/acme/widgets", /only works with github\.com/],
     ["http://github.com/acme/widgets", /only works with github\.com/],
-    ["https://GITHUB.com/acme/widgets", /only works with github\.com/],
     ["https://github.com:443/acme/widgets", /only works with github\.com/],
     ["ssh://git@github.com/acme/widgets.git", /only works with github\.com/],
     ["git://github.com/acme/widgets.git", /only works with github\.com/],
