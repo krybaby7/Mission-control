@@ -342,7 +342,7 @@ describe("mc status and mc run with a check waiting", () => {
       [
         "No mission could run by itself:",
         `- Shout is waiting for your check (“add-shout”, before it is added). Look at it with: mc report ${m.id}. Then: mc approve ${m.id}   or   mc send-back ${m.id} --note "what to change".`,
-        "Night summary: /x/night.md",
+        "Run summary: /x/night.md",
         "",
       ].join("\n"),
     );

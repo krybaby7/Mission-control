@@ -621,12 +621,20 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     return node.id;
   }
 
+  // AI-written text is shown inside curly quotes. A text that already starts with an opening curly quote, or ends with
+  // a closing one, carries its own marks: a second pair would give a doubled mark, so it is shown as it is.
+  function inCurlyQuotes(text) {
+    var t = String(text);
+    var s = t.trim();
+    if (s.charAt(0) === "\u201C" || s.charAt(s.length - 1) === "\u201D") return t;
+    return "\u201C" + t + "\u201D";
+  }
   // An AI wrote this text: show it quoted, with the label that says not to run anything from it.
   function aiBlock(text, notice) {
     var box = el("div", "ai");
     var tag = el("span", "ai-tag");
     add(tag, ic("info"), el("span", "", notice));
-    add(box, tag, el("p", "ai-text", "\u201C" + text + "\u201D"));
+    add(box, tag, el("p", "ai-text", inCurlyQuotes(text)));
     return box;
   }
   function said(s, snap, cls) {
@@ -641,7 +649,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
   }
   function quoted(s, cls) {
     if (!s) return null;
-    return s.author === "ai" ? el("p", "quote", "\u201C" + s.text + "\u201D") : el("p", cls || "", s.text);
+    return s.author === "ai" ? el("p", "quote", inCurlyQuotes(s.text)) : el("p", cls || "", s.text);
   }
   // The first sentence of an engine-written text, for the second line of a row.
   function firstSentence(text) {

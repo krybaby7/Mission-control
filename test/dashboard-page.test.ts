@@ -542,6 +542,31 @@ describe("T-PAGE a check the owner asked for (docs/checkpoints-spec.md, 10)", ()
     expect(card).toContain("add(body, what, todo, nothing)");
   });
 
+  it("puts an AI-written line in curly quotes, but never doubles a mark that the line already has", () => {
+    const inCurlyQuotes = new Function(`${functionSource("inCurlyQuotes")}\nreturn inCurlyQuotes;`)() as (text: string) => string;
+    // A plain line gets its pair.
+    expect(inCurlyQuotes("Add a whisper command")).toBe("“Add a whisper command”");
+    expect(inCurlyQuotes("Check for “Add whisper”: it whispers")).toBe("“Check for “Add whisper”: it whispers”");
+    // A line that starts with an opening mark (the plan card's “Title”: story lines) is shown as it is: no ““ at the start.
+    const startsWith = "“Add whisper”: As a user I can whisper a message.";
+    expect(inCurlyQuotes(startsWith)).toBe(startsWith);
+    // A line that ends with a closing mark is shown as it is: no ”” at the end.
+    const endsWith = "The next feature is “Add whisper”";
+    expect(inCurlyQuotes(endsWith)).toBe(endsWith);
+    // A line that is already one quotation, and one with spaces around it.
+    expect(inCurlyQuotes("“Add whisper”")).toBe("“Add whisper”");
+    expect(inCurlyQuotes("  “Add whisper”: story  ")).toBe("  “Add whisper”: story  ");
+    for (const line of [startsWith, endsWith, "Add a whisper command", "“A” and “B”"]) {
+      const shownLine = inCurlyQuotes(line);
+      expect(shownLine.startsWith("““"), shownLine).toBe(false);
+      expect(shownLine.endsWith("””"), shownLine).toBe(false);
+    }
+    // Both places that quote AI text use it; no other place writes the quote marks itself.
+    expect(functionSource("aiBlock")).toContain("inCurlyQuotes(text)");
+    expect(functionSource("quoted")).toContain("inCurlyQuotes(s.text)");
+    expect(script.match(/\\u201C/g)).toHaveLength(2);
+  });
+
   it("a sentence with nothing to fill in is complete: Copy works at once, and the sheet hides the answers it does not need", () => {
     const open = functionSource("openSheet");
     expect(open).toContain('var ready = !stop && template.indexOf(PLACEHOLDER) < 0;');

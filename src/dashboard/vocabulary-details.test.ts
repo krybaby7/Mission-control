@@ -10,6 +10,7 @@ import {
   fileChangedLine,
   finalReviewCaveat,
   finalReviewWhy,
+  inCurlyQuotes,
   limitedLine,
   loginFailureAis,
   overallSentence,
@@ -386,5 +387,21 @@ describe("T-VOC timeline words", () => {
   it("the plan sentence has the plural right", () => {
     expect(TL.planReady(1, false)).toBe("The plan is ready: 1 feature.");
     expect(TL.planReady(4, true)).toBe("The plan was revised: 4 features.");
+  });
+});
+
+describe("curly quotes", () => {
+  it("put a name in a pair, and never double a mark that the name already has", () => {
+    expect(inCurlyQuotes("Add whisper")).toBe("“Add whisper”");
+    // a line that starts with an opening mark (a plan card's “Title”: story line)
+    expect(inCurlyQuotes("“Add whisper”: As a user I can whisper.")).toBe("“Add whisper”: As a user I can whisper.");
+    // a line that ends with a closing mark
+    expect(inCurlyQuotes("The next feature is “Add whisper”")).toBe("The next feature is “Add whisper”");
+    expect(inCurlyQuotes("“Add whisper”")).toBe("“Add whisper”");
+    expect(inCurlyQuotes("Check for “Add whisper”: it works")).toBe("“Check for “Add whisper”: it works”");
+    for (const text of ["“A”: b", "b: “A”", "plain"]) {
+      expect(inCurlyQuotes(text).startsWith("““")).toBe(false);
+      expect(inCurlyQuotes(text).endsWith("””")).toBe(false);
+    }
   });
 });

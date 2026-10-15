@@ -57,7 +57,7 @@ Examples:
   mc doctor                                 check that everything is set up
   mc new "A habit tracker with a weekly streak chart" --name "Habit tracker"
   mc feature ~/mc-apps/habit-tracker "Add a dark mode"
-  mc run --until 07:00                      work until 7 in the morning
+  mc run --until 07:00                      stop working at 07:00 (24-hour clock)
   mc status                                 see how every mission is doing
   mc report                                 read the latest report
   mc stop                                   stop a run after its current step`;
@@ -89,7 +89,7 @@ export async function main(argv: string[], given: CliIO = processIO): Promise<nu
 
 function buildProgram(io: CliIO, setExit: (code: number) => void): Command {
   const program = new Command("mc")
-    .description("Mission Control builds and improves apps overnight with Claude Code and Codex.")
+    .description("Mission Control builds and improves apps with Claude Code and Codex.")
     .version(packageVersion(), "-V, --version", "show the Mission Control version")
     .helpOption("-h, --help", "show help")
     .configureOutput({ writeOut: io.stdout, writeErr: io.stderr })
@@ -148,7 +148,7 @@ function buildProgram(io: CliIO, setExit: (code: number) => void): Command {
   plan
     .command("queue [file]")
     .description(
-      "queue a plan. The team's planner is skipped and a second AI still reads the plan first. By default the mission stops for your check of the plan before anything is built",
+      "queue a plan. The team's planner is skipped and a second AI still reads the plan first. By default the mission stops for your check of the plan before anything is built. The same plan is not queued again until its mission has finished",
     )
     .option("--checkpoint <kind>", CHECKPOINT_HELP, collect, [])
     .option("--no-plan-checkpoint", NO_PLAN_CHECKPOINT_HELP)
@@ -163,8 +163,8 @@ function buildProgram(io: CliIO, setExit: (code: number) => void): Command {
     .description("work through the queued missions")
     .option("--until <HH:MM>", "stop at this time of day (24-hour clock, your local time)")
     .option("--mission <id>", "work only on this mission")
-    .option("--profile <profile>", "use this profile tonight (each mission keeps its own for later runs)")
-    .option("--role <setting>", "change one role tonight, e.g. engineer=frontier (can be repeated; not saved)", collect, [])
+    .option("--profile <profile>", "use this profile for this run (each mission keeps its own for later runs)")
+    .option("--role <setting>", "change one role for this run, e.g. engineer=frontier (can be repeated; not saved)", collect, [])
     .action((opts: RunOptions) => runCommand(io, opts));
 
   program
@@ -659,6 +659,12 @@ async function planIntakeCommand(io: CliIO, mode: "preview" | "queue", file: str
   // A preview needs no settings and writes nothing; a queue makes the mission.
   const queue = mode === "queue" ? { config: loadConfig() } : undefined;
   const store = queue ? openStore(queue.config) : lenientStore(io);
+  // The same plan is queued once while its mission is alive. A queue is refused; a preview, which only reads, says it as a note.
+  const twin = queue ? liveMissionWithPlan(store, parsed.sha256) : liveMissionWithPlanOrNone(store, parsed.sha256);
+  if (twin && queue) {
+    say(io.stderr, samePlanSentence(twin));
+    return 1;
+  }
   let target: { repoPath: string; baseBranch: string } | undefined;
   if (envelope.folder !== undefined) {
     try {
@@ -675,6 +681,7 @@ async function planIntakeCommand(io: CliIO, mode: "preview" | "queue", file: str
     say(
       io.stdout,
       "This plan can be used. Nothing was queued.",
+      ...(twin ? [samePlanSentence(twin)] : []),
       "",
       `Plan ${quoted}: ${subject}.`,
       `Plan code: ${parsed.code} (the same plan always gets the same code).`,
@@ -713,6 +720,35 @@ async function planIntakeCommand(io: CliIO, mode: "preview" | "queue", file: str
     ...block,
   );
   return 0;
+}
+
+/**
+ * A mission that is still alive and was queued with this very plan (the same SHA-256 of the plan in its fixed form, which
+ * is what the plan code is the start of). Alive means it has not finished: queued, running, waiting for a limit, or
+ * stopped (that includes a mission parked at a check), and also failed in a way the next run retries (a login that
+ * expired). A mission that is done, partly done or failed for good never runs by itself again, so the same plan is a
+ * fair new attempt then.
+ */
+function liveMissionWithPlan(store: MissionStore, sha256: string): Mission | undefined {
+  return store.list().find((m) => isLive(m) && planOf(m)?.sha256 === sha256);
+}
+
+/** The same, for a preview, which only reads: a folder that cannot be listed is no reason to fail. */
+function liveMissionWithPlanOrNone(store: MissionStore, sha256: string): Mission | undefined {
+  try {
+    return liveMissionWithPlan(store, sha256);
+  } catch {
+    return undefined;
+  }
+}
+
+function isLive(m: Mission): boolean {
+  return m.status === "queued" || m.status === "running" || m.status === "waiting" || m.status === "stopped" || (m.status === "failed" && m.failure?.retryable === true);
+}
+
+/** What the owner is told about a plan that is already queued (the leader's text quotes this sentence). */
+function samePlanSentence(m: Mission): string {
+  return `This plan is already queued as “${shown(m.title)}” (${m.id}). See it with: mc status`;
 }
 
 /** The kinds asked for with --checkpoint, plus the plan unless --no-plan-checkpoint, in the order the owner meets them. */
@@ -825,7 +861,7 @@ function planShowCommand(io: CliIO, id: string): number {
 async function runCommand(io: CliIO, opts: RunOptions): Promise<void> {
   const parked = opts.mission === undefined ? undefined : parkedMission(opts.mission);
   if (parked?.checkpoint) {
-    // Nothing to start: the mission waits for its owner, so no run (and no night summary or phone notice) is made for it.
+    // Nothing to start: the mission waits for its owner, so no run (and no run summary or phone notice) is made for it.
     say(io.stdout, `“${parked.title}” is still waiting for your check (${waitingWhat(parked, parked.checkpoint)}). Nothing was started.`);
     return;
   }
@@ -850,11 +886,11 @@ async function runCommand(io: CliIO, opts: RunOptions): Promise<void> {
   const nothing = waitingForYou.length > 0 || waitingForCheck.length > 0 ? "No mission could run by itself:" : "Nothing was queued. Add work with: mc new \"<your idea>\"";
   say(
     io.stdout,
-    missions.length === 0 ? nothing : "Night finished:",
+    missions.length === 0 ? nothing : "Run finished:",
     ...lines,
     ...help,
     ...checks,
-    `Night summary: ${summaryPath}`,
+    `Run summary: ${summaryPath}`,
     ...(missions.length > 0 ? ["Read the report: mc report"] : []),
   );
 }
@@ -873,7 +909,7 @@ function stopCommand(io: CliIO): void {
   lenientStore(io).requestStop();
   say(
     io.stdout,
-    "Stop requested. A running night run stops its current step, saves its progress, writes the report and notifies you.",
+    "Stop requested. A run that is going stops its current step, saves its progress, writes the report and notifies you.",
     'The next "mc run" continues where it stopped.',
   );
 }
@@ -1108,11 +1144,11 @@ function reportCommand(io: CliIO, id: string | undefined): number {
   const store = lenientStore(io);
   if (id !== undefined) findMission(store, id);
   const latest = id === undefined ? latestReport(store) : undefined;
-  // After a night that worked on several missions, its summary lists them all, with what each needs from you.
-  const night = id === undefined ? latestNightSummary(store, latest?.at) : undefined;
-  if (night !== undefined) {
-    printPreview(io, "Night summary", night.path);
-    say(io.stdout, "", `Each mission's own report: mc report <mission>, for example: mc report ${night.missions[0]}`);
+  // After a run that worked on several missions, its summary lists them all, with what each needs from you.
+  const summary = id === undefined ? latestNightSummary(store, latest?.at) : undefined;
+  if (summary !== undefined) {
+    printPreview(io, "Run summary", summary.path);
+    say(io.stdout, "", `Each mission's own report: mc report <mission>, for example: mc report ${summary.missions[0]}`);
     return 0;
   }
   const path = id === undefined ? latest?.path : store.reportPath(id);
@@ -1144,8 +1180,8 @@ function latestReport(store: MissionStore): { path: string; at: number } | undef
 }
 
 /**
- * The latest night summary (<home>/reports/night-*.md), when it was written after the latest mission report and
- * that night worked on several missions: the missions it links, in order.
+ * The latest run summary (<home>/reports/night-*.md; the file names keep their older word), when it was written after the
+ * latest mission report and that run worked on several missions: the missions it links, in order.
  */
 function latestNightSummary(store: MissionStore, latestReportAt: number | undefined): { path: string; missions: string[] } | undefined {
   const dir = join(store.home, "reports");

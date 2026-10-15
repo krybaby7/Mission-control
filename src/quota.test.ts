@@ -485,7 +485,7 @@ describe("QuotaGovernor: pacing by utilization", () => {
       q.recordUtilization(weekly(0.55, resetsAt));
       expect(q.isAvailable("claude")).toBe(false);
       expect(q.state("claude")).toMatchObject({ status: "limited", kind: "weekly", until: resetsAt });
-      expect((q.state("claude") as { raw: string }).raw).toContain("this night's work used 35% of the weekly limit");
+      expect((q.state("claude") as { raw: string }).raw).toContain("this run's work used 35% of the weekly limit");
       expect(q.isAvailable("codex")).toBe(true);
     });
 

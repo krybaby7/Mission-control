@@ -1,4 +1,4 @@
-// `mc doctor`: checks that this computer is ready for a night of work (tools, logins, settings, folders, disk
+// `mc doctor`: checks that this computer is ready for a run (tools, logins, settings, folders, disk
 // space), and with `live` makes one tiny real request to each AI. Every check catches its own errors, so the
 // doctor always finishes and reports, whatever is broken.
 import { accessSync, constants, existsSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
@@ -22,7 +22,7 @@ export interface DoctorCheck {
   detail: string;
   /** What to do about it, when not ok. */
   fix?: string;
-  /** How serious a failure of this check is: errors stop a night from working, warnings don't. */
+  /** How serious a failure of this check is: errors stop a run from working, warnings don't. */
   severity: "error" | "warn";
 }
 
@@ -66,8 +66,8 @@ const LIVE_SCHEMA: JsonSchema = {
 export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorCheck[]> {
   const settings = settingsCheck(opts.config);
   const c = settings.config;
-  // A night run uses the same logins. Codex refreshes its login in place, and two codex processes refreshing it at
-  // once can log Codex out for the night (design-v1 §2.1), so commands that may talk to the servers wait for the run.
+  // A run uses the same logins. Codex refreshes its login in place, and two codex processes refreshing it at
+  // once can log Codex out for the rest of the run (design-v1 §2.1), so commands that may talk to the servers wait for the run.
   const nightRun = activeNightRun(c);
   // One codex process at a time, for the same reason.
   const codexLogin = guarded("Codex login", "error", () => (nightRun ? skippedDuringRun("Codex login", nightRun) : codexLoginCheck(c)));
@@ -109,7 +109,7 @@ function skippedDuringRun(name: string, run: string): DoctorCheck {
   return fail(
     name,
     "warn",
-    `Not checked: a night run is working right now (${run}), and this check would use the same logins at the same time, which can log Codex out for the rest of the night.`,
+    `Not checked: a run is working right now (${run}), and this check would use the same logins at the same time, which can log Codex out.`,
     `Run "mc doctor${name === "Live check" ? " --live" : ""}" again after the run ends ("mc status" shows what it is doing; "mc stop" ends it early).`,
   );
 }
@@ -483,7 +483,7 @@ const LIVE_TARGETS: LiveTarget[] = [
 async function liveChecks(c: Config, given: Partial<Record<Provider, AgentRunner>> | undefined): Promise<DoctorCheck[]> {
   const runners = given ?? createRunners(c, { logger: nullLogger });
   const store = new MissionStore(join(c.home, "doctor"));
-  // In memory only: a limit seen here must not hold back tonight's run.
+  // In memory only: a limit seen here must not hold back the next run.
   const quota = new QuotaGovernor({ clock: systemClock, config: c });
   const executor = new RoleExecutor({ config: c, runners, quota, clock: systemClock, store, logger: nullLogger });
   const checks: DoctorCheck[] = [];

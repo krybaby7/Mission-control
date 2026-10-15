@@ -119,12 +119,12 @@ describe("createNotifier", () => {
       throw new TypeError("fetch failed", { cause: new Error("getaddrinfo ENOTFOUND ntfy.example.com") });
     });
     const { logger, warnings, infos } = recordingLogger();
-    await expect(createNotifier(URL_, logger, impl).notify("Night finished", "m")).resolves.toBeUndefined();
+    await expect(createNotifier(URL_, logger, impl).notify("Run finished", "m")).resolves.toBeUndefined();
 
     expect(infos).toEqual([]);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]!.msg).toBe(
-      'could not send notification "Night finished": fetch failed (getaddrinfo ENOTFOUND ntfy.example.com)',
+      'could not send notification "Run finished": fetch failed (getaddrinfo ENOTFOUND ntfy.example.com)',
     );
     expect(warnings[0]!.data).toEqual({ host: "ntfy.example.com" });
     expect(JSON.stringify(warnings)).not.toContain("mc-secret-topic-123");

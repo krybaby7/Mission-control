@@ -1,5 +1,8 @@
-// The night run behind `mc run`: takes the run lock, works through the queued missions one at a time until they
-// are finished, a stop is requested or the deadline passes, then writes the night summary and notifies.
+// The run behind `mc run`: takes the run lock, works through the queued missions one at a time until they
+// are finished, a stop is requested or the deadline passes, then writes the run summary and notifies.
+// Some internal names (runNight, NightOptions, NightResult, TonightStore) and the file names night-<date>.md and
+// night-<date>.log keep the older word, because tests and files that already exist use them. The words a person reads
+// in this file say "run".
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isWaitingForCheck, lookCommand, parkedNotice, waitingWhat } from "./checkpoint.js";
@@ -24,25 +27,25 @@ export interface NightOptions {
   until?: string;
   /** Run only this mission (whatever its status). */
   missionId?: string;
-  /** Use this profile for the missions run tonight; each keeps its own for later runs. */
+  /** Use this profile for the missions in this run; each keeps its own for later runs. */
   profile?: string;
-  /** Role overrides for tonight, on top of each mission's own (a later override wins field by field). Not saved. */
+  /** Role overrides for this run, on top of each mission's own (a later override wins field by field). Not saved. */
   roleOverrides?: RoleOverride[];
   config?: Config;
   clock?: Clock;
-  /** Default: info lines on the console, everything (agent progress included) in <home>/logs/night-<date>.log. */
+  /** Default: info lines on the console, everything (agent progress included) in <home>/logs/night-<date>.log (the file name keeps its older word). */
   logger?: Logger;
   /** Tests: stand-ins for the CLI runners. */
   runners?: Partial<Record<Provider, AgentRunner>>;
 }
 
 export interface NightResult {
-  /** Every mission worked on tonight, as it ended. */
+  /** Every mission worked on in this run, as it ended. */
   missions: Mission[];
   summaryPath: string;
-  /** Failed missions that wait for their owner (see needsOwner), whether or not they ran tonight. */
+  /** Failed missions that wait for their owner (see needsOwner), whether or not they ran in this run. */
   waitingForYou: Mission[];
-  /** Missions stopped on purpose for the owner's check (see isWaitingForCheck), whether or not they ran tonight. */
+  /** Missions stopped on purpose for the owner's check (see isWaitingForCheck), whether or not they ran in this run. */
   waitingForCheck: Mission[];
 }
 
@@ -51,12 +54,12 @@ const STOP_POLL_MS = 1_000;
 /** Waits shorter than this are not worth a phone notification. */
 const WAIT_NOTICE_MIN_MS = 10 * 60_000;
 /**
- * The furthest a night's stop time may be. --until always means the next time the clock shows it, so a run started
- * just after that time (a morning test, a delayed scheduled start) would otherwise work about 24 hours, through
+ * The furthest a run's stop time may be. --until always means the next time the clock shows it, so a run started
+ * just after that time (a test run, a delayed scheduled start) would otherwise work about 24 hours, through
  * the owner's day. A run at 13:00 with --until 07:00 is still fine.
  */
 const MAX_NIGHT_MS = 18 * 60 * 60_000;
-/** Signals that stop the night gracefully (SIGHUP: the terminal was closed), with the exit code of a forced quit. */
+/** Signals that stop the run gracefully (SIGHUP: the terminal was closed), with the exit code of a forced quit. */
 const STOP_SIGNALS: Partial<Record<NodeJS.Signals, number>> = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 };
 
 /** The next time the clock shows HH:MM (local time), strictly after nowMs. */
@@ -101,13 +104,13 @@ export async function runNight(opts: NightOptions = {}): Promise<NightResult> {
     const waitingForYou = store.list().filter(needsOwner);
     const waitingForCheck = store.list().filter(isWaitingForCheck);
     const summaryPath = writeSummary(night, missions, waitingForYou, waitingForCheck);
-    logger.info(`Night finished. Summary: ${summaryPath}`);
+    logger.info(`Run finished. Summary: ${summaryPath}`);
     const priority = missions.some((m) => m.status === "failed") || waitingForYou.length > 0 || waitingForCheck.length > 0 ? "high" : "default";
-    await notifier.notify("Night finished", nightMessage(missions, waitingForYou, waitingForCheck), { priority });
+    await notifier.notify("Run finished", nightMessage(missions, waitingForYou, waitingForCheck), { priority });
     return { missions, summaryPath, waitingForYou, waitingForCheck };
   } catch (err) {
-    logger.error(`The night run stopped because of an error: ${errorText(err)}`);
-    await notifier.notify("Mission Control stopped", `The night run stopped because of an error: ${errorText(err)}`, { priority: "high" });
+    logger.error(`The run stopped because of an error: ${errorText(err)}`);
+    await notifier.notify("Mission Control stopped", `The run stopped because of an error: ${errorText(err)}`, { priority: "high" });
     throw err;
   } finally {
     stop.dispose();
@@ -118,7 +121,7 @@ export async function runNight(opts: NightOptions = {}): Promise<NightResult> {
 // ───────────────────────────── Setup ─────────────────────────────
 
 interface Night {
-  /** Set when the night ended because no mission could do any work (see Dispatcher.noWorkPossible). */
+  /** Set when the run ended because no mission could do any work (see Dispatcher.noWorkPossible). */
   noWork?: string;
   config: Config;
   clock: Clock;
@@ -228,8 +231,8 @@ function buildDispatcher(night: Night, givenRunners: Partial<Record<Provider, Ag
 }
 
 /**
- * The store as the dispatcher sees it: a mission it loads carries tonight's --profile / --role choices on top of its
- * own, and every save writes the mission's own choices back, so tonight's never outlive the run (even a killed one).
+ * The store as the dispatcher sees it: a mission it loads carries this run's --profile / --role choices on top of its
+ * own, and every save writes the mission's own choices back, so this run's never outlive it (even a killed one).
  */
 class TonightStore extends MissionStore {
   private readonly own = new Map<string, Pick<Mission, "profile" | "roleOverrides">>();
@@ -244,7 +247,7 @@ class TonightStore extends MissionStore {
   override load(id: string): Mission {
     const m = super.load(id);
     this.own.set(id, { profile: m.profile, roleOverrides: m.roleOverrides });
-    // The dispatcher merges a role's overrides in order, field by field: tonight's come last, so they win.
+    // The dispatcher merges a role's overrides in order, field by field: this run's come last, so they win.
     const roleOverrides = [...m.roleOverrides, ...(this.choices.roleOverrides ?? [])];
     return { ...m, profile: this.choices.profile ?? m.profile, roleOverrides };
   }
@@ -381,7 +384,7 @@ async function workThroughQueue(night: Night, dispatcher: Dispatcher, onlyId: st
     const noWork = dispatcher.noWorkPossible();
     if (noWork !== undefined && nextMission(night.store, seen, onlyId)) {
       night.noWork = noWork;
-      night.logger.warn(`Ending the night early: ${noWork}. The remaining missions wait for the next run.`);
+      night.logger.warn(`Ending the run early: ${noWork}. The remaining missions wait for the next run.`);
       break;
     }
   }
@@ -390,7 +393,7 @@ async function workThroughQueue(night: Night, dispatcher: Dispatcher, onlyId: st
 
 /**
  * Missions left "running" or "waiting" mean the last run died without finishing (it was killed, the container or the
- * computer went down): it wrote no report and sent nothing, so the phone hears about it now. They carry on tonight.
+ * computer went down): it wrote no report and sent nothing, so the phone hears about it now. They carry on in this run.
  */
 async function reportInterruptedRun(night: Night): Promise<void> {
   const interrupted = night.store.list().filter((m) => m.status === "running" || m.status === "waiting");
@@ -419,8 +422,8 @@ async function repairCheckpointNotices(night: Night): Promise<void> {
 }
 
 /**
- * The given mission, or else the oldest one with work left, unless it already ran tonight. Read fresh each time,
- * so missions queued during the night run too.
+ * The given mission, or else the oldest one with work left, unless it already ran in this run. Read fresh each time,
+ * so missions queued while the run is going run too.
  */
 function nextMission(store: MissionStore, seen: Set<string>, onlyId: string | undefined): Mission | undefined {
   if (onlyId !== undefined) return seen.has(onlyId) ? undefined : store.load(onlyId);
@@ -523,7 +526,7 @@ function writeSummary(night: Night, missions: Mission[], waitingForYou: Mission[
 function renderSummary(night: Night, missions: Mission[], waitingForYou: Mission[], waitingForCheck: Mission[]): string {
   const { startedAt, clock } = night;
   const lines = [
-    `# Night of ${localDate(startedAt)}`,
+    `# Run summary for ${localDate(startedAt)}`,
     "",
     `Started ${clockTime(startedAt)}, finished ${clockTime(clock.now())}. ${endingSentence(night, missions)}`,
     "",
@@ -533,7 +536,7 @@ function renderSummary(night: Night, missions: Mission[], waitingForYou: Mission
       ? missions.map((m) => missionLine(m, existsSync(night.store.reportPath(m.id))))
       : [
           waitingForYou.length > 0 || waitingForCheck.length > 0
-            ? `No mission could run by itself tonight: the ones left need ${waitingForCheck.length > 0 ? "you" : "your help"} first (below).`
+            ? `No mission could run by itself in this run: the ones left need ${waitingForCheck.length > 0 ? "you" : "your help"} first (below).`
             : 'Nothing was queued. Add work with: mc new "<your idea>"',
         ]),
   ];

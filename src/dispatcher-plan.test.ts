@@ -81,6 +81,9 @@ describe("a mission queued with a plan written outside the team", () => {
     expect(look?.lines).toEqual(
       expect.arrayContaining([
         "App name: Fixture App (the new app goes in a new folder called fixture-app, or the next free name)",
+        // each feature's id is on the line that introduces it (it reaches the AIs and the branch names)
+        "“Feature greet” (id: greet): As a user I want greet.",
+        "“Feature farewell” (id: farewell): As a user I want farewell.",
         "Check for “Feature farewell”: answer in src/farewell.mjs returns farewell",
         "Check for “Feature farewell”: answer in src/farewell.mjs does not return greet",
         "Needs first for “Feature farewell”: “Feature greet”.",
@@ -313,7 +316,7 @@ describe("the night summary and notice for a plan the leader wrote", () => {
       expect(summary).toContain(`- **Team plan** is waiting for your check (the plan). Look at it with \`mc report ${theirs.id}\`, then run`);
       const second = await w.night();
       expect(second.waitingForCheck.map((m) => m.id)).toEqual([mine.id, theirs.id]);
-      const body = w.notifications().filter((n) => n.title === "Night finished").at(-1)?.body ?? "";
+      const body = w.notifications().filter((n) => n.title === "Run finished").at(-1)?.body ?? "";
       expect(body).toContain(`Leader plan: waiting for your check (mc plan show ${mine.id})`);
       expect(body).toContain(`Team plan: waiting for your check (mc report ${theirs.id})`);
     } finally {

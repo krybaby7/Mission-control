@@ -62,7 +62,7 @@ const PACED_WINDOWS = [
   { window: "seven_day", setting: "maxWeeklyUtilization", kind: "weekly" },
 ] as const satisfies readonly { window: string; setting: keyof Config["pacing"]; kind: LimitKind }[];
 
-/** The usage window a night's share of the week is measured in. */
+/** The usage window a run's share of the week is measured in. */
 const WEEKLY_WINDOW = "seven_day";
 /** Readings are fractions such as 0.65 - 0.3; this keeps a share exactly at the cap from slipping under it. */
 const SHARE_EPSILON = 1e-9;
@@ -123,8 +123,8 @@ export class QuotaGovernor {
   /** Latest reading per "<provider>:<window>". */
   private readonly utilization = new Map<string, Utilization>();
   /**
-   * Per provider, the 7-day utilization when this governor (one night run) first read it, lowered when the window
-   * resets or old usage rolls out of it: tonight's share of the week counts from here. Memory only, so every night
+   * Per provider, the 7-day utilization when this governor (one run) first read it, lowered when the window
+   * resets or old usage rolls out of it: this run's share of the week counts from here. Memory only, so every
    * run starts afresh.
    */
   private readonly nightStart = new Map<Provider, number>();
@@ -340,7 +340,7 @@ export class QuotaGovernor {
     if (start === undefined || utilization < start) this.nightStart.set(provider, utilization);
   }
 
-  /** Blocks the provider until its weekly reset once this night has used the configured share of its week. */
+  /** Blocks the provider until its weekly reset once this run has used the configured share of its week. */
   private nightShareBlock(provider: Provider): Block | undefined {
     const cap = this.config.pacing.maxWeeklySharePerNight;
     const start = this.nightStart.get(provider);
@@ -351,7 +351,7 @@ export class QuotaGovernor {
     return {
       kind: "weekly",
       until: latest.resetsAt,
-      raw: `pacing: this night's work used ${percent(used)} of the weekly limit, the most one night may use (${percent(cap)})`,
+      raw: `pacing: this run's work used ${percent(used)} of the weekly limit, the most one run may use (${percent(cap)})`,
     };
   }
 

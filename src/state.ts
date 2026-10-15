@@ -4,7 +4,7 @@
 //   <home>/missions/<id>/mission.json   one Mission (atomic writes)
 //   <home>/missions/<id>/events.jsonl   MissionEvent lines
 //   <home>/missions/<id>/logs/          agent and verify logs
-//   <home>/missions/<id>/report.md      morning report
+//   <home>/missions/<id>/report.md      report
 //   <home>/worktrees/<id>/              git worktrees of the mission
 //   <home>/usage.jsonl                  global UsageRecord ledger
 //   <home>/STOP                         graceful-stop request

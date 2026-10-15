@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { canonicalText, describePlan, parsePlan, PLAN_MAX_CHARS, planCode, reviewLines, wrapLine } from "./plan.js";
+import { canonicalText, describePlan, parsePlan, PLAN_MAX_CHARS, planCode, reviewLines, wrapFact, wrapLine } from "./plan.js";
 import type { SpecOutput } from "./types.js";
 
 // ───────────────────────────── Plans to start from ─────────────────────────────
@@ -530,7 +530,7 @@ describe("describePlan", () => {
       "",
       "1 feature:",
       "",
-      "1. “Dark mode switch on the settings page”",
+      "1. “Dark mode switch on the settings page” (id: dark-mode)",
       "   As a user I can switch the app to dark colours on the settings page, and it stays that way when I come back.",
       "   It counts as done when:",
       "   - The settings page shows a switch labelled Dark mode, and it is off by default.",
@@ -563,13 +563,67 @@ describe("describePlan", () => {
     const parsed = accepted(THREE);
     const lines = describePlan(parsed.spec, { request: parsed.envelope.request, style: "look" });
     expect(lines).toContain("The plan has 3 features: “Add a book to the list”, “Mark a book as read”, “Count of books read”.");
-    expect(lines).toContain("“Mark a book as read”: As a reader I can mark a book as read, so I can tell it apart from the books I have not read.");
+    expect(lines).toContain("“Mark a book as read” (id: mark-read): As a reader I can mark a book as read, so I can tell it apart from the books I have not read.");
     expect(lines).toContain("Check for “Count of books read”: With no books the page shows Books read: 0.");
     expect(lines).toContain("Needs first for “Mark a book as read”: “Add a book to the list”.");
     expect(lines).toContain("Choice made for you: A book with no title is not added.");
     expect(lines).toContain("Name the tests and the code must agree on: The page title is Reading list.");
     for (const f of parsed.spec.features) for (const c of f.acceptance) expect(lines).toContain(`Check for “${f.title}”: ${c}`);
     expect(lines.every((l) => l === l.trim())).toBe(true);
+  });
+
+  it("shows each feature's id next to its title, in the command's text and in the owner's look, so the owner can see what reaches the AIs and the branch names", () => {
+    const parsed = accepted(THREE);
+    const text = describePlan(parsed.spec, { request: parsed.envelope.request, style: "text" });
+    expect(text).toContain("1. “Add a book to the list” (id: add-book)");
+    expect(text).toContain("2. “Mark a book as read” (id: mark-read)");
+    expect(text).toContain("3. “Count of books read” (id: read-count)");
+    const look = describePlan(parsed.spec, { request: parsed.envelope.request, style: "look" });
+    expect(look).toContain("“Add a book to the list” (id: add-book): As a reader I can add a book with its title and author and see it in my list.");
+    expect(look).toContain("“Mark a book as read” (id: mark-read): As a reader I can mark a book as read, so I can tell it apart from the books I have not read.");
+    expect(look).toContain("“Count of books read” (id: read-count): As a reader I can see how many of my books I have read.");
+    // a plan the planner wrote or revised shows its ids the same way; a feature with no id (damaged file) shows none
+    const noId = { ...parsed.spec, features: parsed.spec.features.map((f, i) => (i === 0 ? { ...f, id: "" } : f)) };
+    expect(describePlan(noId, { request: "x", style: "text" })).toContain("1. “Add a book to the list”");
+    expect(describePlan(noId, { request: "x", style: "look" })).toContain("“Add a book to the list”: As a reader I can add a book with its title and author and see it in my list.");
+  });
+
+  it("wraps a fact of 700 characters in the owner's look into lines that each start with the fact's lead again, and loses nothing", () => {
+    const long = "abcdef ".repeat(100).trim(); // 699 characters
+    const spec: SpecOutput = {
+      appName: "Big check app",
+      summary: long,
+      assumptions: [long],
+      uiContract: `- ${long}`,
+      features: [{ id: "big-check", title: "Big check", story: long, acceptance: [long, "A short check."], kind: "standard", deps: [] }],
+    };
+    const look = describePlan(spec, { request: long, style: "look" });
+    expect(look.every((l) => l.length <= 280)).toBe(true);
+    const checks = look.filter((l) => l.startsWith("Check for “Big check”: "));
+    expect(checks.length).toBeGreaterThanOrEqual(3 + 1); // the long check in at least three lines, and the short one
+    expect(checks.at(-1)).toBe("Check for “Big check”: A short check.");
+    expect(checks.slice(0, -1).map((l) => l.slice("Check for “Big check”: ".length)).join(" ")).toBe(long);
+    // every other fact repeats its lead the same way
+    for (const lead of ["You asked: ", "Summary: ", "“Big check” (id: big-check): ", "Choice made for you: ", "Name the tests and the code must agree on: "]) {
+      const parts = look.filter((l) => l.startsWith(lead));
+      expect(parts.length, lead).toBeGreaterThanOrEqual(3);
+      expect(parts.map((l) => l.slice(lead.length)).join(" "), lead).toBe(long);
+    }
+    // for the command line the lead is not repeated: the lines are indented, and each fact is one item
+    const text = describePlan(spec, { request: long, style: "text" });
+    expect(text.some((l) => l.includes("Check for"))).toBe(false);
+    expect(text.every((l) => l.length <= 280)).toBe(true);
+  });
+
+  it("keeps a very long title whole, with no line over the limit, and never loops", () => {
+    const title = "T".repeat(150) + " " + "u".repeat(150);
+    const check = "word ".repeat(120).trim();
+    const spec: SpecOutput = { appName: "A", summary: "S", assumptions: [], uiContract: "", features: [{ id: "long-title", title, story: "s", acceptance: [check], kind: "standard", deps: [] }] };
+    const look = describePlan(spec, { request: "x", style: "look" });
+    expect(look.every((l) => l.length <= 300)).toBe(true);
+    const flat = look.join(" ");
+    expect(flat).toContain("T".repeat(150));
+    expect(flat.match(/word/g)).toHaveLength(120);
   });
 
   it.each(["text", "look"] as const)("keeps every check, contract line, need, the app name and the routine mark of a ten-feature, twenty-check plan, in %s style, in lines of at most 300 characters", (style) => {
@@ -580,11 +634,12 @@ describe("describePlan", () => {
     expect(joined).toContain("Name two.");
     expect(joined.match(/routine work/g)).toHaveLength(5);
     expect(joined.match(/Needs first/g)).toHaveLength(9);
-    // every check is there, whole: the wrapped parts, put back together, are the check
+    // every check is there, whole: the wrapped parts, put back together, are the check (in the look every part starts with its lead again)
+    const rejoined = style === "look" ? joined.replace(/\nCheck for “[^”]*”: /g, " ") : joined.replace(/\n\s*(- )?/g, " ");
     for (const f of ten.features) {
       for (const c of f.acceptance.slice(0, 3)) {
         const words = c.split(" ");
-        expect(joined.replace(/\n\s*(- )?/g, " ")).toContain(words.join(" "));
+        expect(rejoined).toContain(words.join(" "));
       }
     }
   });
@@ -627,6 +682,31 @@ describe("wrapLine", () => {
     const emoji = wrapLine("😀".repeat(10), 5);
     expect(emoji.join("")).toBe("😀".repeat(10));
     expect(emoji.every((l) => !/[\uD800-\uDBFF]$/.test(l))).toBe(true);
+  });
+});
+
+describe("wrapFact", () => {
+  it("is the lead, a space and the words when they fit", () => {
+    expect(wrapFact("Check for “A”:", "It works.")).toEqual(["Check for “A”: It works."]);
+    expect(wrapFact("Check for “A”:", "")).toEqual(["Check for “A”: "]);
+  });
+
+  it("starts every line with the lead, in lines of at most the width, and the words put back together are the words", () => {
+    const body = "word ".repeat(100).trim();
+    const lines = wrapFact("Lead:", body, 120);
+    expect(lines.length).toBeGreaterThan(3);
+    expect(lines.every((l) => l.startsWith("Lead: ") && l.length <= 120)).toBe(true);
+    expect(lines.map((l) => l.slice("Lead: ".length)).join(" ")).toBe(body);
+  });
+
+  it("does not repeat a lead that leaves too little room: the whole text is wrapped as one", () => {
+    const lead = `${"L".repeat(150)}:`;
+    const body = "word ".repeat(60).trim();
+    const lines = wrapFact(lead, body, 200);
+    expect(lines.every((l) => l.length <= 200)).toBe(true);
+    expect(lines[0]?.startsWith(lead)).toBe(true);
+    expect(lines.slice(1).some((l) => l.startsWith("L"))).toBe(false);
+    expect(lines.join(" ")).toBe(`${lead} ${body}`);
   });
 });
 

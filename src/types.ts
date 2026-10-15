@@ -215,8 +215,9 @@ export interface Config {
     /** Don't START new work on a provider whose 7-day utilization is above this (0..1). */
     maxWeeklyUtilization: number;
     /**
-     * Don't START new work on a provider once its 7-day utilization has grown by this much (0..1) since this night
-     * run first read it, leaving the rest of the week for the user. Unset: no per-night cap.
+     * Don't START new work on a provider once its 7-day utilization has grown by this much (0..1) since this
+     * run first read it, leaving the rest of the week for the user. Unset: no per-run cap. (The setting's name keeps
+     * its older word, "Night": it is a stable setting.)
      */
     maxWeeklySharePerNight?: number;
   };
@@ -289,7 +290,7 @@ export interface Spec {
   /** Plain-language summary for a non-programmer. */
   summary: string;
   features: SpecFeature[];
-  /** Decisions the architect made on the user's behalf (shown in the morning report). */
+  /** Decisions the architect made on the user's behalf (shown in the report). */
   assumptions: string[];
   /** UI conventions test authors and engineers must share (labels, routes, test ids). */
   uiContract: string;
@@ -335,7 +336,7 @@ export interface Feature extends SpecFeature {
   /** Hint from a diagnosis rung, passed to later rungs. */
   hint?: string;
   reviewRounds: number;
-  /** Non-blocking findings left after review (go to the morning report). */
+  /** Non-blocking findings left after review (go to the report). */
   openFindings: Finding[];
   blockedReason?: string;
   /** Integration commit after merge. */
@@ -401,7 +402,7 @@ export interface Mission {
   /** Short description of pre-existing failures (feature missions); never blamed on us. */
   baselineFailures: string[];
   verify?: VerifyConfig;
-  /** Plain-language questions/decisions for the human (morning report). */
+  /** Plain-language questions/decisions for the human (shown in the report). */
   decisionsNeeded: string[];
   gateCRounds: number;
   agentRuns: number;
@@ -602,7 +603,7 @@ export interface FailureDigestOutput {
 }
 
 export interface ReportProseOutput {
-  /** 3–8 sentence plain-language narrative of the night for a non-programmer. */
+  /** 3–8 sentence plain-language narrative of the work for a non-programmer. */
   narrative: string;
   /** Plain-language bullet list of what the user can now do in the app. */
   whatYouCanDo: string[];

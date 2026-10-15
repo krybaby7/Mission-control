@@ -79,7 +79,7 @@ Summary: Adds a Dark mode switch to the settings page. The page turns dark when 
 
 1 feature:
 
-1. “Dark mode switch on the settings page”
+1. “Dark mode switch on the settings page” (id: dark-mode)
    As a user I can switch the app to dark colours on the settings page, and it stays that way when I come back.
    It counts as done when:
    - The settings page shows a switch labelled Dark mode, and it is off by default.
@@ -128,7 +128,7 @@ ${BLOCK_ONE}${NEXT("It will stop for your check: the plan.")}`,
     expect(await mc(["plan", "preview", "-"], THREE)).toBe(0);
     expect(out).toContain("Plan “Reading list”: a new app.\nPlan code: c5b7a589 (the same plan always gets the same code).\n");
     expect(out).toContain("App name: Reading list (the new app goes in a new folder called reading-list, or the next free name)\n");
-    expect(out).toContain("\n3 features:\n\n1. “Add a book to the list”\n");
+    expect(out).toContain("\n3 features:\n\n1. “Add a book to the list” (id: add-book)\n");
     expect(out).toContain("   Needs first: “Mark a book as read”.\n");
     expect(noMissionFolder()).toBe(true);
   });
@@ -228,8 +228,10 @@ ${BLOCK_ONE}`,
   });
 
   it("stops at the plan by default, and only a flag on the command line turns that off", async () => {
+    let n = 0;
     const queued = async (...flags: string[]): Promise<Mission> => {
-      await mc(["plan", "queue", "-", ...flags], THREE);
+      // a different plan each time: one that is already queued is refused (see "the same plan twice")
+      await mc(["plan", "queue", "-", ...flags], THREE.replace("name: Reading list", `name: Reading list ${++n}`));
       return store().load(/Mission id: (\S+)/.exec(out)?.[1] ?? "");
     };
     expect((await queued()).checkpoints).toEqual(["plan"]);
@@ -257,6 +259,126 @@ ${BLOCK_ONE}`,
     expect(missions()[0]?.profile).toBe("mixed");
     expect(await mc(["plan", "queue", "-", "--profile", "claude"], THREE)).toBe(1);
     expect(err).toContain("unknown option '--profile'");
+  });
+});
+
+// ───────────────────────────── the same plan twice ─────────────────────────────
+
+describe("the same plan twice", () => {
+  const sentence = (m: Mission): string => `This plan is already queued as “${m.title}” (${m.id}). See it with: mc status`;
+  /** Queues THREE, then sets the mission's status (and the failure that goes with a failed one). */
+  async function queuedWith(status: Mission["status"], failure?: Mission["failure"]): Promise<Mission> {
+    expect(await mc(["plan", "queue", "-"], THREE)).toBe(0);
+    const [m] = missions() as [Mission];
+    store().save({ ...m, status, ...(failure && { failure }) });
+    return m;
+  }
+
+  it("refuses to queue a plan that is already queued, says which mission has it, and queues and spends nothing", async () => {
+    expect(await mc(["plan", "queue", "-"], THREE)).toBe(0);
+    const [first] = missions() as [Mission];
+    const folders = readdirSafe(join(home, "missions"));
+    expect(await mc(["plan", "queue", "-"], THREE)).toBe(1);
+    expect(out).toBe("");
+    expect(err).toBe(`${sentence(first)}\n`);
+    expect(err).toBe(`This plan is already queued as “Reading list” (${first.id}). See it with: mc status\n`);
+    expect(missions()).toHaveLength(1);
+    expect(readdirSafe(join(home, "missions"))).toEqual(folders);
+    expect(store().load(first.id)).toEqual(first); // the mission that holds the plan is as it was
+    // the flags do not make it another plan, and neither do blank lines or the order of lines inside a block
+    expect(await mc(["plan", "queue", "-", "--no-plan-checkpoint"], THREE)).toBe(1);
+    expect(await mc(["plan", "queue", "-", "--checkpoint", "final"], THREE)).toBe(1);
+    expect(await mc(["plan", "queue", "-"], THREE.replaceAll("\n\nfeature:", "\n\n\n\nfeature:"))).toBe(1);
+    expect(await mc(["plan", "queue", "-"], THREE.replaceAll("\n", "\r\n"))).toBe(1);
+    expect(err).toBe(`${sentence(first)}\n`);
+    expect(missions()).toHaveLength(1);
+  });
+
+  it("refuses the plan of a change to an existing app the same way", async () => {
+    await habitTracker();
+    expect(await mc(["plan", "queue", "-"], ONE)).toBe(0);
+    const [first] = missions() as [Mission];
+    expect(await mc(["plan", "queue", "-"], ONE)).toBe(1);
+    expect(err).toBe(`This plan is already queued as “Dark mode” (${first.id}). See it with: mc status\n`);
+    expect(missions()).toHaveLength(1);
+  });
+
+  it("queues a plan that differs by one character, or another plan, beside it", async () => {
+    expect(await mc(["plan", "queue", "-"], THREE)).toBe(0);
+    expect(await mc(["plan", "queue", "-"], THREE.replace("Adding a book with an empty title adds nothing", "Adding a book with a missing title adds nothing"))).toBe(0);
+    expect(await mc(["plan", "queue", "-"], THREE.replace("name: Reading list", "name: Reading list two"))).toBe(0);
+    expect(missions()).toHaveLength(3);
+  });
+
+  it.each(["queued", "running", "waiting", "stopped"] as const)("refuses it while the mission is %s", async (status) => {
+    const m = await queuedWith(status);
+    expect(await mc(["plan", "queue", "-"], THREE)).toBe(1);
+    expect(err).toBe(`${sentence(m)}\n`);
+    expect(missions()).toHaveLength(1);
+  });
+
+  it("refuses it while the mission waits at a check, which is a stopped mission", async () => {
+    const m = await queuedWith("stopped");
+    const parked = store().load(m.id);
+    store().save({
+      ...parked,
+      checkpoint: { id: "plan#1", scope: "plan", kind: "plan", round: 1, state: "pending", parkedAt: new Date().toISOString(), look: { headline: "Check the plan", lines: ["a line"] } },
+    });
+    expect(await mc(["plan", "queue", "-"], THREE)).toBe(1);
+    expect(err).toBe(`${sentence(m)}\n`);
+  });
+
+  it("refuses it while a failed mission is retried by the next run (a login that expired)", async () => {
+    const m = await queuedWith("failed", { reason: "Every AI needs a new login.", retryable: true });
+    expect(await mc(["plan", "queue", "-"], THREE)).toBe(1);
+    expect(err).toBe(`${sentence(m)}\n`);
+  });
+
+  it.each([
+    ["done", undefined],
+    ["partial", undefined],
+    ["failed", undefined],
+    ["failed", { reason: "It could not finish.", retryable: false }],
+  ] as const)("queues it again once the mission is finished (%s %j): a fair new attempt", async (status, failure) => {
+    const old = await queuedWith(status, failure as Mission["failure"] | undefined);
+    expect(await mc(["plan", "queue", "-"], THREE)).toBe(0);
+    expect(err).toBe("");
+    expect(missions()).toHaveLength(2);
+    const fresh = missions().find((m) => m.id !== old.id) as Mission;
+    expect(fresh).toMatchObject({ status: "queued", title: "Reading list" });
+    expect(out).toContain(`Mission id: ${fresh.id}`);
+    // now the new one is the live twin
+    expect(await mc(["plan", "queue", "-"], THREE)).toBe(1);
+    expect(err).toBe(`${sentence(fresh)}\n`);
+  });
+
+  it("does not mistake a mission the team's planner planned for the same plan", async () => {
+    // the same words, queued the old way: it holds no plan code
+    expect(await mc(["new", "I want a small web app to keep my reading list.", "--name", "Reading list"])).toBe(0);
+    expect(await mc(["plan", "queue", "-"], THREE)).toBe(0);
+    expect(missions()).toHaveLength(2);
+  });
+
+  it("only notes it in a preview, which still reads and queues nothing, and says nothing for a plan that is not queued", async () => {
+    await mc(["plan", "preview", "-"], THREE);
+    expect(out).not.toContain("already queued");
+    expect(await mc(["plan", "queue", "-"], THREE)).toBe(0);
+    const [m] = missions() as [Mission];
+    expect(await mc(["plan", "preview", "-"], THREE)).toBe(0);
+    expect(err).toBe("");
+    expect(out.split("\n").slice(0, 4)).toEqual(["This plan can be used. Nothing was queued.", sentence(m), "", "Plan “Reading list”: a new app."]);
+    expect(missions()).toHaveLength(1);
+    // once the mission has finished the preview has no note
+    store().save({ ...store().load(m.id), status: "done" });
+    await mc(["plan", "preview", "-"], THREE);
+    expect(out).not.toContain("already queued");
+  });
+
+  it("makes the leader's retry safe: queueing it a second time after a lost answer finds the first mission", async () => {
+    await mc(["plan", "queue", "-"], THREE);
+    const [m] = missions() as [Mission];
+    for (let i = 0; i < 3; i++) expect(await mc(["plan", "queue", "-"], THREE)).toBe(1);
+    expect(missions().map((x) => x.id)).toEqual([m.id]);
   });
 });
 
@@ -462,6 +584,9 @@ describe("mc plan show", () => {
     expect(out.split("\n").slice(0, 3)).toEqual([`Plan for “Reading” (mission ${old.id}): a new app.`, "Written by the team's planner.", ""]);
     expect(out).not.toContain("Plan code");
     expect(out).toContain("3 features:");
+    // the id of each feature is shown for a plan the planner wrote too
+    expect(out).toContain("\n1. “Add a book to the list” (id: add-book)\n");
+    expect(out).toContain("\n3. “Count of books read” (id: read-count)\n");
   });
 
   it("says there is no plan yet when the team's planner has not written one, and no mission when the id is wrong", async () => {
@@ -524,7 +649,7 @@ describe("mc plan --help", () => {
       expect(text).toContain("--no-plan-checkpoint do not stop for your check of the plan (only when you said you do not want to look at it first)");
     }
     expect(await help("plan", "queue")).toContain(
-      "queue a plan. The team's planner is skipped and a second AI still reads the plan first. By default the mission stops for your check of the plan before anything is built",
+      "queue a plan. The team's planner is skipped and a second AI still reads the plan first. By default the mission stops for your check of the plan before anything is built. The same plan is not queued again until its mission has finished",
     );
     expect(await help("plan", "preview")).toContain("show a plan in plain words and make sure it can be used; nothing is queued. Give a file, or write - to read the plan sent in with the command");
     expect(await help("plan", "show")).toContain("show the plan of a mission in plain words, all of it");

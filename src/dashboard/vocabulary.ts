@@ -13,7 +13,7 @@ import type {
   ProgressStepId,
   WaitInfo,
 } from "./types.js";
-import { PAUSED_NO_AI_BEFORE_STOP, PAUSED_WHEN_TOLD_TO_STOP, RESUMES_BY_ITSELF, waitLead } from "./vocabulary-details.js";
+import { inCurlyQuotes, PAUSED_NO_AI_BEFORE_STOP, PAUSED_WHEN_TOLD_TO_STOP, RESUMES_BY_ITSELF, waitLead } from "./vocabulary-details.js";
 
 export * from "./vocabulary-details.js";
 
@@ -86,7 +86,7 @@ export function makeFormatter(timeZone?: string): Formatter {
 
 /** A mission or feature title is a name, so it gets curly quotes in every displayed sentence. */
 function quoted(title: string): string {
-  return `“${title}”`;
+  return inCurlyQuotes(title);
 }
 
 function plural(n: number, one: string, many = `${one}s`): string {

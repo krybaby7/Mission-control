@@ -182,8 +182,10 @@ describe("what the leader may run on its own", () => {
     const settings = JSON.parse(readFileSync(join(ROOT, "leader", ".claude", "settings.json"), "utf8")) as { permissions: { allow: string[]; ask: string[]; deny: string[] } };
     const wrapper = (command: string): string => `Bash(../scripts/mc-docker.sh ${command}:*)`;
     const { allow, ask, deny } = settings.permissions;
-    expect(allow).toEqual(["status", "logs", "report", "plan preview", "plan show"].map(wrapper));
-    expect(ask).toEqual(["stop", "new", "feature", "plan queue", "run", "approve", "send-back"].map(wrapper));
+    // `publish-preview` only reads (it says which repository a mission's work would go to), so it is allowed too.
+    expect(allow).toEqual(["status", "logs", "report", "plan preview", "plan show", "publish-preview"].map(wrapper));
+    // `get` and `publish` work with GitHub on the PC with the owner's login, so they are asked about too and never allowed.
+    expect(ask).toEqual(["stop", "new", "feature", "plan queue", "run", "approve", "send-back", "get", "publish"].map(wrapper));
     // `plan queue` is asked about and never allowed, whatever order the rules are in; the files and git stay out of reach.
     expect(allow.some((rule) => rule.includes("plan queue"))).toBe(false);
     expect(deny).toEqual(expect.arrayContaining(["Edit", "Write", "NotebookEdit", "Bash(git:*)"]));

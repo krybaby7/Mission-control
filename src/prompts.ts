@@ -94,11 +94,11 @@ export function specPrompt(m: Mission, stackDoc: string | null, revise?: { previ
   const task =
     m.kind === "greenfield"
       ? [
-          "Write the spec for this new app: the features to build tonight, in build order.",
+          "Write the spec for this new app: the features to build, in build order.",
           "There is no repository yet, so plan from the request and the house stack below. An initializer scaffolds the project (tooling, test setup, AGENTS.md) before feature work starts, so don't plan setup work.",
         ]
       : [
-          "Write the spec for this change to an existing codebase: the features to build tonight, in build order.",
+          "Write the spec for this change to an existing codebase: the features to build, in build order.",
           "The repository is checked out in your working directory. Explore it with your read-only tools before planning, follow its conventions, and plan only what the request asks for. The UI contract must cover both the existing UI the tests will touch and the new UI.",
           ...existingRepoFacts(m),
         ];
@@ -400,7 +400,7 @@ export function gateCPrompt(m: Mission, ctx: { diff: string; verifyTail: string;
     section("Your task", [
       "Do the final review of everything built in this mission before the owner sees it. Features were built and merged one at a time; check that together they deliver the request.",
       `Look for broken flows between features, regressions, security holes, data loss, and ${verifyFailures}. Blocked or skipped features are known gaps, not findings.`,
-      "Blocker and major findings become fix-up work tonight, so report only real problems, each with a file and a suggested test. The integrated code is in your working directory; read it as needed, especially if the diff is truncated.",
+      "Blocker and major findings become fix-up work right away, so report only real problems, each with a file and a suggested test. The integrated code is in your working directory; read it as needed, especially if the diff is truncated.",
       'Answer with JSON: `verdict` ("approve" when there is no blocker or major finding, otherwise "changes") and `findings`.',
     ]),
     m.spec && section("The app", [m.spec.summary]),
@@ -456,7 +456,7 @@ export function reportProsePrompt(m: Mission, facts: string): string {
   return scoutBrief(
     missionHeader(m, CAPS.scoutRequest),
     section("Your task", [
-      "Write the morning summary of this mission for its owner, who is not a programmer, using only the facts below.",
+      "Write the summary of this mission for its owner, who is not a programmer, using only the facts below.",
       bullets([
         "`narrative`: 3 to 8 plain sentences covering what was built, what works, what didn't get done and why, and anything the owner needs to decide. No jargon, file names or model names.",
         '`whatYouCanDo`: short items, each something the owner can now do in the app (for example "Add a habit and tick it off each day"). Include only features the facts show as done.',

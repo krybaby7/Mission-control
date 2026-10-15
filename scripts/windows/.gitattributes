@@ -1,0 +1,4 @@
+# The Windows shortcuts must keep Windows line endings and the Linux launcher must keep Linux ones,
+# whatever git setting a copy has.
+*.cmd text eol=crlf
+*.sh text eol=lf

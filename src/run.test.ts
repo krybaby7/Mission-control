@@ -125,7 +125,7 @@ describe("runNight", () => {
     expect(result.summaryPath).toMatch(/reports\/night-\d{4}-\d{2}-\d{2}\.md$/);
     expect(readFileSync(result.summaryPath, "utf8")).toContain("Nothing was queued");
     expect(allCalls(r)).toHaveLength(0);
-    expect(notifications()).toEqual([expect.objectContaining({ title: "Night finished", priority: "3" })]);
+    expect(notifications()).toEqual([expect.objectContaining({ title: "Run finished", priority: "3" })]);
   });
 
   it("works through resumable missions in creation order and leaves finished ones alone", async () => {
@@ -197,7 +197,7 @@ describe("runNight", () => {
   it("notifies the night's result, with high priority when a mission failed", async () => {
     queue("Habit tracker");
     await runNight({ config: testConfig(), logger: nullLogger, runners: runners(loggedOut) });
-    const night = notifications().find((n) => n.title === "Night finished");
+    const night = notifications().find((n) => n.title === "Run finished");
     expect(night?.priority).toBe("4");
     expect(night?.body).toContain("Habit tracker: Stopped, needs your help");
     expect(night?.body).toContain("mc report");
@@ -440,6 +440,35 @@ describe("runNight", () => {
     expect(again.missions.map((m) => m.id)).toEqual([first.id, second.id]);
   });
 
+  it("calls a run a run in everything a person reads: the log lines, the summary heading, the phone notices and the error", async () => {
+    const lines: string[] = [];
+    const logger = { info: (msg: string) => void lines.push(msg), warn: (msg: string) => void lines.push(msg), error: (msg: string) => void lines.push(msg) };
+    queue("First app");
+    queue("Second app");
+    const result = await runNight({ config: testConfig(), logger, runners: runners(loggedOut) });
+    const summary = readFileSync(result.summaryPath, "utf8");
+
+    expect(lines.some((l) => l.startsWith("Ending the run early: every AI needs a new login"))).toBe(true);
+    expect(lines).toContain(`Run finished. Summary: ${result.summaryPath}`);
+    expect(summary.split("\n")[0]).toMatch(/^# Run summary for \d{4}-\d{2}-\d{2}$/);
+    expect(notifications().map((n) => n.title)).toEqual(["First app: failed", "Run finished"]);
+    // The words a person reads (the file name of the summary is the one place the older word stays).
+    const wording = (text: string): string => text.split(result.summaryPath).join("<path>");
+    for (const text of [...lines, summary, ...notifications().map((n) => `${n.title}\n${n.body}`)]) {
+      expect(wording(text)).not.toMatch(/night|tonight|overnight|morning/i);
+    }
+
+    // A run that stops because of an error says so in the same words, in the log and on the phone.
+    rmSync(join(home, "missions"), { recursive: true, force: true });
+    writeFileSync(join(home, "missions"), "a file where the missions folder should be");
+    fetchMock.mockClear();
+    lines.length = 0;
+    await expect(runNight({ config: testConfig(), logger, runners: runners(loggedOut) })).rejects.toThrow();
+    expect(lines.find((l) => l.startsWith("The run stopped because of an error:"))).toBeDefined();
+    expect(notifications().at(-1)).toMatchObject({ title: "Mission Control stopped" });
+    expect(notifications().at(-1)?.body).toMatch(/^The run stopped because of an error: /);
+  });
+
   it("tells the phone when the last run died without finishing, and carries on with its missions", async () => {
     const crashed = queue("Crashed app", { status: "running", stage: "spec" });
 
@@ -462,7 +491,7 @@ describe("runNight", () => {
     expect(summary).not.toContain("Nothing was queued");
     expect(summary).toContain(`\`mc report ${stuck.id}\``);
     expect(summary).toContain(`\`mc run --mission ${stuck.id}\``);
-    expect(notifications()).toEqual([expect.objectContaining({ title: "Night finished", priority: "4" })]);
+    expect(notifications()).toEqual([expect.objectContaining({ title: "Run finished", priority: "4" })]);
     expect(notifications()[0]?.body).toContain(`Stuck app: still needs your help (mc report ${stuck.id})`);
   });
 

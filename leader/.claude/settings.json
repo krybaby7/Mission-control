@@ -5,7 +5,8 @@
       "Bash(../scripts/mc-docker.sh logs:*)",
       "Bash(../scripts/mc-docker.sh report:*)",
       "Bash(../scripts/mc-docker.sh plan preview:*)",
-      "Bash(../scripts/mc-docker.sh plan show:*)"
+      "Bash(../scripts/mc-docker.sh plan show:*)",
+      "Bash(../scripts/mc-docker.sh publish-preview:*)"
     ],
     "ask": [
       "Bash(../scripts/mc-docker.sh stop:*)",
@@ -14,7 +15,9 @@
       "Bash(../scripts/mc-docker.sh plan queue:*)",
       "Bash(../scripts/mc-docker.sh run:*)",
       "Bash(../scripts/mc-docker.sh approve:*)",
-      "Bash(../scripts/mc-docker.sh send-back:*)"
+      "Bash(../scripts/mc-docker.sh send-back:*)",
+      "Bash(../scripts/mc-docker.sh get:*)",
+      "Bash(../scripts/mc-docker.sh publish:*)"
     ],
     "deny": ["Edit", "Write", "NotebookEdit", "Bash(git:*)", "Bash(../scripts/mc-docker.sh logs *--follow*)"]
   }

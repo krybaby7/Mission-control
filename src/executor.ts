@@ -29,7 +29,7 @@ import type {
 const WAIT_MARGIN_MS = 45_000;
 /** Long waits wake at least this often to notice a stop request. */
 const MAX_SLEEP_SLICE_MS = 60_000;
-/** A job whose runs keep hitting limits gives up after this many, so a misread failure cannot rerun all night. */
+/** A job whose runs keep hitting limits gives up after this many, so a misread failure cannot rerun forever. */
 const MAX_LIMITED_RUNS = 8;
 /**
  * A job whose runs keep failing for reasons outside it (crashed, hung) gives up once this long has passed since the

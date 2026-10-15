@@ -179,7 +179,7 @@ describe("e2e: a new app, start to finish", () => {
 
     expect(w.notifications().map((n) => [n.title, n.priority])).toEqual([
       ["Fixture app: done (2/2 features)", "3"],
-      ["Night finished", "3"],
+      ["Run finished", "3"],
     ]);
     expect(w.logs.filter((l) => l.level === "error")).toEqual([]);
     expect(w.events(m.id, "error")).toEqual([]);
@@ -691,7 +691,7 @@ describe("e2e: a feature that cannot be built", () => {
     expect(read(night.summaryPath)).toContain("**Fixture app**: Partly done, 1 of 3 features done.");
     expect(w.notifications().map((n) => [n.title, n.priority])).toEqual([
       ["Fixture app: partly done (1/3 features)", "4"],
-      ["Night finished", "3"],
+      ["Run finished", "3"],
     ]);
   });
 });
@@ -833,7 +833,7 @@ describe("e2e: every login has expired", () => {
     expect(sectionOf(summary1, "Needs your decision")).toContain("Log in again");
     expect(w.notifications().map((n) => [n.title, n.priority])).toEqual([
       ["Fixture app: failed", "4"],
-      ["Night finished", "4"],
+      ["Run finished", "4"],
     ]);
     expect(w.notifications()[0]?.body).toContain("Log in again");
 

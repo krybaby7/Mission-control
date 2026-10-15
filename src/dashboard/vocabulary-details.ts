@@ -6,9 +6,18 @@ import type { PillStateId, Said, TickId, Tone, VerdictId, WaitInfo } from "./typ
 const open = "“";
 const close = "”";
 
+/**
+ * `text` in curly quotes. A text that already starts with an opening mark or ends with a closing one carries its own, and
+ * a second pair would give a doubled mark (““Title”: story”), so it is left as it is.
+ */
+export function inCurlyQuotes(text: string): string {
+  const t = text.trim();
+  return t.startsWith(open) || t.endsWith(close) ? text : `${open}${text}${close}`;
+}
+
 /** A name in curly quotes (feature and mission titles are names, not sentences). */
 function name(title: string): string {
-  return `${open}${title}${close}`;
+  return inCurlyQuotes(title);
 }
 
 function count(n: number, one: string, many = `${one}s`): string {

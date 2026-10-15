@@ -27,9 +27,10 @@ import {
   waitingWhat,
   whyStopped,
 } from "./checkpoint.js";
+import { describePlan } from "./plan.js";
 import { buildReportFacts, renderReport } from "./report.js";
 import { MissionStore } from "./state.js";
-import type { CheckpointAnswer, CheckpointKind, CheckpointRecord, Feature, Mission, PendingCheckpoint, PlanReview, PlanSource } from "./types.js";
+import type { CheckpointAnswer, CheckpointKind, CheckpointRecord, Feature, Mission, PendingCheckpoint, PlanReview, PlanSource, SpecOutput } from "./types.js";
 
 let root: string;
 let store: MissionStore;
@@ -480,6 +481,44 @@ describe("a plan written outside the team", () => {
     expect(render(mission({ features: [] }))).not.toContain("Plan: written by the leader");
     // a damaged plan field is no plan
     expect(render(mission({ plan: "x" as unknown as PlanSource, features: [] }))).not.toContain("Plan: written by the leader");
+  });
+
+  it("says who wrote the plan inside the first 40 lines of the report, above the look, for a plan of any size", () => {
+    // Ten features with twenty checks each, the biggest plan there is: its look is hundreds of lines.
+    const ten: SpecOutput = {
+      appName: "Big app",
+      summary: "Does a lot.",
+      assumptions: ["A choice."],
+      uiContract: "- Name one.",
+      features: Array.from({ length: 10 }, (_, i) => ({
+        id: `part-${i}`,
+        title: `Part ${i}`,
+        story: `Story ${i}.`,
+        acceptance: Array.from({ length: 20 }, (_c, c) => `Part ${i} check ${c} works.`),
+        kind: "standard" as const,
+        deps: [],
+      })),
+    };
+    const lines = describePlan(ten, { request: "Build it.", style: "look" });
+    expect(lines.length).toBeGreaterThan(200);
+    const big: PlanSource = { ...plan, spec: ten, review: { outcome: "approved", issues: [] } };
+    const parked = mission({ plan: big, stage: "init", checkpoint: { ...pending(), look: { headline: "Check the plan for “Big app”", lines } }, features: [] });
+    const reportLines = render(parked).split("\n");
+    const planAt = reportLines.findIndex((l) => l.startsWith("Plan: written by the leader (plan code a4adaca5)"));
+    expect(reportLines[planAt]).toBe("Plan: written by the leader (plan code a4adaca5); the team's plan reviewer asked for no changes.");
+    expect(planAt).toBeGreaterThanOrEqual(0);
+    expect(planAt).toBeLessThan(40);
+    // above the look, and the owner's two answers are still in the first lines too
+    expect(planAt).toBeLessThan(reportLines.findIndex((l) => l.startsWith("**Check the plan for")));
+    expect(reportLines.slice(0, 40).join("\n")).toContain(`mc approve ${parked.id}`);
+    expect(reportLines.slice(0, 40).join("\n")).toContain(`mc send-back ${parked.id}`);
+    // said once, not again under the title further down
+    expect(reportLines.filter((l) => l.startsWith("Plan: written by the leader"))).toHaveLength(1);
+    // once the check is answered there is no look, and the line is under the title as before
+    const after = render(mission({ plan: big, stage: "init", checkpoint: answered(pending()), features: [] })).split("\n");
+    const afterAt = after.findIndex((l) => l.startsWith("Plan: written by the leader"));
+    expect(afterAt).toBeGreaterThanOrEqual(0);
+    expect(afterAt).toBeLessThan(40);
   });
 
   it("says in the waiting block why the team stopped, and where to read all of the plan; an owner's own stop reads as before", () => {

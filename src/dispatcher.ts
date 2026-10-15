@@ -529,7 +529,7 @@ class MissionRun {
     this.scratch.clearInterruptions(marker.label);
     throw new MissionFailedError(
       `${why}, at the step "${marker.label}".`,
-      `${why}, at the step "${marker.label}". Check that the computer stays on overnight and that Docker Desktop keeps running, then run: \`${this.resumeCommand()}\``,
+      `${why}, at the step "${marker.label}". Check that the computer stays on and that Docker Desktop keeps running, then run: \`${this.resumeCommand()}\``,
     );
   }
 
@@ -2350,7 +2350,7 @@ class MissionRun {
         return {
           headline: `Check the finished app “${title}”`,
           lines: [
-            done === m.features.length ? `All ${plural(done, "feature")} ${done === 1 ? "is" : "are"} built.` : `${done} of ${m.features.length} features are built.`,
+            done === m.features.length ? (done === 1 ? "The 1 feature is built." : `All ${done} features are built.`) : `${done} of ${m.features.length} features are built.`,
             verify === undefined ? "The final checks did not run." : verify.ok ? "The final checks passed." : "The final checks did not pass.",
             ...(verify?.reviewed === false ? ["The final review did not finish."] : []),
             ...((verify?.blocking ?? 0) > 0 ? [`The final review found ${plural(verify?.blocking ?? 0, "serious problem")} that ${verify?.blocking === 1 ? "was" : "were"} not fixed.`] : []),

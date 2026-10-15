@@ -111,7 +111,7 @@ export function configTemplateYaml(): string {
 
 const CONFIG_TEMPLATE = `# Mission Control settings
 #
-# This file controls how Mission Control works while you sleep.
+# This file controls how Mission Control works.
 # Lines that start with "#" are notes for you; Mission Control ignores them.
 #
 # How to edit this file safely:
@@ -151,7 +151,7 @@ families:
     frontier: gpt-6-astra
     standard: gpt-6.1-sol
 
-# Quick helper jobs (file lists, failure summaries, the morning report text)
+# Quick helper jobs (file lists, failure summaries, the report text)
 # always use this small Claude model.
 light:
   provider: claude
@@ -226,7 +226,7 @@ roles:
 #   build    - build again with this tier and effort;
 #              family "same" keeps the usual engineer, "other" switches family
 #   diagnose - the architect studies the failure and writes a hint for the next try
-# If every step fails, the feature is set aside and explained in the morning report.
+# If every step fails, the feature is set aside and explained in the report.
 ladders:
   # Used for most features.
   standard:
@@ -263,12 +263,12 @@ failover:
   enabled: true
 
 # Leave some of your plan for yourself: no new work starts on a family once its
-# usage reaches these levels (0.97 = 97%), or once one night has used this much
-# of its weekly limit (0.35 = 35% per night; 1 = no per-night limit).
+# usage reaches these levels (0.97 = 97%), or once one run has used this much
+# of its weekly limit (0.35 = 35% per run; 1 = no per-run limit).
 pacing:
   maxFiveHourUtilization: 0.97   # of the 5-hour window
   maxWeeklyUtilization: 0.85     # of the weekly window
-  maxWeeklySharePerNight: 0.35   # of the weekly window, per night
+  maxWeeklySharePerNight: 0.35   # of the weekly window, per run
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +284,8 @@ notify:
 
 git:
   # Uploading needs a GitHub token in the app's folder, where agents can read it. Before turning it
-  # on, follow "Optional: upload finished work to GitHub" in docs/setup-windows.md.
+  # on, follow "Optional: upload finished work to GitHub" in docs/setup-windows.md. To send one finished
+  # mission with your own login instead, use "mc publish" (see docs/github-setup.md).
   push: false        # true = upload each finished mission's branch to the app's "origin" remote
   branchPrefix: mc   # start of the names of branches Mission Control creates (no "/")
 
@@ -684,7 +685,7 @@ function checkSwitches(check: Checker, root: Record<string, unknown>): void {
   const share = pacing?.maxWeeklySharePerNight;
   if (share !== undefined) {
     const ok = typeof share === "number" && share > 0 && share <= 1;
-    check.require("pacing.maxWeeklySharePerNight", share, ok, "a number above 0 and at most 1 (for example 0.35 means 35% of the weekly limit per night)");
+    check.require("pacing.maxWeeklySharePerNight", share, ok, "a number above 0 and at most 1 (for example 0.35 means 35% of the weekly limit per run)");
   }
 }
 

@@ -78,6 +78,24 @@ describe("mc (program)", () => {
     expect(out).toContain("mc run --until 07:00");
   });
 
+  it("says run, and never frames the work around a time of day, in its help and in what stop prints", async () => {
+    // Written with a bracket in each word so that this file does not hold the words it forbids.
+    const timeOfDay = /n[i]ght|mor[n]ing/i;
+    for (const args of [["--help"], ["run", "--help"], ["new", "--help"], ["plan", "--help"]]) {
+      expect(await mc(...args)).toBe(0);
+      expect(out, args.join(" ")).not.toMatch(timeOfDay);
+    }
+    expect(await mc("--help")).toBe(0);
+    expect(out).toContain("Mission Control builds and improves apps with Claude Code and Codex.");
+    expect(out).toContain("mc run --until 07:00");
+    expect(await mc("run", "--help")).toBe(0);
+    expect(out).toContain("use this profile for this run");
+    expect(out).toContain("change one role for this run");
+    expect(await mc("stop")).toBe(0);
+    expect(out).toContain("Stop requested. A run that is going stops its current step");
+    expect(out).not.toMatch(timeOfDay);
+  });
+
   it("shows the version", async () => {
     expect(await mc("--version")).toBe(0);
     expect(out.trim()).toMatch(/^\d+\.\d+\.\d+/);
@@ -516,12 +534,12 @@ describe("mc status / stop / report / logs", () => {
     const summary = join(home, "reports", "night-2026-10-10.md");
     writeFileSync(
       summary,
-      `# Night of 2026-10-10\n\n## Missions\n\n- **Habit tracker**: Done. [Read the report](../missions/${a.id}/report.md)\n` +
+      `# Run summary for 2026-10-10\n\n## Missions\n\n- **Habit tracker**: Done. [Read the report](../missions/${a.id}/report.md)\n` +
         `- **Notes app**: Partly done. [Read the report](../missions/${b.id}/report.md)\n\n## Needs your decision\n\n- **Notes app**: pick a colour\n`,
     );
 
     expect(await mc("report")).toBe(0);
-    expect(out).toContain(`Night summary: ${summary}`);
+    expect(out).toContain(`Run summary: ${summary}`);
     expect(out).toContain("- **Notes app**: pick a colour");
     expect(out).toContain(`Each mission's own report: mc report <mission>, for example: mc report ${a.id}`);
     expect(await mc("report", b.id)).toBe(0);
@@ -533,7 +551,7 @@ describe("mc status / stop / report / logs", () => {
     writeFileSync(store().reportPath(b.id), "# Notes app, again\n");
     expect(await mc("report")).toBe(0);
     expect(out).toContain(`Report: ${store().reportPath(b.id)}`);
-    writeFileSync(summary, `# Night\n\n- **Notes app**: Done. [Read the report](../missions/${b.id}/report.md)\n`);
+    writeFileSync(summary, `# Run summary\n\n- **Notes app**: Done. [Read the report](../missions/${b.id}/report.md)\n`);
     const later = new Date(Date.now() + 60_000);
     utimesSync(summary, later, later);
     expect(await mc("report")).toBe(0);
@@ -690,7 +708,7 @@ describe("mc run", () => {
     vi.spyOn(process.stderr, "write").mockImplementation(() => true); // the night's own log lines
     expect(await mc("run")).toBe(0);
     expect(out).toContain("Nothing was queued");
-    expect(out).toMatch(/Night summary: .*reports\/night-\d{4}-\d{2}-\d{2}\.md/);
+    expect(out).toMatch(/Run summary: .*reports\/night-\d{4}-\d{2}-\d{2}\.md/);
   });
 
   it("does not say nothing was queued when a failed mission waits, and gives the command that continues it", async () => {

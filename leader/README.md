@@ -1,6 +1,6 @@
 # The leader
 
-The leader is a Claude Code session that the CEO talks to in plain words. It is the CEO's hands: it checks on the work, reads logs and reports, stops the run, queues a new app or a change, and starts the team working through the queued work. It does this only through Mission Control's own commands (status, logs, report, stop, new, feature, plan preview, plan queue, plan show, run, approve, send-back). For a small, clear job it can also write the plan itself (see "Plans the leader writes"). It never writes code and never touches an app by hand. The last two answer a check: when the CEO asked the team to stop and wait for a look, the leader can approve it or send it back, but only after the CEO says yes in the chat.
+The leader is a Claude Code session that the CEO talks to in plain words. It is the CEO's hands: it checks on the work, reads logs and reports, stops the run, queues a new app or a change, and starts the team working through the queued work. It does this only through Mission Control's own commands (status, logs, report, stop, new, feature, plan preview, plan queue, plan show, run, approve, send-back) and two more that work with GitHub (get, publish; see "Working with GitHub"). For a small, clear job it can also write the plan itself (see "Plans the leader writes"). It never writes code and never touches an app by hand. Approve and send-back answer a check: when the CEO asked the team to stop and wait for a look, the leader can approve it or send it back, but only after the CEO says yes in the chat.
 
 The dashboard (`mc dashboard`) is the CEO's eyes. It only shows things. The leader is how the CEO acts on what they see.
 
@@ -10,32 +10,38 @@ Nothing in this folder has been tried on a real PC yet. Everything marked "not t
 
 | File | What it is |
 |---|---|
-| `CLAUDE.md` | The leader's standing instructions: its role, the twelve commands, how to turn the CEO's sentences into commands, how to write a plan, what it must never do, and how to talk. Claude Code reads it when it starts in this folder. |
-| `.claude/settings.json` | The permissions. `status`, `logs`, `report`, `plan preview` and `plan show` run without asking (they only read). `stop`, `run`, `new`, `feature`, `plan queue`, `approve` and `send-back` make Claude Code ask you first (see "What the leader will ask you"). File edits, git and `logs --follow` are refused. Claude Code also runs its own read-only commands (such as `ls`, `cat`, `grep`, `echo`) and reads files inside this folder without asking, and asks about anything else. |
+| `CLAUDE.md` | The leader's standing instructions: its role, the fifteen commands, how to turn the CEO's sentences into commands, how to write a plan, how to work with GitHub, what it must never do, and how to talk. Claude Code reads it when it starts in this folder. |
+| `.claude/settings.json` | The permissions. `status`, `logs`, `report`, `plan preview`, `plan show` and `publish-preview` run without asking (they only read). `stop`, `run`, `new`, `feature`, `plan queue`, `approve`, `send-back`, `get` and `publish` make Claude Code ask you first (see "What the leader will ask you"). File edits, git and `logs --follow` are refused. Claude Code also runs its own read-only commands (such as `ls`, `cat`, `grep`, `echo`) and reads files inside this folder without asking, and asks about anything else. |
 | `README.md` | This file. |
 
 The longer explanation is in [docs/leader.md](../docs/leader.md).
 
 ## Start the leader
 
-You need Claude Code installed in Ubuntu itself, and logged in there. Mission Control keeps its own copy inside its container, which the leader cannot use. Follow Anthropic's installation instructions for Claude Code on Linux, then in the Ubuntu window:
+You need Claude Code installed in Ubuntu itself, and logged in there. Mission Control keeps its own copy inside its container, which the leader cannot use. Follow Anthropic's installation instructions for Claude Code on Linux. Then, in the Ubuntu window, from the folder you downloaded Mission Control to:
 
 ```
-cd ~/Mission-control/leader
-claude
+scripts/mc-docker.sh install-leader
 ```
+
+This saves where Mission Control is and needs no Docker. Do it once, and again if you move Mission Control or download it again. After that, there are two ways to start the leader:
+
+- Click the shortcut on your Windows desktop (see "Start the leader with one click" in [docs/setup-windows.md](../docs/setup-windows.md)). It opens Ubuntu and starts the leader inside this folder.
+- Or, in the Ubuntu window, type `mc leader`. It always starts the leader in this folder, wherever you are. Add `--no-remote` to start it without Remote Control.
 
 Claude Code asks you to log in the first time. Use the same Claude plan as the rest of Mission Control. The leader's chat uses that plan's usage too.
 
 Then talk to it: "How is it going?"
 
-Not tried here: Claude Code's own steps in Ubuntu, and the leader's behaviour with this folder's settings.
+The leader must start inside this folder, because its commands are written `../scripts/mc-docker.sh ...` and its permission rules match that text. The shortcut and `mc leader` both make sure of it. If you start Claude Code yourself, do it from this folder: `cd` into it first.
+
+Not tried here: Claude Code's own steps in Ubuntu, the shortcuts on Windows, and the leader's behaviour with this folder's settings.
 
 ## Reach the leader from the Claude app (Remote Control)
 
 There are two different Remote Control commands, and only one of them gives you one leader on the PC and in the app. This is from Anthropic's Remote Control documentation (https://code.claude.com/docs/en/remote-control); none of it was tried here.
 
-To type to the leader in the Ubuntu window and also from the app, start it like this:
+To type to the leader in the Ubuntu window and also from the app, start it with `mc leader` or the shortcut (they run the command below in this folder), or by hand like this:
 
 ```
 cd ~/Mission-control/leader
@@ -73,16 +79,28 @@ For a small, clear job the leader can write the plan itself, as plain lines of t
 
 A plan the leader wrote makes the team stop at the plan before anything is built, without you asking. The leader reads the whole plan to you again then (`plan show`), and you answer as for any check. The leader skips this stop (`--no-plan-checkpoint`) only after it has asked "Skip your look at this plan? The team will build it without stopping for you. Yes or no?" and you said a clear yes. You can read a plan yourself, without the leader, with `mc plan show <mission>` in an Ubuntu window. The plan is sent in with the command, so no file is written.
 
-Not tried here: whether Claude Code lets `plan preview` and `plan show` through without asking in a real leader session (the rules were tried only when given on the command line of a non-interactive run), how its confirmation shows a long plan, and plans with apostrophes, double quotes or accented and non-English letters in their text. If it asks about `plan preview` and `plan show` anyway, nothing breaks: a mismatch only makes Claude Code ask more often. If it refuses to send a plan at all, the leader says so and queues the job the usual way. [docs/leader.md](../docs/leader.md) has the details.
+Not tried here: whether Claude Code lets `plan preview` and `plan show` through without asking in a real leader session (the rules were tried only when given on the command line of a non-interactive run), how its confirmation shows a long plan, and plans with apostrophes, double quotes or accented and non-English letters in their text. If it asks about `plan preview` and `plan show` anyway, nothing breaks: a mismatch only makes Claude Code ask more often. If it refuses to send a plan at all, the leader says so and queues the job the usual way. If you ask for the same plan twice, Mission Control says `This plan is already queued as “<name>” (<id>). See it with: mc status`; the leader tells you that in plain words and does not queue it again. [docs/leader.md](../docs/leader.md) has the details.
+
+## Working with GitHub
+
+The leader can bring a repository from GitHub to the PC and send a finished mission's work back as a draft pull request. It uses three commands for this, `get`, `publish-preview` and `publish`. All three run on the PC itself with your own GitHub login, never in the box where the team works, so no password or token is ever in that box and the leader never sees one. The leader never runs git or gh itself.
+
+- "Work on my repo acme/widgets and send it to GitHub": the leader asks "Download acme/widgets to this PC so the team can work on it? Yes or no?", then runs `get`. The repository lands in `~/mc-apps/widgets`. Then the usual flow: a plan or a request, a run.
+- When the work is finished (or partly finished) the leader first runs `publish-preview`, which only reads and tells it which repository the work would go to. The AI team can write in the app's folder, so the leader checks that name against the one you gave, and then asks you again with the name in the question: "Send “<title>” to <owner>/<repo> on GitHub as a draft pull request? Nothing is merged and the main branch is not changed. Yes or no?" On yes it runs `publish <mission> --to <owner>/<repo>`, which uploads the branch `mc/<mission>` (never the main branch, never with force) and opens a draft pull request, then prints its address. `publish` refuses a repository other than the one named, and a folder that `get` downloaded refuses any other repository for good. A partly finished mission is published as a draft that lists what is not finished.
+- A new app that the team built from nothing is already on its main branch on the PC, so there is no pull request for it. The leader says that in plain words. You put the whole app on GitHub once, in your own Ubuntu window; [docs/github-setup.md](../docs/github-setup.md) has the steps. Later changes to the app can be sent as draft pull requests.
+- Before any of this works, you log in to GitHub once on the PC, in your own Ubuntu window. [docs/github-setup.md](../docs/github-setup.md) has the steps, the messages you may see, and what was not tried.
+
+Real GitHub could not be reached while this was built. The commands were tested against a stand-in for GitHub (a folder of git repositories) and a stand-in for the gh program. Not tried here: a real GitHub, a real login, Windows and WSL.
 
 ## What the leader will ask you
 
-- It asks you before `stop`, `run`, `new`, `feature`, `plan queue`, `approve` and `send-back` (a prompt in the Ubuntu window, and in the app when you use Remote Control). That is on purpose: reports and logs are written by AIs, and a human tap is the guard against a command that came from such a text. Read what it is about to run, then answer **Yes** once. Never choose "Yes, and don't ask again": Claude Code would save an allow rule for that command in the file `.claude/settings.local.json` at the top of the repository, and nobody would have reviewed it. The `ask` rule in `.claude/settings.json` should still win for the commands it matches (Claude Code checks `deny`, then `ask`, then `allow`), so the question should not go away, but that was not tried here, and a saved rule for `plan queue` would be the exact text of one plan, which is of no use to anyone. If you want fewer prompts anyway, the owner can move entries from `ask` to `allow` in `.claude/settings.json`; the page [docs/leader.md](../docs/leader.md) explains the trade.
-- It may also ask permission for anything outside the twelve commands. Say no unless you know why.
+- It asks you before `stop`, `run`, `new`, `feature`, `plan queue`, `approve`, `send-back`, `get` and `publish` (a prompt in the Ubuntu window, and in the app when you use Remote Control). That is on purpose: reports and logs are written by AIs, and a human tap is the guard against a command that came from such a text. Read what it is about to run, then answer **Yes** once. Never choose "Yes, and don't ask again": Claude Code would save an allow rule for that command in the file `.claude/settings.local.json` at the top of the repository, and nobody would have reviewed it. The `ask` rule in `.claude/settings.json` should still win for the commands it matches (Claude Code checks `deny`, then `ask`, then `allow`), so the question should not go away, but that was not tried here, and a saved rule for `plan queue` would be the exact text of one plan, which is of no use to anyone. If you want fewer prompts anyway, the owner can move entries from `ask` to `allow` in `.claude/settings.json`; the page [docs/leader.md](../docs/leader.md) explains the trade.
+- It may also ask permission for anything outside the fifteen commands. Say no unless you know why.
+- Before `get` it asks "Download <owner/repo> to this PC so the team can work on it? Yes or no?". Before `publish` it asks "Send “<title>” to <owner>/<repo> on GitHub as a draft pull request? Nothing is merged and the main branch is not changed. Yes or no?", with the repository `publish-preview` printed. It does not take a wish at the start of the chat for the second answer.
 - Before `approve` it asks "Approve the plan (or feature, or finished app) of <name>? This lets the team carry on and it cannot be undone. Yes or no?". Before `send-back` it repeats your change and asks "Send it back with this? Yes or no?". It never answers a check on its own.
 - Before `run`, it tells you what is queued, and when the run will stop if you gave a stop time. It does not ask for one. Without a stop time the run goes on until the queued work is done or you ask for a stop. It also ends early if no work can go on (a full disk, every AI login expired, or the AI command lines keep failing). Before `stop`, it always asks.
 - A run started by the leader is a background task of the chat session. If the session ends, the run may stop (progress is kept and the next run continues; not tried here). For a run that must not depend on a chat, start it yourself or use the scheduled task from the setup guide.
 
 ## What the leader cannot do
 
-It cannot reopen a feature or change a plan in place. A stuck feature or a question gets answered with a follow-up request, which starts on the next run. It cannot log in to Claude or Codex, free disk space, start the dashboard, or show exact usage figures.
+It cannot reopen a feature or change a plan in place. A stuck feature or a question gets answered with a follow-up request, which starts on the next run. It cannot log in to Claude, Codex or GitHub, free disk space, start the dashboard, merge a pull request, or show exact usage figures.

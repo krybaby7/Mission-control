@@ -413,6 +413,9 @@ describe("card words", () => {
   it("titles", () => {
     expect(CARD_TEXT.failedTitle("Recipe box", false)).toBe("“Recipe box” needs your help");
     expect(CARD_TEXT.failedTitle("Recipe box", true)).toBe("“Recipe box” still needs your help");
+    // a title that already carries its own curly quotes does not get a second pair
+    expect(CARD_TEXT.failedTitle("“Recipe box”", false)).toBe("“Recipe box” needs your help");
+    expect(CARD_TEXT.stuckTitle("“Recipe” box")).toBe("“Recipe” box is stuck");
     expect(CARD_TEXT.stoppedTitle("X")).toBe("“X” stopped unexpectedly");
     expect(CARD_TEXT.pausedTitle("X")).toBe("“X” is paused");
     expect(CARD_TEXT.stuckTitle("Sign-up page")).toBe("“Sign-up page” is stuck");

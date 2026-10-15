@@ -1,5 +1,5 @@
 // Leftover processes. An agent's `npm run start -- -p 3100 &`, a nohup'd dev server, or a Playwright web server that
-// outlived its test run keeps a port (and memory) busy for the rest of the night, and with CI=1 Playwright refuses to
+// outlived its test run keeps a port (and memory) busy for the rest of the run, and with CI=1 Playwright refuses to
 // start on a busy port, so every later e2e check would fail. runProcess only kills a run's own process tree; a
 // process that left it (its own session, or a parent that exited) is re-parented to the init process.
 //

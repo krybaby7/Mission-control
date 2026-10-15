@@ -1,0 +1,151 @@
+{
+  "id": "2026-10-10-fresh-app",
+  "kind": "greenfield",
+  "title": "Fresh app",
+  "request": "Build a fresh app",
+  "repoPath": "/tmp/mc-e2e-kJfrgo/apps/fixture-app",
+  "baseBranch": "main",
+  "integrationBranch": "mc/2026-10-10-fresh-app",
+  "profile": "mixed",
+  "roleOverrides": [],
+  "status": "done",
+  "stage": "complete",
+  "createdAt": "2026-10-10T23:00:00.000Z",
+  "updatedAt": "2026-10-10T23:00:00.000Z",
+  "features": [
+    {
+      "id": "greet",
+      "title": "Feature greet",
+      "story": "As a user I want greet to work.",
+      "acceptance": [
+        "run() in src/greet.mjs returns \"greet works\""
+      ],
+      "kind": "standard",
+      "deps": [],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "outcome": "pass",
+          "summary": "implemented it",
+          "at": "2026-10-10T23:00:00.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/greet.test.mjs",
+          "sha256": "3eef3255fe366876414c7e65e30b2e71161c914f748b638bdcc8ab87c0f2b25c"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "testsCommit": "8f9df0949bb4076e5a12b1f6cf1992790389e23e",
+      "passingCommit": "9af594c9f07162e7e500682dde6e84ab58b611cd",
+      "builtBy": "codex",
+      "commit": "3deb872204b680f909877c15d84875920716d39d"
+    },
+    {
+      "id": "farewell",
+      "title": "Feature farewell",
+      "story": "As a user I want farewell to work.",
+      "acceptance": [
+        "run() in src/farewell.mjs returns \"farewell works\""
+      ],
+      "kind": "standard",
+      "deps": [
+        "greet"
+      ],
+      "status": "done",
+      "rung": 0,
+      "attempts": [
+        {
+          "rung": 0,
+          "action": "build",
+          "provider": "codex",
+          "model": "gpt-6.1-sol",
+          "effort": "medium",
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "outcome": "pass",
+          "summary": "implemented it",
+          "at": "2026-10-10T23:00:00.000Z"
+        }
+      ],
+      "frozenTests": [
+        {
+          "path": "tests/farewell.test.mjs",
+          "sha256": "044f7c0b54abc1d01633f725e2134cdfdf3b2b60930913a9e12e77dad7922ac1"
+        }
+      ],
+      "reviewRounds": 0,
+      "openFindings": [],
+      "testsCommit": "fe58d447d0fa355739af915b932b9595746d7767",
+      "passingCommit": "c64e36171614619a8a5393394091259a4455efb5",
+      "builtBy": "codex",
+      "commit": "559f4310fcd1a15a48b20b2d499bab4116cfcf20"
+    }
+  ],
+  "baselineBroken": false,
+  "baselineFailures": [],
+  "decisionsNeeded": [],
+  "gateCRounds": 0,
+  "agentRuns": 13,
+  "notes": [
+    "Every feature answers with a short sentence."
+  ],
+  "spec": {
+    "appName": "Fixture App",
+    "summary": "A tiny app whose features each say that they work.",
+    "features": [
+      {
+        "id": "greet",
+        "title": "Feature greet",
+        "story": "As a user I want greet to work.",
+        "acceptance": [
+          "run() in src/greet.mjs returns \"greet works\""
+        ],
+        "kind": "standard",
+        "deps": []
+      },
+      {
+        "id": "farewell",
+        "title": "Feature farewell",
+        "story": "As a user I want farewell to work.",
+        "acceptance": [
+          "run() in src/farewell.mjs returns \"farewell works\""
+        ],
+        "kind": "standard",
+        "deps": [
+          "greet"
+        ]
+      }
+    ],
+    "assumptions": [
+      "Every feature answers with a short sentence."
+    ],
+    "uiContract": "Feature <id> lives in src/<id>.mjs and exports run()."
+  },
+  "baseSha": "c3a4b27d1bf0852aadc0c2a35d35ed45cf51416b",
+  "verify": {
+    "full": "node --test \"tests/**/*.test.mjs\"",
+    "testGlobs": [
+      "tests/**"
+    ],
+    "tests": "node --test {files}"
+  }
+}

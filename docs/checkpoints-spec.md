@@ -120,7 +120,7 @@ Other schema deltas: `src/state.ts` `CreateMissionInit` (line 38) gets `checkpoi
 |---|---|---|
 | plan | "The plan has 3 features: Add shout, Add tests, Update README." One line per feature with its story. "Choices made for you: ..." (the spec's assumptions). | none |
 | feature | "“Add shout” is built, passed its checks, and was reviewed." The build summary (last passing attempt). "The reviewer left 1 small note: ..." (open findings, at most 3). | `branch` = `f.branch`; `commit` = `f.passingCommit`; `files` from `git diff --name-only <integration>..<passingCommit>`, at most 10 |
-| final | "All 3 features are built. The final checks passed." (or what `finalVerify` says). Screenshots found by `collectScreenshots` (report.ts) at park time. Open findings. | `branch` = `m.integrationBranch`; `screenshots` |
+| final | "All 3 features are built. The final checks passed." (or what `finalVerify` says; for one feature the first sentence is "The 1 feature is built."). Screenshots found by `collectScreenshots` (report.ts) at park time. Open findings. | `branch` = `m.integrationBranch`; `screenshots` |
 
 How the owner opens it. The report (written at park, section 9) has a "Waiting for your check" block at the very top, so the leader's `report` command (first 40 lines) shows it. For `feature` and `final` it ends with the same steps the report's "How to try it" already uses (`checkoutStep`, report.ts 130): `git checkout --detach <branch>` in the app folder, run it, then put the folder back. While parked, the unit and integration worktrees are kept (simple, fast resume; risk 15.4).
 
@@ -175,7 +175,7 @@ The owner is warned before the third showing: the report block and the dashboard
 
 * `hasWorkLeft` (415): `&& m.checkpoint?.state !== "pending"`. The queue skips parked missions, so the run moves on and ends when nothing else is left, with no waiting. `needsOwner` (420) is unchanged.
 * New `waitingForCheck(m)`. `NightResult` gets `waitingForCheck: Mission[]` (additive; risk 15.2).
-* `renderSummary` (about 500) and `nightMessage` (about 540): a "Waiting for your check" section and a line per parked mission. `priority` of "Night finished" is `high` when any exist (already `high` for `waitingForYou`, 100).
+* `renderSummary` (about 500) and `nightMessage` (about 540): a "Waiting for your check" section and a line per parked mission. `priority` of the "Run finished" notice (called "Night finished" when this was first built) is `high` when any exist (already `high` for `waitingForYou`, 100).
 * Start of the run (after `reportInterruptedRun`, 94): `drainInbox()` applies leftover inbox files; parked missions with no `notifiedAt` get their notice now (repairs the crash window of row 1).
 * `CheckpointWatcher` (a small class like `StopControl`, `setInterval` 1 s, `unref`): reads `readdirSync(<home>/inbox)`; for each file whose mission is not `dispatcher.activeMissionId()`, calls `applyAnswer` with a plain `MissionStore` (not `TonightStore`), then removes that mission's id from the night's `seen` set so `workThroughQueue` (366) picks it up in the same run. The other missions' `MissionRun` copies are never touched.
 * End-of-run message in `runCommand` (`cli.ts` 549): `- Shout is waiting for your check (the plan). Look at it with: mc report <id>. Then: mc approve <id>   or   mc send-back <id> --note "what to change".`
@@ -386,7 +386,7 @@ Also later: selective features (`--checkpoint feature:<id>` after the plan is sh
 
 1. Tests that pin the number of leader commands (`test/leader.test.ts`) must change; they are the one intended exception to "existing tests unchanged". If other tests compare whole `CARD_KINDS` or `LAMP_REASON_CODES` lists I did not find them (grep found none), but I did not run the suite.
 2. Additive fields on `NightResult` and `status --json` rows could break a `toEqual` in `run.test.ts` or `cli.test.ts` (not read). Fallback: compute parked missions in `cli.ts` from the store and leave `NightResult` alone.
-3. The idle answer path takes the run lock for milliseconds; a `mc run` starting in that instant fails once with "another mc run is active". Probability is negligible; the scheduled task retries the next night.
+3. The idle answer path takes the run lock for milliseconds; a `mc run` starting in that instant fails once with "another mc run is active". Probability is negligible; the scheduled run tries again at the next start.
 4. Parked missions keep their worktrees (installed dependencies can be large). A mission parked for weeks holds disk; `lowDisk` (dispatcher.ts 295) still guards new work. Mitigation later: release unit worktrees at park.
 5. The proof and nonce protect against accidents and prompt injection, not a determined same-user agent (8.3).
 6. Ancestry check relies on `/proc` (Linux); on other systems it is skipped. The production path is the Linux container.

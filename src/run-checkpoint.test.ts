@@ -63,7 +63,7 @@ describe("a mission that waits for its owner's check", () => {
 
     // One high-priority notice for the check, and the night's own, also high because something waits for the owner.
     expect(checkNotices(w)).toEqual([expect.objectContaining({ title: "A parked app: please check the plan", priority: "4" })]);
-    const finished = w.notifications().find((n) => n.title === "Night finished");
+    const finished = w.notifications().find((n) => n.title === "Run finished");
     expect(finished?.priority).toBe("4");
     expect(finished?.body).toContain("A parked app: Waiting for your check, 0 of 2 features done");
   });
@@ -78,9 +78,9 @@ describe("a mission that waits for its owner's check", () => {
     expect(again.missions).toEqual([]); // nothing to do: it is not "queued work"
     expect(again.waitingForCheck.map((m) => m.id)).toEqual([parked.id]);
     expect(w.jobs).toHaveLength(jobs);
-    expect(summaryOf(again.summaryPath)).toContain("No mission could run by itself tonight: the ones left need you first (below).");
+    expect(summaryOf(again.summaryPath)).toContain("No mission could run by itself in this run: the ones left need you first (below).");
     expect(checkNotices(w)).toHaveLength(1); // the owner is told once, not on every run
-    expect(w.notifications().filter((n) => n.title === "Night finished").at(-1)?.body).toContain("A parked app: waiting for your check");
+    expect(w.notifications().filter((n) => n.title === "Run finished").at(-1)?.body).toContain("A parked app: waiting for your check");
 
     // `mc run --mission` on it is a no-op for the dispatcher.
     const only = await w.night({ missionId: parked.id });
@@ -91,7 +91,7 @@ describe("a mission that waits for its owner's check", () => {
     const night = await w.night();
     expect(night.missions.map((m) => [m.id, m.status])).toEqual([[parked.id, "done"]]);
     expect(night.waitingForCheck).toEqual([]);
-    expect(w.notifications().filter((n) => n.title === "Night finished").at(-1)?.priority).toBe("3");
+    expect(w.notifications().filter((n) => n.title === "Run finished").at(-1)?.priority).toBe("3");
     expect(w.report(parked.id)).toContain("| The plan | Approved |");
   });
 

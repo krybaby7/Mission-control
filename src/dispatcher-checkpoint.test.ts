@@ -407,7 +407,7 @@ describe("the final checkpoint", () => {
     expect(parked.integrationWorktree).toBeDefined(); // kept while it waits
     const look = parked.checkpoint?.look;
     expect(look?.headline).toBe("Check the finished app “Fixture app”");
-    expect(look?.lines).toEqual(["All 1 feature is built.", "The final checks passed."]);
+    expect(look?.lines).toEqual(["The 1 feature is built.", "The final checks passed."]);
     expect(look?.branch).toBe(parked.integrationBranch);
     expect(look?.files).toEqual(expect.arrayContaining(["src/greet.mjs"]));
     const report = readFileSync(hh.store.reportPath(id), "utf8");
@@ -422,6 +422,30 @@ describe("the final checkpoint", () => {
     expect(done.status).toBe("done");
     expect(await hh.git.headSha(done.repoPath, "main")).toBe(await hh.git.headSha(done.repoPath, done.integrationBranch));
     expect(readFileSync(hh.store.reportPath(id), "utf8")).toContain("| The finished app | Approved |");
+  });
+
+  it("counts the built features in plain words: all of several, and how many of them when one is set aside", async () => {
+    // Two features, both built.
+    const two = harness();
+    const twoId = queue(two, "final");
+    const parkedTwo = await two.run(twoId);
+    expect(parkedTwo.features).toHaveLength(2);
+    expect(parkedTwo.checkpoint?.look.lines[0]).toBe("All 2 features are built.");
+    h?.cleanup();
+
+    // Two features, one set aside after three send-backs: the line counts the built ones.
+    const some = harness({ features: [feature("greet"), feature("solo")], agents: { engineer: fixing } });
+    const someId = queue(some, "feature", "final");
+    await some.run(someId);
+    for (const note of ["one", "two", "three"]) {
+      answer(some, someId, "send_back", note);
+      await some.run(someId);
+    }
+    answer(some, someId, "approve"); // the other feature
+    const parkedSome = await some.run(someId);
+    expect(parkedSome.features.map((f) => [f.id, f.status])).toEqual([["greet", "blocked"], ["solo", "done"]]);
+    expect(parkedSome.checkpoint).toMatchObject({ kind: "final" });
+    expect(parkedSome.checkpoint?.look.lines[0]).toBe("1 of 2 features are built.");
   });
 
   it("adds the owner's change as a feature, builds and checks it, and asks again", async () => {

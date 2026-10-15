@@ -1,7 +1,7 @@
 {
   "name": "mission-control",
   "version": "0.1.0",
-  "description": "Autonomous overnight coding orchestrator that drives the official Claude Code and Codex CLIs",
+  "description": "Autonomous coding orchestrator that drives the official Claude Code and Codex CLIs",
   "type": "module",
   "bin": {
     "mc": "dist/cli.js"

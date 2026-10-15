@@ -74,7 +74,7 @@ function consoleLine(now: Date, level: LogLevel, msg: string): string {
 
 function ignoreError(): void {}
 
-/** A vanished reader (e.g. `mc run 2>&1 | tee night.log` after tee dies) makes stderr emit EPIPE, fatal without a listener. */
+/** A vanished reader (e.g. `mc run 2>&1 | tee run.log` after tee dies) makes stderr emit EPIPE, fatal without a listener. */
 function ignoreStderrErrors(): void {
   if (!process.stderr.listeners("error").includes(ignoreError)) process.stderr.on("error", ignoreError);
 }

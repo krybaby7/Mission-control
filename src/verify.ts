@@ -78,7 +78,7 @@ export class Verifier {
         ? await runProcess({
             command: "bash",
             // No login or rc files: they live outside the repository, where agents can write (~/.bash_profile with
-            // "exit 0" would pass every check that night) and no diff, scan or reviewer looks. PATH comes from our env.
+            // "exit 0" would pass every check) and no diff, scan or reviewer looks. PATH comes from our env.
             args: ["--noprofile", "--norc", "-c", command],
             cwd,
             env: { ...scrubEnv(this.opts.env ?? process.env), CI: "1", FORCE_COLOR: "0" },

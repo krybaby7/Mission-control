@@ -1,4 +1,4 @@
-// Morning report: a warm, plain-language markdown summary of one mission for a non-programmer, the plain-text
+// The report: a warm, plain-language markdown summary of one mission for a non-programmer, the plain-text
 // fact sheet the scout turns into prose, and collection of the app's Playwright screenshots.
 import { createHash } from "node:crypto";
 import { type Dirent, readFileSync } from "node:fs";
@@ -219,7 +219,7 @@ function findingFact(f: Feature, finding: Finding): string {
   return `[${finding.severity}] ${f.id}${where}: ${finding.description}`;
 }
 
-// ───────────────────────────── Morning report ─────────────────────────────
+// ───────────────────────────── The report ─────────────────────────────
 
 export interface RenderReportOptions {
   /** Narrative written by the scout; null/absent → a template narrative. */
@@ -242,7 +242,7 @@ export interface RenderReportOptions {
 }
 
 /**
- * The morning report as markdown. Plain language first; technical details last. The screenshots come after the
+ * The report as markdown. Plain language first; technical details last. The screenshots come after the
  * features table, so the first lines (what `mc report` shows) keep the decisions and the features.
  */
 export function renderReport(m: Mission, opts: RenderReportOptions): string {
@@ -271,15 +271,24 @@ function headerSection(m: Mission, generatedAt: string): string {
   const { done, total } = countFeatures(m.features);
   const progress = total === 0 ? "no features planned yet" : `${done} of ${total} features done`;
   const header = `# ${oneLine(m.title)}\n\n**${statusLabel(m.status, m)}** · ${progress} · report written ${formatLocalTime(generatedAt)}`;
-  const plan = planOf(m);
-  if (!plan) return header;
-  // A plan from outside: who wrote it, which one it is (the code `mc plan show` prints), and what the team's plan reviewer did with it.
-  const answer = plan.review ? `; ${planReviewShort(plan.review)}` : ".";
-  return `${header}\n\nPlan: written by the leader (plan code ${plan.sha256.slice(0, 8)})${answer}`;
+  // While a check waits, the waiting block (which comes first) already says it, above the look: it is not said twice.
+  const line = isWaitingForCheck(m) ? "" : planLine(m);
+  return line === "" ? header : `${header}\n\n${line}`;
 }
 
 /**
- * The same words as the night summary and the notifications (run.ts statusPhrase). Given the mission, a stop for the
+ * For a plan from outside: who wrote it, which one it is (the code `mc plan show` prints), and what the team's plan
+ * reviewer did with it. Empty for a mission the team's planner planned.
+ */
+function planLine(m: Mission): string {
+  const plan = planOf(m);
+  if (!plan) return "";
+  const answer = plan.review ? `; ${planReviewShort(plan.review)}` : ".";
+  return `Plan: written by the leader (plan code ${plan.sha256.slice(0, 8)})${answer}`;
+}
+
+/**
+ * The same words as the run summary and the notifications (run.ts statusPhrase). Given the mission, a stop for the
  * owner's check reads as that, not as a pause. (The fact sheet for the scout passes no mission: it never mentions checks.)
  */
 function statusLabel(status: MissionStatus, m?: Mission): string {
@@ -318,6 +327,8 @@ function waitingSection(m: Mission, cp: PendingCheckpoint, container: boolean, r
       `- **Approve** lets the team carry on from here: ${code(`mc approve ${m.id}`)}. You can add ${code('--note "..."')}; it is kept in this report.`,
       `- **Send back** with what to change: ${code(`mc send-back ${m.id} --note "what to change"`)}. ${sendBackEffect(cp, sent)}`,
     ].join("\n"),
+    // Above the look, so a long plan can never push it out of the first lines `mc report` shows.
+    planLine(m),
     `**${oneLine(shown(look.headline))}**`,
     bulletList(look.lines.map((line) => shown(String(line))), ""),
   ].filter((p) => p !== "");

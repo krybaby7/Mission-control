@@ -23,6 +23,8 @@ export const PLAN_MAX_CHARS = 30_000;
 export const PLAN_PROBLEMS_SHOWN = 12;
 /** Lines of a plan shown to a person are cut here (the report and the card cut at 300), so nothing the plan says is lost. */
 const WRAP_AT = 280;
+/** A look line keeps its lead on every line it wraps into only if at least this much room is left for the words after it. */
+const FACT_ROOM_MIN = 80;
 const QUOTE_MAX = 40;
 const MAX_FEATURES = 10;
 const MAX_CHECKS = 20;
@@ -402,7 +404,8 @@ type Describable = Pick<SpecOutput, "appName" | "summary" | "features" | "assump
  * agree on. It also takes the planner's own plans (after a revision), which the limits of a leader's plan do not cover:
  * any number of features, backticks and curly brackets, a contract of many lines in one string, long lines. Each text is
  * made one line as `shown` does, but never cut; a line over 280 characters is wrapped, so nothing is lost on its way to
- * the report or the card.
+ * the report or the card. Each feature shows its id next to its title (it reaches the AIs and the branch names). In the
+ * owner's look, which is read one line at a time, a wrapped fact starts every line with its lead again (`wrapFact`).
  */
 export function describePlan(spec: Describable, opts: DescribeOptions): string[] {
   const text = (x: unknown): string => (typeof x === "string" ? oneLine(x) : "");
@@ -432,26 +435,31 @@ export function describePlan(spec: Describable, opts: DescribeOptions): string[]
   const bullets = (items: string[], indent = ""): void => {
     for (const item of items) wrapLine(item, WRAP_AT - indent.length - 2).forEach((part, i) => out.push(`${indent}${i === 0 ? "- " : "  "}${part}`));
   };
+  // The owner's look shows one line at a time, so every line a long fact wraps into starts with the same lead.
+  const fact = (lead: string, body: string): void => {
+    for (const line of wrapFact(lead, body)) out.push(line);
+  };
+  const head = (lead: string, body: string): void => (opts.style === "look" ? fact(lead, body) : add(`${lead} ${body}`));
 
-  add(`You asked: ${text(opts.request)}`);
-  add(`App name: ${text(spec.appName)}${where}`);
-  add(`Summary: ${text(spec.summary)}`);
+  head("You asked:", text(opts.request));
+  head("App name:", `${text(spec.appName)}${where}`);
+  head("Summary:", text(spec.summary));
   if (opts.style === "look") {
     // One fact to a line, each saying what it is about: the report and the card show these lines one by one.
-    add(`The plan has ${total}: ${features.map((f) => `“${f.title}”`).join(", ")}.`);
+    fact(`The plan has ${total}:`, `${features.map((f) => `“${f.title}”`).join(", ")}.`);
     for (const f of features) {
-      add(`“${f.title}”: ${f.story}`);
-      for (const check of f.checks) add(`Check for “${f.title}”: ${check}`);
-      if (f.deps.length > 0) add(`Needs first for “${f.title}”: ${needs(f.deps)}.`);
-      if (f.routine) add(`Marked as routine work for “${f.title}”: ${ROUTINE_WORK}`);
+      fact(`“${f.title}”${f.id === "" ? "" : ` (id: ${f.id})`}:`, f.story);
+      for (const check of f.checks) fact(`Check for “${f.title}”:`, check);
+      if (f.deps.length > 0) fact(`Needs first for “${f.title}”:`, `${needs(f.deps)}.`);
+      if (f.routine) fact(`Marked as routine work for “${f.title}”:`, ROUTINE_WORK);
     }
-    for (const c of choices) add(`Choice made for you: ${c}`);
-    for (const n of names) add(`Name the tests and the code must agree on: ${n}`);
+    for (const c of choices) fact("Choice made for you:", c);
+    for (const n of names) fact("Name the tests and the code must agree on:", n);
     return out;
   }
   out.push("", `${total}:`, "");
   features.forEach((f, i) => {
-    add(`${i + 1}. “${f.title}”`);
+    add(`${i + 1}. “${f.title}”${f.id === "" ? "" : ` (id: ${f.id})`}`);
     add(f.story, "   ");
     out.push("   It counts as done when:");
     bullets(f.checks, "   ");
@@ -467,6 +475,18 @@ export function describePlan(spec: Describable, opts: DescribeOptions): string[]
     bullets(names);
   }
   return out;
+}
+
+/**
+ * A fact for the owner's look: `lead`, a space and `body`, in lines of at most `max` characters. When it takes more than
+ * one line, every line starts with `lead` again, so a line shown on its own still says what it is about. A lead so long
+ * that too little room is left for the words (a very long title in a plan the planner wrote) is not repeated: the whole
+ * text is wrapped as one, so nothing is lost and no line is too long.
+ */
+export function wrapFact(lead: string, body: string, max = WRAP_AT): string[] {
+  const room = max - lead.length - 1;
+  if (room < FACT_ROOM_MIN) return wrapLine(`${lead} ${body}`, max);
+  return wrapLine(body, room).map((part) => `${lead} ${part}`);
 }
 
 /** The plan reviewer's answer and the owner's send-backs, as lines: what changed the plan, and who changed it. */

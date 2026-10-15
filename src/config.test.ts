@@ -168,6 +168,17 @@ describe("configTemplateYaml", () => {
     expect(loadConfig(file)).toEqual(loadConfig(join(dir, "missing.yaml")));
   });
 
+  it("words its comments in terms of a run; only the stable setting name maxWeeklySharePerNight keeps the older word", () => {
+    const text = configTemplateYaml();
+    // Written with a bracket in each word so that this file does not hold the words it forbids.
+    expect(text.replaceAll("maxWeeklySharePerNight", "<setting>")).not.toMatch(/n[i]ght|mor[n]ing|while you sl[e]ep/i);
+    expect(text).toContain("once one run has used this much");
+    expect(text).toContain("(0.35 = 35% per run; 1 = no per-run limit)");
+    expect(text).toContain("maxWeeklySharePerNight: 0.35   # of the weekly window, per run");
+    expect(text).toContain("the report text");
+    expect(text).toContain("explained in the report.");
+  });
+
   it("explains itself with comments, including every top-level setting", () => {
     const text = configTemplateYaml();
     const lines = text.split("\n");
@@ -541,6 +552,7 @@ describe("validateConfig", () => {
       const problems = problemsAfter((c) => ((c.pacing as Record<string, unknown>).maxWeeklySharePerNight = bad));
       expect(problems, String(bad)).toHaveLength(1);
       expect(problems[0]).toMatch(/^pacing\.maxWeeklySharePerNight must be a number above 0 and at most 1/);
+      expect(problems[0]).toContain("(for example 0.35 means 35% of the weekly limit per run)");
     }
   });
 

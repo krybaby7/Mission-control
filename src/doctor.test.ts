@@ -462,7 +462,7 @@ describe("runDoctor: live checks", () => {
 
     const login = check(checks, "Codex login");
     expect(login).toMatchObject({ ok: false, severity: "warn" });
-    expect(login.detail).toContain("a night run is working right now (pid 7 on host mission-control-run-other)");
+    expect(login.detail).toContain("a run is working right now (pid 7 on host mission-control-run-other)");
     expect(login.fix).toContain('Run "mc doctor" again after the run ends');
     expect(names(checks)).not.toContain("Codex models");
     const live = check(checks, "Live check");

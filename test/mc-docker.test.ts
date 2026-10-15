@@ -193,6 +193,32 @@ describe("mc-docker.sh: help and preconditions", () => {
     expect(wrapper(["help"]).stdout).toContain("plan preview|queue|show      Plans written outside the team (write - after preview or queue to send the plan in)");
   });
 
+  it("lists the GitHub commands and the leader commands in the help, and says where the GitHub ones run", () => {
+    const help = wrapper(["help"]).stdout;
+    expect(help).toContain("On this PC, with your own GitHub login (never inside the container):");
+    expect(help).toContain("get <owner/repo | github.com address> [folder-name]");
+    expect(help).toContain("Download a GitHub repository into ~/mc-apps/<folder-name>");
+    expect(help).toContain("publish <mission>");
+    expect(help).toContain("Upload a finished mission's branch and open a draft pull request");
+    expect(help).toContain("publish <mission> --to <owner/repo>");
+    expect(help).toContain("publish-preview <mission>");
+    expect(help).toContain("Show where a finished mission's work would go on GitHub. It uploads nothing");
+    expect(help).toContain("install-leader");
+    expect(help).toContain("leader [--no-remote]");
+  });
+
+  it("does not hand get, publish, install-leader or leader to the container", () => {
+    // They run on this PC. With the image missing they still give their own answers, not "build the image".
+    const r = wrapper(["get"], { env: { FAKE_IMAGE_MISSING: "1" } });
+    expect(r.stderr).toContain("get needs a GitHub repository");
+    expect(r.run).toBeUndefined();
+    expect(r.calls).toEqual([]);
+    expect(wrapper(["install-leader", "x"], { env: { FAKE_IMAGE_MISSING: "1" } }).stderr).toContain("install-leader takes no arguments");
+    expect(wrapper(["leader", "--bogus"], { env: { FAKE_IMAGE_MISSING: "1" } }).stderr).toContain("leader: I don't know");
+    expect(wrapper(["publish", "--force"], { env: { FAKE_IMAGE_MISSING: "1" } }).stderr).toContain("is not a mission name");
+    expect(wrapper(["publish-preview", "--force"], { env: { FAKE_IMAGE_MISSING: "1" } }).stderr).toContain("is not a mission name");
+  });
+
   it("refuses to run as root", () => {
     const r = wrapper(["status"], { env: { FAKE_UID: "0" } });
     expect(r.status).toBe(1);
@@ -213,7 +239,7 @@ describe("mc-docker.sh: help and preconditions", () => {
     expect(r.stderr).toContain("If it is already running, open its Settings > Resources > WSL integration");
   });
 
-  it("fails at once when Docker isn't running and the command isn't a night run", () => {
+  it("fails at once when Docker isn't running and the command isn't a run", () => {
     const r = wrapper(["status"], { env: { FAKE_INFO_FAILURES: "1000" } });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("Docker isn't running");
@@ -374,7 +400,7 @@ describe("mc-docker.sh: build", () => {
   });
 });
 
-describe("mc-docker.sh: night run", () => {
+describe("mc-docker.sh: the run", () => {
   const RUN_FLAGS = ["--name", "mission-control-run", "--hostname", "mission-control-run"];
 
   it("runs mc run in the fixed-name container, with a fixed hostname so a killed run's lock is judged by its pid", () => {
@@ -438,7 +464,7 @@ describe("mc-docker.sh: container limits", () => {
     expect(valueAfter(r.run, "--cap-drop")).toBe("ALL");
   });
 
-  it("applies them to the night run as well", () => {
+  it("applies them to the run as well", () => {
     const r = wrapper(["run", "--until", "07:00"]);
     expect(r.run).toEqual(expectedRun(
       ["--name", "mission-control-run", "--hostname", "mission-control-run"],
@@ -447,16 +473,16 @@ describe("mc-docker.sh: container limits", () => {
   });
 });
 
-describe("mc-docker.sh: telling the iPad when a night run can't start", () => {
+describe("mc-docker.sh: telling the iPad when a run can't start", () => {
   const PROBE = ["mc", "config", "get", "notify.ntfyUrl"];
   const isProbe = (call: string[]) => call[0] === "run" && call.slice(-4).join(" ") === PROBE.join(" ");
 
-  it("keeps a private copy of the notification address each time a night run starts", () => {
+  it("keeps a private copy of the notification address each time a run starts", () => {
     const r = wrapper(["run", "--until", "07:00"], { env: { FAKE_NTFY_URL: NTFY_URL } });
     expect(r.status).toBe(0);
     expect(fs.readFileSync(notifyUrlFile(), "utf8")).toBe(`${NTFY_URL}\n`);
     expect(fs.statSync(notifyUrlFile()).mode & 0o777).toBe(0o600);
-    // Read in a container of its own (same volumes and limits, no name), before the night's container starts.
+    // Read in a container of its own (same volumes and limits, no name), before the run's container starts.
     const probe = r.calls.findIndex(isProbe);
     expect(r.calls[probe]).toEqual(["run", "--rm", "--init", "--shm-size=1g", ...LIMITS, ...STANDARD_VOLUMES,
       "--volume", `${home}/mc-apps:/home/pwuser/mc-apps`, IMAGE, ...PROBE]);
@@ -476,7 +502,7 @@ describe("mc-docker.sh: telling the iPad when a night run can't start", () => {
     expect(fs.existsSync(notifyUrlFile())).toBe(false);
   });
 
-  it("only refreshes the address for night runs", () => {
+  it("only refreshes the address for runs", () => {
     const r = wrapper(["status"], { env: { FAKE_NTFY_URL: NTFY_URL } });
     expect(r.calls.some(isProbe)).toBe(false);
     expect(fs.existsSync(notifyUrlFile())).toBe(false);
@@ -486,7 +512,7 @@ describe("mc-docker.sh: telling the iPad when a night run can't start", () => {
   function sentNotification(r: WrapperResult): { url: string | undefined; body: string | undefined } {
     expect(r.curls).toHaveLength(1);
     const call = r.curls[0]!;
-    expect(call).toContain("Title: Mission Control: the night run didn't start");
+    expect(call).toContain("Title: Mission Control: the run didn't start");
     expect(call).toContain("Priority: 4");
     return { url: call.at(-1), body: valueAfter(call, "--data-binary") };
   }
