@@ -73,11 +73,12 @@ const PLANNER_LINES = `What happens next:
 - The team's planner is skipped. This plan is used as written.
 - A second AI reads the plan first and may ask for changes.
 `;
-const OLD_CHECK_LINE = "For each feature the checks are written first, the work is done until they pass, and a different AI reviews it.";
-const TESTS_LINE = "Checked by tests (1): the checks are written first, the work is done until they pass, and a different AI reviews it.";
+const OLD_CHECK_LINE = "For each feature the checks are written first, the work is done until they pass, and a second AI reviews it.";
+const TESTS_LINE = "Checked by tests (1): the checks are written first, the work is done until they pass, and a second AI reviews it.";
 const REVIEW_LINE = (n: number): string =>
   `Checked by a second AI (${n}): the work is done, Mission Control checks it with scripts, and a second AI judges each check as passed or not, with a reason. No tests are written.`;
-const OWNER_LINE = "Checked by a second AI and then by you (1): the same, and then the team stops for your look before the feature is added.";
+const OWNER_LINE = "Checked by a second AI and then by you (1): the work is done, Mission Control checks it with scripts, and a second AI judges each check as passed or not, with a reason. Then the team stops for your look before the feature is added. No tests are written.";
+const OWNER_LINE_NO_LOOK = "Checked by a second AI and then by you (1): the work is done, Mission Control checks it with scripts, and a second AI judges each check as passed or not, with a reason. It will be queued without a stop for your look. No tests are written.";
 const PICTURES_LINE = "For web pages Mission Control tries to take pictures at phone width and desktop width, and the second AI is asked to look at them. If it cannot, it says so.";
 const NO_LOOK = "It will not stop for your look at features marked “owner” or at features the second AI could not fully judge. They are checked by a second AI only.";
 
@@ -230,7 +231,6 @@ ${BLOCK_A}
 ${PLANNER_LINES}- It will stop for your check: the plan.
 - If the second AI cannot judge a check of “Setup guide for new users”, it will stop for your look at that feature.
 - ${REVIEW_LINE(1)}
-- ${PICTURES_LINE}
 ${NEXT_TAIL}`);
     expect(store().list()).toEqual([]);
   });
@@ -251,7 +251,8 @@ ${NEXT_TAIL}`);
 
   it("prints example A with the flag: one line that says the look is not asked for", async () => {
     expect(await mc(["plan", "preview", "-", "--no-owner-checkpoint"], GUIDE)).toBe(0);
-    expect(out).toContain(`${PLANNER_LINES}- It will stop for your check: the plan.\n- ${NO_LOOK}\n- ${REVIEW_LINE(1)}\n- ${PICTURES_LINE}\n`);
+    expect(out).toContain(`${PLANNER_LINES}- It will stop for your check: the plan.\n- ${NO_LOOK}\n- ${REVIEW_LINE(1)}\n`);
+    expect(out).not.toContain(PICTURES_LINE);
     expect(out).not.toContain("If the second AI cannot judge");
   });
 
@@ -269,7 +270,7 @@ ${NEXT_TAIL}`);
     expect(next(out)).toEqual([
       "- It will stop for your check: the plan.",
       `- ${NO_LOOK}`,
-      "- Checked by a second AI and then by you (1): the same, but it will be queued without a stop for your look.",
+      `- ${OWNER_LINE_NO_LOOK}`,
       `- ${PICTURES_LINE}`,
     ]);
   });
@@ -282,7 +283,6 @@ ${NEXT_TAIL}`);
       "- If the second AI cannot judge a check of “Description of each column”, it will stop for your look at that feature.",
       `- ${TESTS_LINE}`,
       `- ${REVIEW_LINE(1)}`,
-      `- ${PICTURES_LINE}`,
     ]);
     const three = SALES.replace("rows: 4-12\n", "rows: 4-12\n\nfeature: third\ntitle: Third\nstory: The third.\nmode: owner\ncheck: It reads well.\n");
     expect(await mc(["plan", "preview", "-"], three)).toBe(0);
@@ -292,8 +292,47 @@ ${NEXT_TAIL}`);
       `- ${TESTS_LINE}`,
       `- ${REVIEW_LINE(1)}`,
       `- ${OWNER_LINE}`,
-      `- ${PICTURES_LINE}`,
     ]);
+  });
+
+  it("every line about a way of checking can be read alone: none of them points back at another line with the words “the same” (real run R2)", async () => {
+    for (const text of [GUIDE, LANDING, SALES]) {
+      for (const flags of [[], ["--no-owner-checkpoint"]]) {
+        expect(await mc(["plan", "preview", "-", ...flags], text)).toBe(0);
+        expect(next(out).join("\n")).not.toMatch(/\bthe same\b/);
+      }
+    }
+    // a plan with only an owner feature reads whole: what is done, and what happens after it
+    expect(await mc(["plan", "preview", "-"], LANDING)).toBe(0);
+    expect(next(out)).toContain(`- ${OWNER_LINE}`);
+    expect(OWNER_LINE).toContain("a second AI judges each check as passed or not, with a reason");
+  });
+
+  it("says the line about pictures only when a feature checked by reading talks about a web page (real run R2)", async () => {
+    // a guide and a table have no page
+    for (const text of [GUIDE, SALES]) {
+      expect(await mc(["plan", "preview", "-"], text)).toBe(0);
+      expect(out).not.toContain(PICTURES_LINE);
+      expect(out).not.toMatch(/take pictures/);
+    }
+    // a page, or a file that ends in .html, or a style sheet, in the words of such a feature brings the line back
+    for (const [what, text] of [
+      ["a page", LANDING],
+      ["a .html file", GUIDE.replace("heading: Install", "check: The guide is also saved as docs/setup.html.\nheading: Install")],
+      ["a style sheet", GUIDE.replace("mention: Habit tracker", "mention: stylesheet")],
+      ["a .css file", GUIDE.replace("heading: Install", "check: The look is set in docs/guide.css.\nheading: Install")],
+    ] as const) {
+      expect(await mc(["plan", "preview", "-"], text), what).toBe(0);
+      expect(out, what).toContain(`- ${PICTURES_LINE}\n`);
+    }
+    // the word page in a feature checked by tests does not bring it
+    expect(await mc(["plan", "preview", "-"], SALES.replace("The regions are in alphabetical order.", "The regions are in alphabetical order on the page."))).toBe(0);
+    expect(out).not.toContain(PICTURES_LINE);
+    // the line is at the end of the lines about checking, as before, and the queue prints none of it
+    expect(await mc(["plan", "preview", "-"], LANDING)).toBe(0);
+    expect(next(out).at(-1)).toBe(`- ${PICTURES_LINE}`);
+    expect(await mc(["plan", "queue", "-"], LANDING)).toBe(0);
+    expect(out).not.toContain("take pictures");
   });
 
   it("names at most three titles in a stop line, then how many more", async () => {
@@ -469,6 +508,43 @@ describe("mc plan show: how each feature was checked", () => {
       "  Pictures: none (this feature has no page).",
       "",
     ]);
+  });
+
+  // R2-5 of the real runs: a taste check (it ends "(the CEO decides)") is left for the owner, not "not judged".
+  it("calls a taste check left for you, in the counts and on the check itself, and any other check that was not judged not judged", async () => {
+    const m = await salesMission((_m, notes) => {
+      notes.status = "done";
+      notes.acceptance = ["First.", "Second (the CEO decides).", "Third."];
+      notes.checked = checked([result(1, "pass", "a quote"), result(2, "cannot_judge", "A matter of taste."), result(3, "cannot_judge", "No file to read.")], { round: 1 });
+    });
+    expect(await mc(["plan", "show", m.id])).toBe(0);
+    const lines = section();
+    expect(lines[2]).toBe("- “Description of each column”: a second AI checked it against your list (checked once). 1 passed, 0 failed, 1 could not be judged, 1 left for you.");
+    expect(lines[3]).toBe("    1. passed: First. Evidence: a quote");
+    expect(lines[4]).toBe("    2. left for you: Second (the CEO decides). Evidence: A matter of taste.");
+    expect(lines[5]).toBe("    3. not judged: Third. Evidence: No file to read.");
+    // only taste checks: the counts name them alone
+    rmSync(store().missionDir(m.id), { recursive: true, force: true });
+    const only = await salesMission((_m, notes) => {
+      notes.status = "done";
+      notes.acceptance = ["First.", "Second (the CEO decides)."];
+      notes.checked = checked([result(1, "pass", "a quote"), result(2, "cannot_judge", "A matter of taste.")], { round: 1 });
+    });
+    await mc(["plan", "show", only.id]);
+    expect(section()[2]).toBe("- “Description of each column”: a second AI checked it against your list (checked once). 1 passed, 0 failed, 1 left for you.");
+  });
+
+  it("does not say a taste check is left for you when the plan was queued without a stop for the owner's look", async () => {
+    const m = await salesMission((mm, notes) => {
+      mm.ownerStops = false;
+      notes.status = "done";
+      notes.acceptance = ["First.", "Second (the CEO decides)."];
+      notes.checked = checked([result(1, "pass", "a quote"), result(2, "cannot_judge", "A matter of taste.")], { round: 1 });
+    });
+    expect(await mc(["plan", "show", m.id])).toBe(0);
+    const lines = section();
+    expect(lines[2]).toBe("- “Description of each column”: a second AI checked it against your list (checked once). 1 passed, 0 failed, 1 could not be judged.");
+    expect(lines[4]).toBe("    2. not judged: Second (the CEO decides). Evidence: A matter of taste.");
   });
 
   it("says once when it was checked once, cuts a long check at 120 characters, and shows what the script found", async () => {

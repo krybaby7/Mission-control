@@ -48,17 +48,41 @@ function logHas(m: Pick<CheckedMission, "checkpointLog">, f: Pick<Feature, "id">
   return (Array.isArray(m.checkpointLog) ? m.checkpointLog : []).filter((r) => r?.scope === scope && r.decision === decision).length;
 }
 
+/**
+ * A taste check: a check that ends with “(the CEO decides)”, which `leader/CLAUDE.md` tells the leader to write for a taste question in an
+ * "owner" feature ("it reads as friendly"). Nobody but the owner can answer it, so the second AI always says it cannot judge it. The
+ * words call such a check “left for you”, not “not judged”. The dashboard keeps its own copy of this rule (src/dashboard/modes.ts).
+ */
+const TASTE_CHECK = /\(\s*the\s+CEO\s+decides\s*\)\s*[.!]?\s*$/iu;
+
+export function isTasteCheck(check: unknown): boolean {
+  return typeof check === "string" && TASTE_CHECK.test(check);
+}
+
+/**
+ * The numbers (from 1) of the taste checks of `f` that the second AI did not judge (no result, or `cannot_judge`), in order. Empty for a
+ * feature whose second AI check did not finish: nothing was asked then, and the words say that instead.
+ */
+export function leftForYouChecks(f: Pick<Feature, "acceptance" | "checked">): number[] {
+  const checked = f.checked;
+  if (checked === undefined || checked.unfinished === true) return [];
+  const results = Array.isArray(checked.results) ? checked.results : [];
+  const judged = new Set(results.filter((r) => r?.result === "pass" || r?.result === "fail").map((r) => r.n));
+  return (Array.isArray(f.acceptance) ? f.acceptance : []).flatMap((check, i) => (isTasteCheck(check) && !judged.has(i + 1) ? [i + 1] : []));
+}
+
 /** How the second AI's answer came out, counted from the stored results. Nothing is trusted that is not there: a check with no result is a check nobody judged. */
-function resultCounts(f: Feature): { total: number; passed: number; failed: number; unjudged: number; unfinished: boolean; noPicture: boolean } {
+function resultCounts(f: Feature): { total: number; passed: number; failed: number; unjudged: number; left: number; unfinished: boolean; noPicture: boolean } {
   const total = Array.isArray(f.acceptance) ? f.acceptance.length : 0;
   const checked = f.checked;
-  if (checked === undefined || checked.unfinished === true) return { total, passed: 0, failed: 0, unjudged: total, unfinished: true, noPicture: false };
+  if (checked === undefined || checked.unfinished === true) return { total, passed: 0, failed: 0, unjudged: total, left: 0, unfinished: true, noPicture: false };
   const results = Array.isArray(checked.results) ? checked.results : [];
   const passed = results.filter((r) => r?.result === "pass").length;
   const failed = results.filter((r) => r?.result === "fail").length;
+  const unjudged = Math.max(0, total - passed - failed);
   // `pictures.why` is stored only when a page was expected and the second AI was shown no picture of it (it could not be taken, or it could not be given).
   const noPicture = typeof checked.pictures?.why === "string";
-  return { total, passed, failed, unjudged: Math.max(0, total - passed - failed), unfinished: false, noPicture };
+  return { total, passed, failed, unjudged, left: Math.min(unjudged, leftForYouChecks(f).length), unfinished: false, noPicture };
 }
 
 function plural(n: number, one: string, many: string): string {
@@ -90,6 +114,11 @@ export interface HowChecked {
   failed: number;
   /** Checks nobody judged. */
   unjudged: number;
+  /**
+   * Of those, the taste checks (ending “(the CEO decides)”): only the owner can answer them. The words say "left for you" for them only when
+   * the owner was asked (see `unjudgedSplit`).
+   */
+  left: number;
   /** A mode feature with no `checked`, or with `checked.unfinished`: the second AI's check did not finish. */
   unfinished: boolean;
   /**
@@ -112,7 +141,7 @@ export function howChecked(m: CheckedMission, f: Feature): HowChecked {
   if (!isModeFeature(f)) {
     const noTests = !Array.isArray(f.frozenTests) || f.frozenTests.length === 0;
     const row: CheckedRow = noTests ? 2 : approved ? 1 : 3;
-    return { row, approved, sentBack, queuedWithoutLook: false, total: 0, passed: 0, failed: 0, unjudged: 0, unfinished: false, noPicture: false };
+    return { row, approved, sentBack, queuedWithoutLook: false, total: 0, passed: 0, failed: 0, unjudged: 0, left: 0, unfinished: false, noPicture: false };
   }
   const c = resultCounts(f);
   const row: CheckedRow = c.unfinished ? 4 : c.failed > 0 ? 5 : c.unjudged > 0 ? 6 : 7;
@@ -129,9 +158,54 @@ function queuedText(h: HowChecked): string {
 }
 
 /**
+ * The checks nobody judged, split in two: the taste checks that are left for the owner (`left`), and the others, which the second AI
+ * could not judge (`other`). A feature that was queued without a stop for the owner's look has no check left for the owner: nobody will
+ * answer it, so all of them are `other`. `left + other` is `h.unjudged`.
+ */
+export function unjudgedSplit(h: Pick<HowChecked, "unjudged" | "left" | "queuedWithoutLook">): { left: number; other: number } {
+  const left = h.queuedWithoutLook ? 0 : Math.min(h.left, h.unjudged);
+  return { left, other: h.unjudged - left };
+}
+
+/**
+ * How the second AI's answers came out, in one sentence: `4 passed, 0 failed, 1 left for you.`; when some checks could not be judged for
+ * another reason, they come first: `3 passed, 0 failed, 2 could not be judged, 1 left for you.`; with no taste check it is
+ * `3 passed, 0 failed, 1 could not be judged.`, as it always was. `left` counts inside `unjudged`.
+ */
+export function answerCounts(passed: number, failed: number, unjudged: number, left: number): string {
+  const kept = Math.min(Math.max(left, 0), unjudged);
+  const rest = [...(unjudged - kept > 0 || kept === 0 ? [`${unjudged - kept} could not be judged`] : []), ...(kept > 0 ? [`${kept} left for you`] : [])];
+  return `${passed} passed, ${failed} failed, ${rest.join(", ")}.`;
+}
+
+/**
+ * `text` cut to at most `max` characters at a word boundary, with a closing `…` when something was left off (the look puts the evidence of
+ * the second AI after the check it is about, and a reason that stops in the middle of a word is no reason; real run R2). White space is
+ * one plain space. A text with no space in its first half is cut where it is. A character made of two code units is kept whole.
+ */
+export function cutAtWord(text: string, max: number): string {
+  const flat = text.replace(/\s+/gu, " ").trim();
+  if (flat.length <= max) return flat;
+  let head = flat.slice(0, Math.max(0, max - 1));
+  const last = head.charCodeAt(head.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1);
+  // The cut falls inside a word unless the next character is a space: then the last word is whole and stays.
+  const space = head.lastIndexOf(" ");
+  if (flat.charAt(head.length) !== " " && space >= head.length / 2) head = head.slice(0, space);
+  return `${head.replace(/[\s,;:(\-\u2013\u2014]+$/u, "")}\u2026`;
+}
+
+/** The clause that ends the words of row 6 (checks not judged): the owner's approval, or the sentence that nobody was asked. */
+function sixthEnding(h: HowChecked): string[] {
+  return h.approved ? ["approved by you"] : h.queuedWithoutLook ? [queuedText(h)] : [];
+}
+
+/**
  * The words the `Checked:` line uses for one feature (spec 10.1, middle column, with the endings), always starting with
  * "by": for example `by tests`, `by a second AI against your list and approved by you`,
  * `by a second AI against your list (2 checks not met)`, `by a second AI against your list (it was queued without a stop for your look)`.
+ * Row 6 has one clause for each thing that is true, joined by semicolons, so no clause reads as part of another:
+ * `by a second AI against your list; 1 check left for you; approved by you`.
  */
 export function checkedWords(h: HowChecked): string {
   const ending = h.approved ? " and approved by you" : h.queuedWithoutLook ? ` (${queuedText(h)})` : "";
@@ -146,8 +220,15 @@ export function checkedWords(h: HowChecked): string {
       return `by Mission Control's own checks only (the second AI's check did not finish)${ending}`;
     case 5:
       return `by a second AI against your list (${plural(h.failed, "check", "checks")} not met)${ending}`;
-    case 6:
-      return `by a second AI against your list, except ${plural(h.unjudged, "check", "checks")} it could not judge${ending}`;
+    case 6: {
+      const { left, other } = unjudgedSplit(h);
+      return [
+        "by a second AI against your list",
+        ...(other > 0 ? [`${plural(other, "check", "checks")} could not be judged`] : []),
+        ...(left > 0 ? [`${plural(left, "check", "checks")} left for you`] : []),
+        ...sixthEnding(h),
+      ].join("; ");
+    }
     case 7:
       return `by a second AI against your list${ending}`;
   }
@@ -169,11 +250,23 @@ export function tableWords(h: HowChecked): string {
     case 4:
       return `Built; the second AI's check did not finish, so only Mission Control's own checks ran${ending}`;
     case 5: {
-      const left = h.unjudged > 0 ? `, and ${h.unjudged} ${h.unjudged === 1 ? "was" : "were"} not judged by anyone` : "";
-      return `Built, but ${h.failed} of ${h.total} ${h.total === 1 ? "check" : "checks"} ${h.failed === 1 ? "was" : "were"} not met (see the review notes)${left}${ending}`;
+      const { left, other } = unjudgedSplit(h);
+      const unjudged = [
+        ...(other > 0 ? [`${other} ${other === 1 ? "was" : "were"} not judged by anyone`] : []),
+        ...(left > 0 ? [`${plural(left, "check is", "checks are")} left for you`] : []),
+      ];
+      const rest = unjudged.length === 0 ? "" : unjudged.length === 1 ? `, and ${unjudged[0]}` : `, ${unjudged[0]}, and ${unjudged[1]}`;
+      return `Built, but ${h.failed} of ${h.total} ${h.total === 1 ? "check" : "checks"} ${h.failed === 1 ? "was" : "were"} not met (see the review notes)${rest}${ending}`;
     }
-    case 6:
-      return `Built; ${plural(h.unjudged, "check was", "checks were")} not judged by anyone${ending}`;
+    case 6: {
+      const { left, other } = unjudgedSplit(h);
+      const clauses = [
+        ...(other > 0 ? [`${plural(other, "check was", "checks were")} not judged by anyone`] : []),
+        ...(left > 0 ? [`${plural(left, "check", "checks")} left for you`] : []),
+        ...sixthEnding(h),
+      ];
+      return `Built; ${clauses.join("; ")}`;
+    }
     case 7:
       return `Built; a second AI checked it against your list (${h.passed} of ${h.total} passed)${ending}`;
   }

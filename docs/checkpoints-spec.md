@@ -212,6 +212,7 @@ Success text:
 | `approve`, no run active | `Recorded: you approved the plan for “Shout”.` / `It continues on the next run, for example: mc run --mission <id>` |
 | `approve`, run active | `Recorded: you approved the plan for “Shout”.` / `The run that is going picks it up within a few seconds. If it has just ended, continue it with: mc run --mission <id>` |
 | `send-back`, round 1 or 2 | `Recorded: you sent the plan for “Shout” back.` / `The planner revises it with your note and asks you again (change <n> of 2).` (feature: `The engineer changes it ... and the reviewer looks again`; final: `The team adds your change as a new feature, checks it, and asks you again`) |
+| `approve` or `send-back` of a feature | `Recorded: you approved “Add shout” for “Shout”.` / `Recorded: you sent “Add shout” for “Shout” back.` When the feature has the mission's own title (one feature, named like the mission), it is named once: `Recorded: you approved “Usage guide”.` (real run R2). |
 | `send-back` that hits the cap | `Recorded. You have sent this back twice before, so the work stops here: <end state sentence>. The report says what to do next.` |
 
 Errors (stderr, exit 1):

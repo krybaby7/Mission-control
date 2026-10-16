@@ -8,7 +8,7 @@ A real run drives the real Claude Code CLI through the engine on a tiny throwawa
 2. `scripts/dev/real-run-setup.sh` makes `~/.mission-control` (Claude-only profile, 20-minute agent timeout, 40 agent runs) and `~/mc-apps/word-tools` (a tiny app on branch `main` with tests). It deletes both folders first.
 3. Every engine command goes through the scrub wrapper, which removes this session's identity and cloud credentials from the environment, because the engine's agents run with broad permissions:
    `MC_IN_CONTAINER=1 scripts/dev/scrub.sh node dist/cli.js <command>`
-4. Queue a job, for example a plan from a file: `... plan queue - < plan.txt` (see `leader/CLAUDE.md` and `docs/plans-spec.md` for the plan format), or `... feature ~/mc-apps/word-tools "Add a shout(text) function ..." --name Shout --profile claude --checkpoint plan`.
+4. Queue a job, for example a plan sent in on standard input: `... plan queue - < plan.txt` (see `leader/CLAUDE.md` and `docs/plans-spec.md` for the plan format), or `... feature ~/mc-apps/word-tools "Add a shout(text) function ..." --name Shout --profile claude --checkpoint plan`. `plan queue` and `plan preview` have no `--profile` option: a plan takes its profile from `defaultProfile` in the config, which the setup script sets to `claude`. `--profile` belongs to `mc new`, `mc feature` and `mc run`.
 5. `... run` runs until the queue is empty or a check waits for you. A stop for your check ends the run with exit code 0. Look with `... status`, `... report`, `... plan show <id>`. Answer with `... approve <id>` or `... send-back <id> --note "..."`, then `... run --mission <id>`.
 6. Look at the result in the app folder: `git -C ~/mc-apps/word-tools branch -a`, then `git checkout --detach mc/<id>`, run its tests, and `git checkout main`. The engine never moves `main` for a change to an existing app.
 7. Read `~/.mission-control/quota.json` (the weekly and 5-hour readings the engine took) and `usage.jsonl` (one row per AI call) for the cost.
@@ -17,7 +17,7 @@ A real run drives the real Claude Code CLI through the engine on a tiny throwawa
 ## Facts learned the hard way
 
 * The engine downgrades Claude's permission mode to `auto` when it runs as root. That works.
-* Codex is not available in the container. Use `--profile claude`.
+* Codex is not available in the container. The setup script writes `defaultProfile: claude` into the config, so every mission queued there, a plan included, uses Claude only. Do not add `--profile claude` to `plan queue`: it fails with `unknown option '--profile'`.
 * A plan file given to `mc plan preview/queue` must be inside `~/mc-apps`; send it on standard input (`-`) instead.
 * The dashboard can be served on the real home: `MC_IN_CONTAINER=1 scripts/dev/scrub.sh node dist/cli.js dashboard --port 8787 --host 127.0.0.1` (start it in the background; stop it by process id, see below).
 * `pkill -f <text>` kills your own shell when the text appears in your own command line (exit code 144). Use `pgrep -f`, read the pid, and `kill <pid>`.

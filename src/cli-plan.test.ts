@@ -101,7 +101,7 @@ What happens next:
 - The team's planner is skipped. This plan is used as written.
 - A second AI reads the plan first and may ask for changes.
 - ${stop}
-- For each feature the checks are written first, the work is done until they pass, and a different AI reviews it.
+- For each feature the checks are written first, the work is done until they pass, and a second AI reviews it.
 
 To queue it, run the same command with "plan queue" instead of "plan preview".
 `;

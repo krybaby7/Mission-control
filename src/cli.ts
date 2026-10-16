@@ -8,7 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError } from "commander";
 import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
-import { hasModeFeature, howChecked, imagesShownWords, isModeFeature, ownerSentences, pictureReason } from "./checked-by.js";
+import { answerCounts, hasModeFeature, howChecked, imagesShownWords, isModeFeature, leftForYouChecks, ownerSentences, pictureReason, unjudgedSplit } from "./checked-by.js";
 import { type AnswerInput, type AnswerProblem, answerNotice, answerProblem, applyAnswer, CHECKPOINT_KINDS, cleanNote, didWhat, endState, isCheckpointShape, isWaitingForCheck, localClock, lookCommand, MAX_NOTE_CHARS, MAX_SEND_BACKS, sendBacks, shown, waitingWhat } from "./checkpoint.js";
 import { parsePort, runDashboard } from "./dashboard/command.js";
 import { DEFAULT_PORT } from "./dashboard/constants.js";
@@ -799,8 +799,29 @@ function titleList(titles: string[]): string {
   return `${quoted.slice(0, 3).join(", ")} and ${quoted.length - 3} more`;
 }
 
+// "a second AI", not "a different AI": in the Claude-only or Codex-only profile the reviewer is another session of the same company's AI
+// (real run R1). This is the one sentence of a plan with no mode feature that changed on purpose (real-run defect R1-2).
 const CHECKED_BY_TESTS =
-  "the checks are written first, the work is done until they pass, and a different AI reviews it.";
+  "the checks are written first, the work is done until they pass, and a second AI reviews it.";
+
+/** What a feature checked by reading goes through, in the words every one of its preview lines starts with. */
+const READING_STEPS = "the work is done, Mission Control checks it with scripts, and a second AI judges each check as passed or not, with a reason.";
+
+/**
+ * Whether the text of a feature that is checked by reading talks about a web page (the word page, a file ending in .html or .htm, a style
+ * sheet, a web site, a browser). Only then does the preview say anything about pictures. The engine decides for real when the work is done,
+ * from the files that changed; a plan has none yet, so this is a guess from its words, and it errs on the side of saying the line.
+ */
+const PAGE_WORDS = /\.html?\b|\.css\b|\b(?:pages?|html|css|stylesheets?|web ?sites?|sites?|browsers?)\b/iu;
+
+function planTalksOfAPage(features: readonly SpecFeature[]): boolean {
+  return features.some((f) => {
+    if (f.mode === undefined) return false;
+    const expect = f.expect;
+    const texts = [f.title, f.story, ...f.acceptance, ...(expect?.headings ?? []), ...(expect?.mentions ?? [])];
+    return texts.some((t) => PAGE_WORDS.test(t));
+  });
+}
 
 /**
  * What the preview says about how each feature is checked. A plan with no "review" or "owner" feature gets the one old line;
@@ -813,19 +834,17 @@ function checkingLines(features: readonly SpecFeature[], noOwnerLook: boolean): 
   if (review + owner === 0) return [`For each feature ${CHECKED_BY_TESTS}`];
   return [
     ...(tests > 0 ? [`Checked by tests (${tests}): ${CHECKED_BY_TESTS}`] : []),
-    ...(review > 0
-      ? [
-          `Checked by a second AI (${review}): the work is done, Mission Control checks it with scripts, and a second AI judges each check as passed or not, with a reason. No tests are written.`,
-        ]
-      : []),
+    ...(review > 0 ? [`Checked by a second AI (${review}): ${READING_STEPS} No tests are written.`] : []),
     ...(owner > 0
       ? [
           noOwnerLook
-            ? `Checked by a second AI and then by you (${owner}): the same, but it will be queued without a stop for your look.`
-            : `Checked by a second AI and then by you (${owner}): the same, and then the team stops for your look before the feature is added.`,
+            ? `Checked by a second AI and then by you (${owner}): ${READING_STEPS} It will be queued without a stop for your look. No tests are written.`
+            : `Checked by a second AI and then by you (${owner}): ${READING_STEPS} Then the team stops for your look before the feature is added. No tests are written.`,
         ]
       : []),
-    "For web pages Mission Control tries to take pictures at phone width and desktop width, and the second AI is asked to look at them. If it cannot, it says so.",
+    ...(planTalksOfAPage(features)
+      ? ["For web pages Mission Control tries to take pictures at phone width and desktop width, and the second AI is asked to look at them. If it cannot, it says so."]
+      : []),
   ];
 }
 
@@ -997,11 +1016,14 @@ function featureCheckLines(m: Mission, f: Feature, events: MissionEvent[]): stri
   }
   const round = Number.isInteger(c.round) && c.round > 1 ? c.round : 1;
   const times = round === 1 ? "once" : `${round} times`;
-  const lines = [`- ${title}: a second AI checked it against your list (checked ${times}). ${h.passed} passed, ${h.failed} failed, ${h.unjudged} could not be judged.`];
+  // A taste check (it ends “(the CEO decides)”) is left for the owner, not "not judged"; unless the feature was queued without a stop for the owner's look.
+  const split = unjudgedSplit(h);
+  const leftForYou = new Set(split.left > 0 ? leftForYouChecks(f) : []);
+  const lines = [`- ${title}: a second AI checked it against your list (checked ${times}). ${answerCounts(h.passed, h.failed, h.unjudged, split.left)}`];
   const results = Array.isArray(c.results) ? c.results : [];
   (Array.isArray(f.acceptance) ? f.acceptance : []).forEach((check, i) => {
     const r = results.find((x) => x?.n === i + 1);
-    const word = r?.result === "pass" ? "passed" : r?.result === "fail" ? "failed" : "not judged";
+    const word = r?.result === "pass" ? "passed" : r?.result === "fail" ? "failed" : leftForYou.has(i + 1) ? "left for you" : "not judged";
     const evidence = typeof r?.evidence === "string" && r.evidence.trim() !== "" ? `Evidence: ${cleanAiText(r.evidence, SHOW_EVIDENCE_CHARS)}` : "";
     lines.push(`    ${i + 1}. ${[`${word}:`, shown(typeof check === "string" ? check : "", SHOW_CHECK_CHARS), evidence].filter((part) => part !== "").join(" ")}`);
   });

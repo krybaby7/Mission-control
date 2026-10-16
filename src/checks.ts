@@ -2185,6 +2185,22 @@ function normalizeForSearch(text: string): string {
     .replace(/[“”]/gu, '"');
 }
 
+/**
+ * The text a quote is looked for in, and the quote itself, made alike but not read as a page: white space collapsed, NFC, one kind of
+ * quote mark, and nothing else changed. Tags, attribute values, markdown marks and link addresses stay, so a quote of markup can be
+ * found where it stands in the file (`<a class="button" href="../README.md">`), which the visible text cannot show.
+ */
+function normalizeRaw(text: string): string {
+  return collapse(nfc(text))
+    .replace(/[‘’]/gu, "'")
+    .replace(/[“”]/gu, '"');
+}
+
+/** True for a quote of markup that holds an attribute (`<div class=`, `<a href="x">`): only the file itself can show it, not the visible text. */
+function hasTagAttribute(raw: string): boolean {
+  return /<[A-Za-z][^<>]*\s[\w:-]+\s*=/u.test(raw);
+}
+
 /** Removes `<...>` tags (not their text) in one pass. */
 function stripTags(s: string): string {
   if (!s.includes("<")) return s;
@@ -2212,36 +2228,90 @@ function stripTags(s: string): string {
   return parts.join("");
 }
 
-/** The pieces of a text that sit between double quotation marks (straight or curly), each cut at `...` and `…`. */
-function quotedPieces(evidence: string): string[] {
-  const pieces: string[] = [];
+/** A double quotation mark of the evidence: where it stands (a backslash before it counts), and which kind it is. */
+interface QuoteMark {
+  start: number;
+  end: number;
+  kind: "straight" | "open" | "close";
+}
+
+/**
+ * The double quotation marks of an evidence text, straight or curly. A straight mark after a backslash (`\"`) belongs to the quoted
+ * words, as it does when an answer is written like JSON, unless the whole text is written that way: then those are its marks.
+ */
+function quoteMarks(evidence: string): QuoteMark[] {
+  const plain: QuoteMark[] = [];
+  const escaped: QuoteMark[] = [];
+  for (let k = 0; k < evidence.length; k++) {
+    const c = evidence.charAt(k);
+    if (c === '"') {
+      if (k > 0 && evidence.charAt(k - 1) === "\\") escaped.push({ start: k - 1, end: k + 1, kind: "straight" });
+      else plain.push({ start: k, end: k + 1, kind: "straight" });
+    } else if (c === "“") plain.push({ start: k, end: k + 1, kind: "open" });
+    else if (c === "”") plain.push({ start: k, end: k + 1, kind: "close" });
+  }
+  return plain.length > 0 ? plain : escaped;
+}
+
+/** How many closing marks after an opening one are tried as the end of a quote that holds marks of its own (a tag with up to eight attributes). */
+const MAX_QUOTE_ENDS = 16;
+/** How many stretches of one evidence text are looked for in the files at most. An honest answer needs a few dozen; text built to be slow gets "not found". */
+const MAX_QUOTE_SPANS = 1500;
+
+/**
+ * Whether every quote of the evidence is real, as `verdict` judges each piece of one (a quote is cut at `...` and `…`, and each piece
+ * is looked for on its own).
+ *
+ * A quote that holds quotation marks of its own is one quote. The marks of an attribute (`class="button"`, a mark right after `=`) come
+ * in pairs inside the quote, so `"<a class="button" href="x">Go</a>"` runs from the first mark to the one that is left over, and all of
+ * its text must be real: a made-up value cannot hide between two pieces. Other quotes with marks inside them (`"font-family: "Segoe UI",
+ * serif"`) run to the closing mark that gives the longest text that is real. When no such text is real, the nearest closing mark ends
+ * the quote, as it always did, and its text is the one that is held to the files. A text with more stretches than MAX_QUOTE_SPANS is
+ * not real.
+ */
+function quotesAreReal(evidence: string, verdict: (piece: string) => "skip" | "found" | "missing"): boolean {
+  const marks = quoteMarks(evidence);
+  const textBetween = (open: QuoteMark, close: QuoteMark): string => evidence.slice(open.end, close.start).replaceAll('\\"', '"');
+  let spans = 0;
+  const real = (open: QuoteMark, close: QuoteMark): boolean => ++spans <= MAX_QUOTE_SPANS && textBetween(open, close).split(/\.\.\.|…/u).every((piece) => verdict(piece) !== "missing");
+  const startsValue = (mark: QuoteMark): boolean => mark.kind === "straight" && mark.start > 0 && evidence.charAt(mark.start - 1) === "=";
   let i = 0;
-  const n = evidence.length;
-  while (i < n) {
-    let open = -1;
-    let closer = '"';
-    for (let k = i; k < n; k++) {
-      const c = evidence.charAt(k);
-      if (c === '"') {
-        open = k;
-        closer = '"';
-        break;
+  while (i < marks.length) {
+    const open = marks[i]!;
+    if (open.kind === "straight") {
+      // The mark that is left over once every attribute value inside has been opened and closed ends the quote.
+      let depth = 0;
+      let outer = -1;
+      for (let j = i + 1; j < marks.length && outer < 0; j++) {
+        const mark = marks[j]!;
+        if (mark.kind !== "straight") continue;
+        if (startsValue(mark)) depth++;
+        else if (depth > 0) depth--;
+        else outer = j;
       }
-      if (c === "“") {
-        open = k;
-        closer = "”";
+      if (outer > i + 1) {
+        if (!real(open, marks[outer]!)) return false;
+        i = outer + 1;
+        continue;
+      }
+    }
+    // A curly opening mark is closed by a curly closing one, or by a straight one when there is none; a straight one by a straight one.
+    const ends: number[] = [];
+    for (let j = i + 1; j < marks.length; j++) if (open.kind === "open" ? marks[j]!.kind === "close" : marks[j]!.kind === "straight") ends.push(j);
+    if (ends.length === 0 && open.kind === "open") for (let j = i + 1; j < marks.length; j++) if (marks[j]!.kind === "straight") ends.push(j);
+    if (ends.length === 0) break;
+    const tried = ends.slice(0, MAX_QUOTE_ENDS);
+    let taken = -1;
+    for (let t = tried.length - 1; t >= 0; t--) {
+      if (real(open, marks[tried[t]!]!)) {
+        taken = tried[t]!;
         break;
       }
     }
-    if (open < 0) break;
-    let close = evidence.indexOf(closer, open + 1);
-    if (close < 0 && closer === "”") close = evidence.indexOf('"', open + 1);
-    if (close < 0) break;
-    const inside = evidence.slice(open + 1, close);
-    for (const part of inside.split(/\.\.\.|…/u)) pieces.push(part);
-    i = close + 1;
+    if (taken < 0) return false;
+    i = taken + 1;
   }
-  return pieces;
+  return true;
 }
 
 function stripWorktree(path: string, worktree: string): string {
@@ -2294,11 +2364,13 @@ export function judgeRubric(input: RubricInput): RubricJudgement {
       problem: `Your answer must name, in "seen", at least one of the changed files that you really opened: ${input.changedFiles.slice(0, 5).map((c) => plainName(c)).join(", ")}.`,
     };
   }
-  // The text a quote is looked for in: the changed files, the files `seen` names, and the drawn pages.
-  let searchText: string | undefined;
-  const search = (): string => {
-    if (searchText !== undefined) return searchText;
-    const chunks: string[] = [...input.changedText, ...input.pageText];
+  // The text a quote is looked for in: the changed files, the files `seen` names, and the drawn pages. It is made twice, and only when a
+  // quote needs it: the visible text (tags, markdown marks and link addresses taken out), and the raw text (nothing taken out), because
+  // an honest answer may quote what a reader sees, and also a rule of the style sheet or a tag as the file has it.
+  let chunks: string[] | undefined;
+  const searchChunks = (): string[] => {
+    if (chunks !== undefined) return chunks;
+    chunks = [...input.changedText, ...input.pageText];
     if (input.readSeen) {
       const done = new Set<string>();
       for (const name of seen) {
@@ -2309,10 +2381,30 @@ export function judgeRubric(input: RubricInput): RubricJudgement {
         if (text !== undefined) chunks.push(text);
       }
     }
-    searchText = normalizeForSearch(chunks.join("\n"));
-    return searchText;
+    return chunks;
   };
+  let searchText: string | undefined;
+  const search = (): string => (searchText ??= normalizeForSearch(searchChunks().join("\n")));
+  let searchRawText: string | undefined;
+  const searchRaw = (): string => (searchRawText ??= normalizeRaw(searchChunks().join("\n")));
   const knownNames = [...input.changedFiles, ...seen].map((s) => normalizeForSearch(s));
+  /** One piece of a quote: too short to hold to the files ("skip"), in them ("found"), or not ("missing"). Said once for each piece. */
+  const verdicts = new Map<string, "skip" | "found" | "missing">();
+  const quoteVerdict = (piece: string): "skip" | "found" | "missing" => {
+    const known = verdicts.get(piece);
+    if (known !== undefined) return known;
+    const quote = normalizeForSearch(piece);
+    const raw = normalizeRaw(piece);
+    // A quote of markup with an attribute is held to the file as it stands: the visible text of a page has no attribute in it.
+    const markup = raw.length >= MIN_QUOTE && hasTagAttribute(raw);
+    let verdict: "skip" | "found" | "missing";
+    if (quote.length < MIN_QUOTE && !markup) verdict = "skip";
+    else if (quote.length >= MIN_QUOTE && knownNames.some((k) => k !== "" && (k === quote || k.endsWith("/" + quote) || quote.endsWith("/" + k)))) verdict = "found";
+    else if (markup) verdict = searchRaw().includes(raw) ? "found" : "missing";
+    else verdict = (quote.length >= MIN_QUOTE && search().includes(quote)) || (raw.length >= MIN_QUOTE && searchRaw().includes(raw)) ? "found" : "missing";
+    verdicts.set(piece, verdict);
+    return verdict;
+  };
   const pictureNames = input.pictures.map((p) => stripWorktree(p, input.worktree));
   const openedPictures = (input.opened ?? []).map((o) => stripWorktree(o, input.worktree));
   const pictureWasOpened = input.family === "claude" && input.opened !== undefined && pictureNames.some((p) => openedPictures.some((o) => samePath(p, o)));
@@ -2342,17 +2434,7 @@ export function judgeRubric(input: RubricInput): RubricJudgement {
         }
       } else {
         // 4. Quotes are real.
-        let lost = false;
-        for (const piece of quotedPieces(r.evidence)) {
-          const quote = normalizeForSearch(piece);
-          if (quote.length < MIN_QUOTE) continue;
-          if (knownNames.some((k) => k !== "" && (k === quote || k.endsWith("/" + quote) || quote.endsWith("/" + k)))) continue;
-          if (!search().includes(quote)) {
-            lost = true;
-            break;
-          }
-        }
-        if (lost) {
+        if (!quotesAreReal(r.evidence, quoteVerdict)) {
           result = "cannot_judge";
           evidence = cut(`The quote was not found in the files. ${evidence}`, EVIDENCE_MAX);
           downgraded++;

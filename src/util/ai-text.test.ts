@@ -1,5 +1,6 @@
 // What a second AI writes about files it read is made plain before anyone sees it (V2-10): nothing hidden, no picture or link, no web address,
 // no raw HTML tag, no e-mail address and no script address (W2e-R3), and ordinary text that only looks like an address is left alone (W2e-R10).
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { HIDDEN as PLAN_HIDDEN } from "../plan.js";
 import { cleanAiText, hasWords, isHiddenChar, WEB_ADDRESS_REMOVED, writtenLength } from "./ai-text.js";
@@ -83,7 +84,7 @@ describe("cleanAiText: web addresses", () => {
     ["(//evil.example)", `(${GONE})`],
     ["see www.evil.example/a/b now", `see ${GONE} now`],
     ["WWW.EVIL.EXAMPLE", GONE],
-    ["a<img src=\"https://evil.example/x.png\">b", "a b"],
+    ["a<img src=\"https://evil.example/x.png\">b", "a img tag b"],
     ["<https://evil.example/x>", `<${GONE}>`],
   ])("%s", (text, expected) => {
     expect(cleanAiText(text)).toBe(expected);
@@ -149,15 +150,15 @@ describe("cleanAiText: raw HTML (W2e-R3)", () => {
   });
 
   it.each([
-    ["<img src=x onerror=alert(1)>", ""],
-    ['<a href="javascript:alert(1)">go</a>', "go"],
-    ["<script>alert(1)</script>", "alert(1)"],
-    ["Before <b>bold</b> after.", "Before bold after."],
-    ["a<br>b", "a b"],
-    ["<<b>script>x", "< script>x"],
+    ["<img src=x onerror=alert(1)>", "an img tag"],
+    ['<a href="javascript:alert(1)">go</a>', "an a tag go closing a tag"],
+    ["<script>alert(1)</script>", "a script tag alert(1) closing script tag"],
+    ["Before <b>bold</b> after.", "Before b tag bold closing b tag after."],
+    ["a<br>b", "a br tag b"],
+    ["<<b>script>x", "< b tag script>x"],
     ["<img src=x onerror=alert(1)", "< img src=x onerror=alert(1)"],
-    ["<!-- hidden --> text", "text"],
-    ["List<string> and Map<K, V> are types.", "List and Map are types."],
+    ["<!-- hidden --> text", "a comment text"],
+    ["List<string> and Map<K, V> are types.", "List string tag and Map k tag are types."],
   ])("%s", (text, expected) => {
     expect(cleanAiText(text)).toBe(expected);
   });
@@ -175,6 +176,107 @@ describe("cleanAiText: raw HTML (W2e-R3)", () => {
   });
 });
 
+describe("cleanAiText: a tag becomes its name in words (R3-5 of the real runs)", () => {
+  it("reads well for the sentences the second AI really wrote about a page", () => {
+    // From the evidence of the real run R3 (a page with pictures): before, these read `inside " " there are three " " elements` and `has no , , or @import`.
+    expect(cleanAiText('site/index.html: inside "<div class="benefits" data-testid="benefits">" there are three "<section class="benefit" data-testid="benefit">" elements.')).toBe(
+      'site/index.html: inside "a div tag" there are three "a section tag" elements.',
+    );
+    expect(cleanAiText("site/index.html has no <script>, <link>, <img> or @import. The only href is the relative \"../README.md\".")).toBe(
+      'site/index.html has no script tag, link tag, img tag or @import. The only href is the relative "../README.md".',
+    );
+    expect(cleanAiText("It has one <h1>, and the <title> is word-tools.")).toBe("It has one h1 tag, and the title tag is word-tools.");
+    expect(cleanAiText('all of its CSS sits in one "<style>" block (lines 8-25)')).toBe('all of its CSS sits in one "a style tag" block (lines 8-25)');
+    expect(cleanAiText('line 7: "<title>word-tools</title>".')).toBe('line 7: "a title tag word-tools closing title tag".');
+  });
+
+  it("puts a word in front of a tag that stands alone, and leaves the writer's own words in front of any other", () => {
+    expect(cleanAiText('<div class="x">')).toBe("a div tag");
+    expect(cleanAiText('"<div class=\'x\'>" and (<td>) and <b>bold</b>')).toBe('"a div tag" and (a td tag) and b tag bold closing b tag');
+    expect(cleanAiText("</div>")).toBe("a closing div tag");
+    expect(cleanAiText("then </div> follows")).toBe("then closing div tag follows");
+    expect(cleanAiText("<!-- note -->")).toBe("a comment");
+    expect(cleanAiText("see <!-- note --> here")).toBe("see comment here");
+  });
+
+  it("says `a` or `an` as a reader would say the name", () => {
+    const alone = (name: string): string => cleanAiText(`<${name}>`);
+    for (const [name, words] of [
+      ["div", "a div tag"],
+      ["section", "a section tag"],
+      ["img", "an img tag"],
+      ["input", "an input tag"],
+      ["a", "an a tag"],
+      ["em", "an em tag"],
+      ["ol", "an ol tag"],
+      ["ul", "a ul tag"],
+      ["u", "a u tag"],
+      ["h1", "an h1 tag"],
+      ["hr", "an hr tag"],
+      ["html", "an html tag"],
+      ["svg", "an svg tag"],
+      ["td", "a td tag"],
+      ["tr", "a tr tag"],
+      ["header", "a header tag"],
+      ["IMG", "an img tag"],
+    ] as const) {
+      expect(alone(name), name).toBe(words);
+    }
+  });
+
+  it("keeps nothing from inside a tag: no attribute, handler, address or script, and a name that is odd or long is just `tag`", () => {
+    const out = cleanAiText('<img src="https://evil.example/x.png" onerror="alert(1)" alt="secret words">');
+    expect(out).toBe("an img tag");
+    expect(cleanAiText("<img/src=x onerror=alert(1)>")).toBe("an img tag");
+    expect(cleanAiText(`<${"a".repeat(21)} onclick=alert(1)>`)).toBe("a tag");
+    expect(cleanAiText("<a-b-c onclick=alert(1)>")).toBe("an a-b-c tag");
+    expect(cleanAiText("<!DOCTYPE html> <?php echo 1; ?>")).toBe("a doctype tag php tag");
+    // An address in an attribute is taken out first, as it always was; the tag then goes the same way as any other.
+    expect(cleanAiText('<a href="mailto:a@b.example">mail</a>')).not.toMatch(/mailto|example/u);
+  });
+
+  it("cleaning twice changes nothing more, and the words do not make a tag, a link or an address", () => {
+    for (const text of ["<div class=\"x\">hello</div>", "<<b>script>x", "<scr<script>ipt>alert(1)</scr</script>ipt>", "ht<b></b>tp://evil.example/x", "[<b>](javascript:alert(1))", "![<i>](x)"]) {
+      const out = cleanAiText(text);
+      expect(cleanAiText(out), text).toBe(out);
+      expect(out, text).not.toMatch(/<[A-Za-z/!?]/u);
+      expect(out, text).not.toMatch(/!\[|\]\(|evil|javascript:/u);
+    }
+  });
+
+  it("does not count as writing: evidence that is nothing but tags still says nothing", () => {
+    expect(cleanAiText("<b></b> <i></i>")).toBe("a b tag closing b tag i tag closing i tag");
+    expect(hasWords("<b></b> <i></i>")).toBe(false);
+    expect(hasWords('<img src=x onerror=alert(1)> <div class="x">')).toBe(false);
+    expect(writtenLength("<b></b>")).toBe(7);
+  });
+
+  // Rendered as GitHub-flavoured markdown by pandoc, when this computer has it: no element that draws or runs anything comes out.
+  const pandoc = spawnSync("pandoc", ["--version"], { encoding: "utf8" });
+  const battery = [
+    "<img src=x onerror=alert(1)>",
+    '<a href="javascript:alert(1)">go</a>',
+    "<svg onload=alert(1)>",
+    "<script>alert(1)</script>",
+    "<style>body{display:none}</style>",
+    '<img src="data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=">',
+    "<iframe src=//evil.example/x></iframe>",
+    "<!-- hidden --> text <![CDATA[ x ]]> <!DOCTYPE html> <?php echo 1; ?>",
+    "<<<img src=x onerror=alert(1)>>>",
+    "<scr<script>ipt>alert(1)</scr</script>ipt>",
+    "<IMG SRC=x ONERROR=alert(1)>",
+    '"<div class="benefits" data-testid="benefits">" and "<a class="button" href="https://evil.example/x">Go</a>"',
+    "![x](https://evil.example/x.png) [y](http://evil.example) <https://evil.example/z> <b>[z](javascript:alert(1))</b>",
+  ];
+  it.skipIf(pandoc.status !== 0)("pandoc draws no tag, link or picture from the cleaned text", () => {
+    for (const text of battery) {
+      const html = spawnSync("pandoc", ["-f", "gfm", "-t", "html"], { input: cleanAiText(text, 2000), encoding: "utf8" }).stdout;
+      expect(html, text).not.toMatch(/<(?!\/?(?:p|code|em|strong|del)\b)[A-Za-z]/u);
+      expect(html, text).not.toMatch(/\b(?:href|src|onerror|onload)\s*=/iu);
+    }
+  });
+});
+
 describe("cleanAiText: script, data and mail addresses (W2e-R3)", () => {
   it.each([
     ["[x](javascript:alert(1))", `x ${GONE})`],
@@ -187,7 +289,7 @@ describe("cleanAiText: script, data and mail addresses (W2e-R3)", () => {
     ["see javascript:alert(1) now", `see ${GONE} now`],
     ["see VBScript:msgbox(1) now", `see ${GONE} now`],
     ["see mailto:a@b.example, or data:text/html,hi.", `see ${GONE}, or ${GONE}.`],
-    ["<a href=\"mailto:a@b.example\">mail</a>", "mail"],
+    ["<a href=\"mailto:a@b.example\">mail</a>", "an a tag mail closing a tag"],
     [`java${u(0x200b)}script:alert(1)`, GONE],
     ["write to a@b.example.", `write to ${GONE}.`],
     ["write to first.last+tag@mail.example.co.uk, then stop", `write to ${GONE}, then stop`],

@@ -108,6 +108,17 @@ describe("T-MODES-SNAP-1: what read.ts keeps of a feature checked by a second AI
     expect(unfinished).toMatchObject({ unfinished: true, unjudged: 0, results: [] });
   });
 
+  it("keeps no text of a check, except a fixed mark for a taste check, which the words call left for you (R2-5)", () => {
+    const f = reading("a", "done", ["pass", "pass", "cannot_judge"], { mode: "owner", acceptance: ["SECRET-ONE", "SECRET-TWO (the CEO decides) and more", "A matter of taste (The CEO decides)."] });
+    const kept = read([{ mission: missionAt(MID, ID, { features: [f], checkpointLog: [answered("a", "approve")] }) }])?.mission?.features[0];
+    expect(kept?.acceptance).toEqual(["", "", "(the CEO decides)"]);
+    expect(JSON.stringify(kept)).not.toMatch(/SECRET|matter of taste/);
+    // the same, end to end: the line under the finished feature on the Results page
+    const s = snapOf([{ mission: missionAt(MID, ID, { status: "done", stage: "complete", features: [f], checkpointLog: [answered("a", "approve")] }) }]);
+    const got = s.debrief?.missions[0]?.got.map((g) => g.checkedBy);
+    expect(got).toEqual(["Checked by a second AI against your list; 1 check left for you; approved by you"]);
+  });
+
   it("a mission with no mode, no effort, no checked and no ownerStops has none of the keys", () => {
     const entry = read([{ mission: missionAt(MID, ID, { features: [featureWith("a", "done")] }) }])?.mission;
     expect("ownerStops" in (entry ?? {})).toBe(false);

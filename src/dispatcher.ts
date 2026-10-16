@@ -4,7 +4,20 @@
 // passing verify tail, unit installs, init attempts, the final verify result) live next to it in <missionDir>/dispatch.json.
 import { type Dirent, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { approvedWork, askedBecause, asksForLook, changedApprovedWork, hasModeFeature, imagesShownWords, isModeFeature, lookReason, pictureReason } from "./checked-by.js";
+import {
+  answerCounts,
+  approvedWork,
+  askedBecause,
+  asksForLook,
+  changedApprovedWork,
+  cutAtWord,
+  hasModeFeature,
+  imagesShownWords,
+  isModeFeature,
+  leftForYouChecks,
+  lookReason,
+  pictureReason,
+} from "./checked-by.js";
 import {
   type Deliverables,
   type DeliverableSource,
@@ -63,7 +76,7 @@ import {
 import type { QuotaGovernor } from "./quota.js";
 import { imageName, pictureName, playwrightRenderer, type RenderedPage, type Renderer, type RenderResult } from "./render.js";
 import { buildReportFacts, collectScreenshots, renderReport } from "./report.js";
-import { normalizeVerifyConfig, SCHEMAS } from "./schemas.js";
+import { normalizeSpecText, normalizeVerifyConfig, SCHEMAS } from "./schemas.js";
 import { type MissionStore, planOf, slugify } from "./state.js";
 import type {
   Access,
@@ -1309,7 +1322,7 @@ class MissionRun {
   /** Asks the architect for a spec until one passes validation; problems are sent back on a retry. */
   private async writeSpec(
     attempts: number,
-    revise?: { previous: SpecOutput; issues: string[] },
+    revise?: { previous: SpecOutput; issues: string[]; byOwner?: boolean },
   ): Promise<{ spec: SpecOutput | null; problems: string[]; answered: boolean }> {
     const greenfield = this.m.kind === "greenfield";
     const brief = specPrompt(this.m, greenfield ? this.stackDoc() : null, revise);
@@ -1328,7 +1341,8 @@ class MissionRun {
       });
       problems = answer.out ? validateSpec(answer.out) : [runFailure(answer.result)];
       answered ||= answer.out !== null;
-      if (answer.out && problems.length === 0) return { spec: answer.out, problems, answered };
+      // A list that came back as one line with the text `\n` in it is made a list again (R3-4); a plan written well is returned as it is.
+      if (answer.out && problems.length === 0) return { spec: normalizeSpecText(answer.out), problems, answered };
     }
     return { spec: null, problems, answered };
   }
@@ -1383,8 +1397,11 @@ class MissionRun {
     // The planner's answer has no field for a mode: they come back by feature id, and a revision that loses one is refused.
     const carried = spec ? carryModes(previous, spec) : undefined;
     if (carried?.ok) {
+      // The plan reviewer cannot rewrite the checks of a feature that is checked by reading: those are the owner's words (R3-2).
+      const kept = keepWrittenChecks(previous, carried.spec);
       this.setPlanReview("revised", issues); // saved together with the new plan
-      this.adoptSpec(carried.spec);
+      this.adoptSpec(kept.spec);
+      for (const title of kept.titles) this.noteOnce(`The plan reviewer's changes to the checks of “${shown(title)}” were not used, because it is checked by reading.`);
     } else {
       this.setPlanReview("not_applied", issues);
       this.noteOnce(spec ? PLAN_LOST_A_MODE : `The plan reviewer asked for changes that could not be applied: ${issues.join(" ")}`);
@@ -2526,6 +2543,8 @@ class MissionRun {
       ...(judged === undefined && { unfinished: true as const }),
       scripted: { problems: check.problems, facts: check.facts },
       pictures: { taken: pictures.taken, ...(answered.offered && pictures.images.length > 0 && { images: pictures.images.length }), ...(why !== undefined && { why }) },
+      // The files the report names when it tells the owner what to open (a guide or a page is read by opening its file).
+      ...(check.readable.length > 0 && { files: check.readable.slice(0, 10).map((r) => plainName(r.path, 200)) }),
     };
     if (judged) {
       this.lookNotes.set(f.id, judged.lookNotes);
@@ -2960,7 +2979,7 @@ class MissionRun {
             lines: [
               ...(failed ? ["Your change could not be made, so this is the earlier plan."] : []),
               "This plan was written by the leader, not by the team's planner.",
-              ...reviewLines(plan.review, sendBacks(m, "plan")),
+              ...indentWrapped(reviewLines(plan.review, sendBacks(m, "plan")), sendBacks(m, "plan") > 0),
               ...describePlan(m.spec ?? plan.spec, {
                 request: m.request,
                 style: "look",
@@ -3064,10 +3083,15 @@ class MissionRun {
       const passed = results.filter((r) => r.result === "pass").length;
       const failedChecks = results.filter((r) => r.result === "fail");
       const notJudged = results.filter((r) => r.result !== "pass" && r.result !== "fail");
-      lines.push(`The second AI's answers: ${passed} passed, ${failedChecks.length} failed, ${c.unjudged} could not be judged.${c.round > 1 ? ` It checked ${c.round} times.` : ""}`);
+      // A taste check (it ends “(the CEO decides)”) can only be answered by the owner, who is looking right now: it is "left for you", not "not judged".
+      const leftForYou = new Set(leftForYouChecks(feature));
+      lines.push(`The second AI's answers: ${answerCounts(passed, failedChecks.length, c.unjudged, leftForYou.size)}${c.round > 1 ? ` It checked ${c.round} times.` : ""}`);
       const open = [...failedChecks, ...notJudged];
       for (const r of open.slice(0, 3)) {
-        lines.push(`Check ${r.n} (${r.result === "fail" ? "failed" : "not judged"}): ${shown(feature.acceptance[r.n - 1] ?? "", 120)} ${cleanAiText(r.evidence, 200)}`);
+        const label = r.result === "fail" ? "failed" : leftForYou.has(r.n) ? "left for you" : "not judged";
+        // The line is cut at 300 characters when it is shown, so the check and its reason are cut here, each at a word: the check to 120 characters,
+        // the reason to 150 (real run R2: the whole line was cut in the middle of the reason).
+        lines.push(`Check ${r.n} (${label}): ${cutAtWord(shown(feature.acceptance[r.n - 1] ?? "", 2000), 120)} ${cutAtWord(cleanAiText(r.evidence, 400), 150)}`.trimEnd());
       }
       const more = open.length - 3;
       if (more > 0) lines.push(`And ${more} more ${more === 1 ? "check" : "checks"} did not pass; mc plan show ${m.id} lists all of them.`);
@@ -3170,7 +3194,7 @@ class MissionRun {
     cp.reworkFrom ??= sha256(JSON.stringify(previous));
     this.save();
     if (sha256(JSON.stringify(m.spec)) !== cp.reworkFrom) return true; // the architect already changed it before a stop
-    const { spec } = await this.writeSpec(1, { previous, issues: [`The owner asked for this change to the plan: ${cp.answer?.note ?? ""}`] });
+    const { spec } = await this.writeSpec(1, { previous, issues: [`The owner asked for this change to the plan: ${cp.answer?.note ?? ""}`], byOwner: true });
     const carried = spec ? carryModes(previous, spec) : undefined;
     if (carried?.ok) {
       this.adoptSpec(carried.spec);
@@ -3443,6 +3467,26 @@ export function carryModes(previous: SpecOutput, next: SpecOutput): CarriedModes
   return { ok: true, spec: { ...next, features } };
 }
 
+/**
+ * The checks of a feature that is checked by reading are the owner's words: the plan reviewer's revision (gate A) gets them back as they
+ * were, by feature id, and the rest of its changes stay. A revision had made them into checks a reader can never judge (`npm test still
+ * passes`, `the owner decides`, pixel rules), and had replaced a taste check that ends `(the CEO decides)`. The titles are those of the
+ * features whose checks were put back (only when the revision had changed them). A feature checked by tests keeps what the revision
+ * wrote. The owner's own send-back does not use this: the owner's note may change the checks on purpose.
+ */
+export function keepWrittenChecks(previous: SpecOutput, next: SpecOutput): { spec: SpecOutput; titles: string[] } {
+  const before = new Map(previous.features.filter((f) => isModeFeature(f)).map((f) => [f.id, f]));
+  if (before.size === 0) return { spec: next, titles: [] };
+  const titles: string[] = [];
+  const features = next.features.map((nf): SpecFeature => {
+    const pf = before.get(nf.id);
+    if (!pf || !isModeFeature(nf) || JSON.stringify(pf.acceptance) === JSON.stringify(nf.acceptance)) return nf;
+    titles.push(nf.title);
+    return { ...nf, acceptance: [...pf.acceptance] };
+  });
+  return titles.length === 0 ? { spec: next, titles } : { spec: { ...next, features }, titles };
+}
+
 const PLAN_LOST_A_MODE = "The plan reviewer's changed plan dropped a feature that is checked by a second AI, so the plan was used as written.";
 const PLAN_LOST_A_MODE_BY_OWNER = "The changed plan dropped a feature that is checked by a second AI, so the plan you sent back was kept as it was.";
 
@@ -3638,6 +3682,16 @@ function lastLines(text: string, n: number): string[] {
 function listFiles(paths: string[]): string {
   const shown = paths.slice(0, MAX_LISTED_FILES).join(", ");
   return paths.length > MAX_LISTED_FILES ? `${shown} and ${paths.length - MAX_LISTED_FILES} more` : shown;
+}
+
+/**
+ * The plan reviewer's answer as lines of the owner's look (`reviewLines`): a long sentence is wrapped into several lines that have no lead
+ * of their own, so every line after the first one of the sentence starts with two spaces, and the report writes it under the same bullet
+ * (real run R3: each piece was a bullet of its own). `sentBackLine`: the last line is the separate sentence about the owner's send-backs.
+ */
+export function indentWrapped(lines: string[], sentBackLine: boolean): string[] {
+  const sentence = lines.length - (sentBackLine ? 1 : 0);
+  return lines.map((line, i) => (i > 0 && i < sentence ? `  ${line}` : line));
 }
 
 /** “A”, “B” and “C”, or the first five and the count of the rest. */

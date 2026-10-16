@@ -1,6 +1,6 @@
 // Tests of the scripted checks (docs/modes-spec.md sections 6 and 8.3, and the matching tests of section 15).
 // Text that looks like a key is built in code from pieces, so this file holds none.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -1553,5 +1553,164 @@ describe("judgeRubric", () => {
     const j = ok(judgeRubric(input(answer([{ evidence: "short" }, { evidence: 'It says “nothing like this exists” here' }, { basis: "picture", evidence: "A long enough description of a picture" }]))));
     expect(j.downgraded).toBe(3);
     expect(j.unjudged).toBe(3);
+  });
+});
+
+// ───────────────────────────── judgeRubric: quotes of markup (R3-1 of the real runs) ─────────────────────────────
+
+describe("judgeRubric: a quote of markup, a style rule or an attribute (R3-1)", () => {
+  const WT = "/work/tree";
+  const FILE = "site/index.html";
+  const page = [
+    "<!DOCTYPE html>",
+    "<html><head><title>word-tools</title>",
+    "<style>",
+    "  .benefits { display: grid; grid-template-columns: 1fr; gap: 20px; }",
+    "</style></head><body>",
+    '<a class="button" data-testid="get-started"',
+    '   href="../README.md">Get started</a>',
+    '<div class="benefits" data-testid="benefits"><section class="benefit" data-testid="benefit"><h2>No dependencies</h2></section></div>',
+    "</body></html>",
+    "",
+  ].join("\n");
+  const checks = ["The page has a Get started button.", "The page lists its benefits.", "The page loads nothing from outside."];
+
+  /** One honest-looking answer in which check 1 has this evidence, checked against `page`. */
+  function judge(evidence: string, over: Partial<RubricInput> = {}) {
+    const answer: RubricOutput = {
+      verdict: "approve",
+      results: checks.map((check, i) => ({ number: i + 1, check, result: "pass" as const, evidence: i === 0 ? evidence : "The file site/index.html was read and the check is met.", basis: "text" as const })),
+      seen: [FILE],
+      notes: [],
+    };
+    const j = judgeRubric({ answer, checks, changedFiles: [FILE], changedText: [page], pageText: [], family: "claude", opened: [`${WT}/${FILE}`], worktree: WT, pictures: [], ...over });
+    if (!j.ok) throw new Error(`not ok: ${j.problem}`);
+    return j;
+  }
+  const kept = (evidence: string, over: Partial<RubricInput> = {}): boolean => judge(evidence, over).results[0]!.result === "pass";
+
+  const TAG = '<a class="button" data-testid="get-started" href="../README.md">Get started</a>';
+
+  it("keeps a pass whose evidence quotes a tag with attributes, however the marks are written", () => {
+    expect(kept(`site/index.html line 6: "${TAG}".`)).toBe(true);
+    expect(kept(`site/index.html line 6: \u201c${TAG}\u201d.`)).toBe(true);
+    expect(kept(`site/index.html line 6: "${TAG.replaceAll('"', '\\"')}".`)).toBe(true);
+    expect(kept(`site/index.html line 6 has "${TAG}" and the heading "No dependencies".`)).toBe(true);
+    expect(kept(`Inside "<div class="benefits" data-testid="benefits">" the first heading is "No dependencies" in site/index.html.`)).toBe(true);
+    expect(kept('The text is "<a class="button" data-testid="get-started" ... >Get started</a>" in site/index.html.')).toBe(true);
+  });
+
+  it("keeps a pass whose evidence quotes an attribute value or a rule of the style sheet, which the visible text does not hold", () => {
+    expect(kept('The only href is the relative "../README.md" in site/index.html.')).toBe(true);
+    expect(kept('The attribute is written data-testid="benefit" in site/index.html, as "data-testid=\\"benefit\\"" shows.')).toBe(true);
+    expect(kept('site/index.html has a base rule of ".benefits { display: grid; grid-template-columns: 1fr; gap: 20px; }".')).toBe(true);
+  });
+
+  it("still turns down a quote of markup that is made up: a wrong attribute value, wrong words, a wrong file name, a wrong rule", () => {
+    const made = [
+      `"${TAG.replace("get-started", "start-now")}"`,
+      `"${TAG.replace(">Get started<", ">Start here<")}"`,
+      `"${TAG.replace("../README.md", "../GUIDE.md")}"`,
+      '"../GUIDE.md"',
+      '"data-testid=\\"nothing-here\\""',
+      '\u201c<a class="button" data-testid="missing-id">Get started</a>\u201d',
+      '".benefits { display: flex; flex-direction: row; }"',
+      '"<div class="benefits" data-testid="benefits">" and "<div class="menu" data-testid="menu">"',
+      '"No dependencies" and "Pay once and use it forever"',
+      '"<link rel="stylesheet" href="https://cdn.example/x.css">"',
+    ];
+    for (const quote of made) {
+      const j = judge(`site/index.html line 6: ${quote}.`);
+      expect(j.results[0]!.result, quote).toBe("cannot_judge");
+      expect(j.results[0]!.evidence.startsWith("The quote was not found in the files."), quote).toBe(true);
+      expect(j.downgraded, quote).toBe(1);
+    }
+  });
+
+  it("does not hold a quote of fewer than 8 characters to the files, in markup or in words", () => {
+    for (const quote of ['"<style>"', '"<br>"', '"nothing"', '"<h1>"', '"x.css"', '"a=\\"b\\""']) {
+      expect(kept(`The file has no ${quote} at all, it says.`), quote).toBe(true);
+    }
+    // A tag with no attribute and no words in it says nothing, whatever its length.
+    expect(kept('The file has no "<script>" and no "<noscript>" in site/index.html.')).toBe(true);
+    // At 8 characters a quote is held to the files.
+    expect(kept('It says "x.css.map" in site/index.html.')).toBe(false);
+  });
+
+  it("looks for a quote of markup in an unchanged file that `seen` names, through readSeen, and not in one that was not opened", () => {
+    const other = '<link rel="stylesheet" href="style.css">\n<script src="app.js"></script>\n';
+    const readSeen = (name: string) => (name === "docs/head.html" ? other : undefined);
+    const base = { readSeen, opened: [`${WT}/${FILE}`, `${WT}/docs/head.html`] };
+    const a = (evidence: string): RubricOutput => ({
+      verdict: "approve",
+      results: checks.map((check, i) => ({ number: i + 1, check, result: "pass" as const, evidence: i === 0 ? evidence : "The file site/index.html was read and the check is met.", basis: "text" as const })),
+      seen: [FILE, "docs/head.html"],
+      notes: [],
+    });
+    const run = (evidence: string, over: Partial<RubricInput> = {}) => {
+      const j = judgeRubric({ answer: a(evidence), checks, changedFiles: [FILE], changedText: [page], pageText: [], family: "claude", worktree: WT, pictures: [], ...base, ...over });
+      if (!j.ok) throw new Error(j.problem);
+      return j.results[0]!.result;
+    };
+    expect(run('docs/head.html has "<link rel="stylesheet" href="style.css">" in its head.')).toBe("pass");
+    expect(run('docs/head.html has "<link rel="stylesheet" href="other.css">" in its head.')).toBe("cannot_judge");
+    expect(run('docs/head.html has "<link rel="stylesheet" href="style.css">" in its head.', { opened: [`${WT}/${FILE}`] })).toBe("cannot_judge");
+  });
+
+  it("a fail and a picture judgement are not held to the quotes, as before", () => {
+    const fail = judge('"../GUIDE.md" is not there and "<a class="x" href="y">Go</a>" is made up.');
+    expect(fail.results[0]!.result).toBe("cannot_judge");
+    const answer: RubricOutput = {
+      verdict: "changes",
+      results: checks.map((check, i) => ({ number: i + 1, check, result: i === 0 ? ("fail" as const) : ("pass" as const), evidence: i === 0 ? 'It never says "Pay once and use it forever" anywhere.' : "The file site/index.html was read and the check is met.", basis: "text" as const })),
+      seen: [FILE],
+      notes: [],
+    };
+    const j = judgeRubric({ answer, checks, changedFiles: [FILE], changedText: [page], pageText: [], family: "claude", opened: [`${WT}/${FILE}`], worktree: WT, pictures: [], });
+    expect(j.ok && j.results[0]!.result).toBe("fail");
+    expect(j.ok && j.downgraded).toBe(0);
+  });
+
+  it("text built to be slow is turned down quickly: thousands of quotation marks, and a big file", () => {
+    const big = `${page}\n${"<p>filler text of the page goes on here</p>\n".repeat(50_000)}`;
+    const hostile = `site/index.html: ${'"real text" '.repeat(4000)}`;
+    const start = Date.now();
+    const j = judge(hostile, { changedText: [big] });
+    expect(Date.now() - start).toBeLessThan(5000);
+    expect(j.results[0]!.result).toBe("cannot_judge");
+    // Ordinary evidence with many quotes is not near the limit.
+    const many = `site/index.html has ${Array.from({ length: 15 }, () => '"No dependencies"').join(", ")} and "${TAG}".`;
+    expect(kept(many)).toBe(true);
+  });
+});
+
+describe("judgeRubric: the real answers of the real run R3 (a page with pictures)", () => {
+  const dir = join(import.meta.dirname, "..", "test", "fixtures", "modes", "real-r3");
+  const read = (name: string): string => readFileSync(join(dir, name), "utf8");
+  const real = JSON.parse(read("answers.json")) as Record<"review" | "owner", { checks: string[]; answer: RubricOutput; page: string }>;
+  const WT = "/work/tree";
+  // The second AI also read the app's README, which the app repository no longer holds: the line it quoted from it.
+  const readSeen = (name: string): string | undefined => (name === "README.md" ? "# word-tools\n\nTiny text helpers, with no dependencies.\n" : undefined);
+
+  it.each(["review", "owner"] as const)("%s: no correct pass is turned into `cannot_judge`", (kind) => {
+    const { checks, answer, page } = real[kind];
+    const pictures = answer.seen.filter((s) => s.endsWith(".png"));
+    const j = judgeRubric({
+      answer,
+      checks,
+      changedFiles: ["site/index.html"],
+      changedText: [read(page)],
+      pageText: [],
+      readSeen,
+      family: "claude",
+      opened: answer.seen.map((s) => (s.startsWith("/") ? s : `${WT}/${s}`)),
+      worktree: WT,
+      pictures,
+    });
+    if (!j.ok) throw new Error(j.problem);
+    expect(j.downgraded).toBe(0);
+    // What stays unjudged is what the second AI itself could not judge: it cannot run the project's tests, and it cannot stand in for the owner.
+    expect(j.results.filter((r) => r.result === "cannot_judge").map((r) => r.n)).toEqual(kind === "review" ? [9] : [13]);
+    expect(j.results.filter((r) => r.result === "pass")).toHaveLength(checks.length - 1);
   });
 });

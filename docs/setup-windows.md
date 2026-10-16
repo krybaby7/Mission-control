@@ -360,7 +360,7 @@ For work that is not code (a guide, a page, a table), the leader can write a pla
    mc shell
    ```
 
-   Then type the commands from the report's **How to try it** section, one at a time. When the app says it's ready, open <http://localhost:3000> in your Windows browser. When you're done, press **Ctrl+C** to stop the app, run the `git checkout ...` command the report gives to put the app's folder back on your own version (if it gave one), and type `exit`. For a change to an app you already had, the report also says how to keep the change.
+   Then type the commands from the report's **How to try it** section, one at a time. When the app says it's ready, open <http://localhost:3000> in your Windows browser. When you're done, press **Ctrl+C** to stop the app, run the `git checkout ...` command the report gives to put the app's folder back on your own version (if it gave one), and type `exit`. For a change to an app you already had, the report also says how to keep the change. For a guide or a web page there is no app to start: the section ends with the name of the file to open (for example `docs/USAGE.md`), and gives its Windows path.
 
 Your apps' files are in File Explorer at `\\wsl.localhost\Ubuntu\home\<your-ubuntu-name>\mc-apps`.
 

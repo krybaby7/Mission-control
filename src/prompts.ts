@@ -99,7 +99,7 @@ export function formatFileList(paths: string[], max: number = CAPS.fileList, max
 
 // ───────────────────────────── Spec stage ─────────────────────────────
 
-export function specPrompt(m: Mission, stackDoc: string | null, revise?: { previous: SpecOutput; issues: string[] }): string {
+export function specPrompt(m: Mission, stackDoc: string | null, revise?: { previous: SpecOutput; issues: string[]; byOwner?: boolean }): string {
   const task =
     m.kind === "greenfield"
       ? [
@@ -130,12 +130,26 @@ function existingRepoFacts(m: Mission): string[] {
   return facts;
 }
 
-function revisionSection(revise: { previous: SpecOutput; issues: string[] }): string {
+/** The widths the engine draws a page at (src/render.ts): the only pixel widths a plan may name for a page. */
+const PHONE_WIDTH = 390;
+const DESKTOP_WIDTH = 1280;
+
+/**
+ * What the planner is told about the checks of the features that are checked by reading (R3-2 and R3-3 of the real runs): how such a
+ * feature is judged, which pixel widths exist, and that the checks are the owner's words. Only for a plan that has such a feature.
+ */
+const READING_ONLY = `Those features are judged only by reading their files and, for a page, by looking at two pictures of it, drawn ${PHONE_WIDTH} px wide (phone) and ${DESKTOP_WIDTH} px wide (desktop). No command is run for them. So no check may need a command to run, such as the project's tests passing, and no check may need the owner's judgement to be answered. A page is never drawn at any other width, so name no other pixel width.`;
+const OWNERS_WORDS = "The checks of these features are the owner's own words. A taste check that ends with “(the CEO decides)” is left for the owner to answer, and it stays too. Keep every check of these features exactly as it is in the previous spec, in the same order, with none added and none taken away, even when an issue below asks for another change to one of them. Make the other changes.";
+/** The same, when the owner sent the plan back: the owner's note may change a check on purpose, and nothing else may. */
+const OWNERS_NOTE = "The checks of these features are the owner's own words. Change a check only where the owner's note asks for it, and keep every other check exactly as it is in the previous spec, in the same order. A taste check that ends with “(the CEO decides)” stays unless the note asks to change it.";
+
+function revisionSection(revise: { previous: SpecOutput; issues: string[]; byOwner?: boolean }): string {
   const modeIds = revise.previous.features.filter(isModeFeature).map((f) => f.id);
   return section("Revise your previous spec", [
     "A reviewer asked for changes. Address every issue below and keep what was fine.",
     modeIds.length > 0 &&
       `Some features are judged by reading the result and not by tests. Their ids are: ${modeIds.map(code).join(", ")}. Keep every one of these ids, do not split, merge or drop these features, and write their checks as statements a reader can judge from the files, not as tests.`,
+    modeIds.length > 0 && `${READING_ONLY} ${revise.byOwner ? OWNERS_NOTE : OWNERS_WORDS}`,
     bullets(revise.issues),
     "Previous spec:",
     fence(JSON.stringify(revise.previous, null, 2), "json"),
@@ -160,6 +174,8 @@ export function gateAPrompt(m: Mission): string {
         "deps are correct and the first feature delivers the core user flow;",
         "nothing needs paid services, API keys or accounts the request didn't provide.",
       ]),
+      hasModeFeature(spec.features) &&
+        `A feature marked as checked by a second AI is judged only by reading its files and, for a page, by looking at two pictures of it, drawn ${PHONE_WIDTH} px wide (phone) and ${DESKTOP_WIDTH} px wide (desktop). No command is run for it. So do not ask for a check that needs a command to run, such as the project's tests passing, or one that needs the owner's judgement to be answered, and do not ask for any other pixel width. Their checks are the owner's own words: do not ask to rewrite, add or replace them. A taste check that ends with “(the CEO decides)” is left for the owner to answer, and it is not an error: keep it.`,
       'Answer with JSON: `verdict` ("approve" or "revise") and `issues`, each a concrete change to make (empty when approving).',
     ]),
     section("Spec", [renderSpec(spec)]),

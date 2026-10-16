@@ -8,6 +8,7 @@ import {
   applyAnswer,
   checkpointId,
   cleanNote,
+  didWhat,
   endState,
   isCheckpointShape,
   isDerivedFeature,
@@ -305,6 +306,17 @@ describe("texts", () => {
     expect(notice.message).not.toContain("secret");
   });
 
+  it("names the feature once when it has the mission's own title, and the mission otherwise (real run R2)", () => {
+    const twin = { ...m, title: "Add shout" } as Mission;
+    expect(didWhat(twin, pending("feature", 1, "add-shout"), "approve")).toBe("you approved “Add shout”");
+    expect(didWhat(twin, pending("feature", 1, "add-shout"), "send_back")).toBe("you sent “Add shout” back");
+    expect(answerNotice(twin, answered(pending("feature", 1, "add-shout"), "approve"), { decision: "approve", at: "2026-10-12T14:05:00.000Z" }).message).toMatch(/^You approved “Add shout” at \d\d:\d\d\. It continues on the next run\.$/);
+    // another title, the plan and the finished app keep the longer words
+    expect(didWhat(m, pending("feature", 1, "add-shout"), "approve")).toBe("you approved “Add shout” for “Shout”");
+    expect(didWhat(m, pending(), "approve")).toBe("you approved the plan for “Shout”");
+    expect(didWhat(m, pending("final"), "send_back")).toBe("you sent the finished app for “Shout” back");
+  });
+
   it("strips control characters out of AI-written titles", () => {
     const dirty = { ...m, title: "Sho\u001b]52;;x\u0007ut" } as Mission;
     expect(parkedNotice(dirty, pending()).title).toBe("Shout: please check the plan".replace("Shout", "Sho]52;;xut"));
@@ -350,6 +362,18 @@ describe("the report", () => {
     expect(report).toContain("I stopped here on purpose, so you can look at it before I go on.");
     expect(report).not.toContain("To look at it yourself:"); // there is nothing to open yet
     expect(report.indexOf("# Shout")).toBeGreaterThan(report.indexOf("## Waiting for your check"));
+  });
+
+  it("keeps a line that starts with spaces under the bullet before it, and makes a bullet of every other line (R3-8)", () => {
+    const lines = ["First fact.", "The reviewer asked for a long list of changes, so", "  this is the rest of the same sentence,", "  and the end of it.", "Second fact.", "  piece of the second.", "Check for “Add shout”: a check."];
+    const cp = { ...pending(), look: { headline: "Check the plan for “Shout”", lines } };
+    const report = render(parkedMission(cp, { stage: "init" }));
+    expect(report).toContain(
+      "**Check the plan for “Shout”**\n\n- First fact.\n- The reviewer asked for a long list of changes, so\n  this is the rest of the same sentence,\n  and the end of it.\n- Second fact.\n  piece of the second.\n- Check for “Add shout”: a check.",
+    );
+    // a first line that starts with spaces is still a bullet, and plain lines are as they were
+    const odd = render(parkedMission({ ...pending(), look: { headline: "h", lines: ["  starts with spaces", "next"] } }, { stage: "init" }));
+    expect(odd).toContain("**h**\n\n- starts with spaces\n- next");
   });
 
   it("tells the owner how to open a feature that waits to be added, and how to put the folder back", () => {

@@ -51,12 +51,27 @@ export function timesSentBack(m: Pick<Mission, "checkpointLog">, f: Pick<Feature
 /** The row of the table in spec 10.1 that fits first. */
 export type CheckedRow = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
+/**
+ * A taste check ends with “(the CEO decides)” (leader/CLAUDE.md): only the owner can answer it, so the second AI always says it cannot
+ * judge it, and the words say it is "left for you". This is the dashboard's own copy of the rule in src/checked-by.ts. The page never
+ * keeps the text of a check, so a taste check is kept as this one fixed mark, which is not the plan's text.
+ */
+const TASTE_CHECK = /\(\s*the\s+CEO\s+decides\s*\)\s*[.!]?\s*$/iu;
+export const TASTE_MARK = "(the CEO decides)";
+
+/** `TASTE_MARK` for the text of a taste check, else nothing: all that is kept of the text of a check. */
+export function tasteMark(check: unknown): string {
+  return typeof check === "string" && TASTE_CHECK.test(check) ? TASTE_MARK : "";
+}
+
 export interface CheckedFacts {
   /** 1 tests, approved. 2 tests, and no test was written. 3 tests. 4 the second AI's check did not finish. 5 checks left unmet. 6 checks not judged. 7 every check judged and met. */
   row: CheckedRow;
   /** Checks left unmet (row 5) and checks nobody judged (rows 4 to 6); 0 for rows 1 to 3. */
   unmet: number;
   unjudged: number;
+  /** Of the checks nobody judged, the taste checks that are left for the owner. Absent when there are none, and when the feature was queued without a stop for the owner's look (nobody will answer them). */
+  left?: number;
   approved: boolean;
   /** Rows 4 to 7, not approved, `ownerStops` is false and the feature is an "owner" one or has checks not judged (or its review did not finish, or no picture was shown). */
   queuedWithoutLook: boolean;
@@ -84,7 +99,11 @@ export function checkedFacts(m: ModeMission, f: Feature): CheckedFacts {
   const row: CheckedRow = unfinished ? 4 : unmet > 0 ? 5 : unjudged > 0 ? 6 : 7;
   const noPicture = !unfinished && checked.pictures?.why !== undefined;
   const queuedWithoutLook = !approved && m.ownerStops === false && (f.mode === "owner" || unjudged > 0 || unfinished || noPicture);
-  return { row, unmet, unjudged, approved, queuedWithoutLook, ...(noPicture && { noPicture }) };
+  // The taste checks nobody judged: no result, or "cannot_judge". Nobody is asked when the feature was queued without a stop.
+  const judged = new Set(results.filter((r) => r.result === "pass" || r.result === "fail").map((r) => r.n));
+  const tasteLeft = (Array.isArray(f.acceptance) ? f.acceptance : []).filter((a, i) => a === TASTE_MARK && !judged.has(i + 1)).length;
+  const left = unfinished || queuedWithoutLook ? 0 : Math.min(tasteLeft, unjudged);
+  return { row, unmet, unjudged, approved, queuedWithoutLook, ...(left > 0 && { left }), ...(noPicture && { noPicture }) };
 }
 
 /** A finished feature has no test that checked it: rows 2 and 4 to 7 (the caveat "N features have no tests"). */

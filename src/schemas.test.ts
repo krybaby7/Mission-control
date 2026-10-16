@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Ajv } from "ajv";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assertStrictCompatible, normalizeVerifyConfig, SCHEMAS, type SchemaName, validateOutput, type VerifyConfigOutput } from "./schemas.js";
+import { assertStrictCompatible, normalizeSpecText, normalizeVerifyConfig, SCHEMAS, type SchemaName, validateOutput, type VerifyConfigOutput } from "./schemas.js";
 import type {
   BuildOutput,
   ContextPackOutput,
@@ -340,5 +340,77 @@ describe("normalizeVerifyConfig", () => {
 
   it("names every problem at once", () => {
     expect(() => normalizeVerifyConfig({ install: null, full: "", tests: null, testGlobs: [" "] })).toThrow(/`verify\.full` is empty.*; `verify\.testGlobs` has no glob/);
+  });
+});
+
+describe("normalizeSpecText (R3-4 of the real runs)", () => {
+  // The contract of the revised plan in the real run R3: one line, with the two characters backslash and n between its items (9 times),
+  // and a backslash before each of its quotation marks (12 times), where the plan had a list on separate lines.
+  const real = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "modes", "real-r3", "revised-contract.txt"), "utf8");
+  const withContract = (uiContract: string): SpecOutput => ({ ...spec, uiContract });
+
+  it("the real contract is a list again: a line break for each backslash-n, and plain quotation marks", () => {
+    expect(real).not.toContain("\n");
+    expect(real.split("\\n")).toHaveLength(10);
+    const fixed = normalizeSpecText(withContract(real)).uiContract;
+    const lines = fixed.split("\n");
+    expect(lines).toHaveLength(10);
+    expect(lines[0]).toBe("- The page is the file site/index.html (a static file opened directly; no server route).");
+    expect(lines[3]).toBe('- Benefits container: data-testid="benefits"');
+    expect(lines[5]).toBe('- Get started button: data-testid="get-started", visible text exactly "Get started" (a <button> or an <a> styled as a button)');
+    expect(lines[6]).toBe('- Viewport meta tag: <meta name="viewport" content="width=device-width, initial-scale=1">');
+    expect(fixed).not.toMatch(/\\[n"]/u);
+  });
+
+  it("works on every string of the plan, and leaves the rest of it as it was", () => {
+    const messy: SpecOutput = {
+      ...spec,
+      appName: "Habit Tracker",
+      summary: "First.\\nSecond.\\nThird.",
+      assumptions: ["One.\\nTwo.\\nThree.", "Plain."],
+      features: [{ ...spec.features[0]!, title: "Track", story: 'Say \\"hello\\" and \\"bye\\"', acceptance: ['Shows \\"a\\" and \\"b\\"', "fine"] }, spec.features[1]!],
+    };
+    const fixed = normalizeSpecText(messy);
+    expect(fixed.summary).toBe("First.\nSecond.\nThird.");
+    expect(fixed.assumptions).toEqual(["One.\nTwo.\nThree.", "Plain."]);
+    expect(fixed.features[0]).toMatchObject({ id: "track-habit", title: "Track", story: 'Say "hello" and "bye"', acceptance: ['Shows "a" and "b"', "fine"], kind: "standard", deps: [] });
+    expect(fixed.features[1]).toEqual(spec.features[1]);
+    expect(fixed.appName).toBe("Habit Tracker");
+  });
+
+  it("returns the very same object when nothing needs changing, and never changes its input", () => {
+    expect(normalizeSpecText(spec)).toBe(spec);
+    const right = withContract("- one\n- two\n- three");
+    expect(normalizeSpecText(right)).toBe(right);
+    const before = JSON.stringify(withContract(real));
+    const input = withContract(real);
+    normalizeSpecText(input);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it("leaves text that only talks about an escape: one backslash-n in a sentence, a string with real line breaks, quotation marks that are not all escaped", () => {
+    for (const text of [
+      "The tool splits the text on \\n and joins it again.",
+      "- one\n- two\\n- three\\n- four",
+      'It says "hello" and also \\"bye\\".',
+      'One \\"quoted\\" word and "another".',
+      "Windows paths like C:\\new\\folder have no line break in them, only a backslash.",
+      "A single \\\" mark.",
+    ]) {
+      expect(normalizeSpecText(withContract(text)).uiContract, text).toBe(text);
+    }
+  });
+
+  it("a title, a story or a check is one line by nature: it may talk about backslash-n on purpose, so only the summary, the assumptions and the contract become lines", () => {
+    const talk = "lines('a\\nb\\nc') returns three items, split on \\n";
+    const fixed = normalizeSpecText({ ...spec, summary: "A.\\nB.\\nC.", features: [{ ...spec.features[0]!, title: talk, story: talk, acceptance: [talk] }, spec.features[1]!] });
+    expect(fixed.summary).toBe("A.\nB.\nC.");
+    expect(fixed.features[0]).toMatchObject({ title: talk, story: talk, acceptance: [talk] });
+    expect(normalizeSpecText({ ...spec, appName: talk }).appName).toBe(talk);
+  });
+
+  it("a string with two backslash-n and no real line break is changed even if it is short, and quotes are changed when every one is escaped", () => {
+    expect(normalizeSpecText(withContract("a\\nb\\nc")).uiContract).toBe("a\nb\nc");
+    expect(normalizeSpecText(withContract('data-testid=\\"x\\" and \\"y\\"')).uiContract).toBe('data-testid="x" and "y"');
   });
 });

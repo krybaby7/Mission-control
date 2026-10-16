@@ -32,6 +32,7 @@ import {
   TITLE_MAX_CHARS,
   WAIT_MARGIN_MS,
 } from "./constants.js";
+import { tasteMark } from "./modes.js";
 import { clean, cleanId } from "./sanitize.js";
 
 // ───────────────────────────── What it returns ─────────────────────────────
@@ -494,8 +495,9 @@ function cleanFeature(f: Record<string, unknown>): Feature {
     title: clean(f.title, TITLE_MAX_CHARS) || id,
     story: isString(f.story) ? clean(f.story, REASON_MAX_CHARS) : "",
     // The check texts are never read. A feature checked by a second AI keeps one empty placeholder per check, so the page can say how many
-    // checks are on its list (docs/modes-spec.md, 11.1); every other feature has none, as before.
-    acceptance: mode !== undefined && Array.isArray(f.acceptance) ? f.acceptance.slice(0, CHECKED_RESULTS_MAX).map(() => "") : [],
+    // checks are on its list (docs/modes-spec.md, 11.1); every other feature has none, as before. A taste check (it ends “(the CEO decides)”)
+    // keeps a fixed mark instead of the empty text, which is not the plan's text, so the page can say it is left for the owner.
+    acceptance: mode !== undefined && Array.isArray(f.acceptance) ? f.acceptance.slice(0, CHECKED_RESULTS_MAX).map((a) => tasteMark(a)) : [],
     kind: f.kind === "mechanical" ? "mechanical" : "standard",
     deps: [],
     status: cleanId(f.status) as Feature["status"],
@@ -532,7 +534,8 @@ function cleanChecked(v: unknown): FeatureChecked | undefined {
   if (Array.isArray(v.results)) {
     for (const r of v.results.slice(0, CHECKED_RESULTS_MAX)) {
       if (isRecord(r) && isString(r.result) && CHECK_RESULTS.has(r.result)) {
-        results.push({ n: results.length + 1, result: r.result as CheckedResult["result"], evidence: "", basis: "text" });
+        // The number of the check in the list, as the engine wrote it (a damaged entry in front of it must not move it).
+        results.push({ n: isNumber(r.n) && r.n >= 1 ? Math.min(Math.floor(r.n), CHECKED_RESULTS_MAX) : results.length + 1, result: r.result as CheckedResult["result"], evidence: "", basis: "text" });
       }
     }
   }

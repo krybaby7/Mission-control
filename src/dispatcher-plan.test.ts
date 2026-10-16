@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { World } from "../test/e2e-world.js";
 import { createFixtureRepo, type HarnessOptions, labelOf, MissionHarness, planSource } from "../test/fixtures/mission-harness.js";
 import { applyAnswer } from "./checkpoint.js";
+import { indentWrapped } from "./dispatcher.js";
 import type { SpecOutput } from "./types.js";
 
 let h: MissionHarness | undefined;
@@ -153,6 +154,43 @@ describe("a mission queued with a plan written outside the team", () => {
     ]);
     expect(parked.checkpoint?.look.lines).toContain("Check for “Feature greet”: Revised check.");
     expect(readFileSync(hh.store.reportPath(id), "utf8")).toContain("the team's plan reviewer asked for changes and the planner revised it.");
+  });
+
+  // R3-8 of the real runs: a long answer of the plan reviewer is wrapped into several lines without a lead of their own, and the report made a bullet of each.
+  it("indents the pieces of a long answer of the plan reviewer, so the report keeps them under one bullet", async () => {
+    const issues = [1, 2, 3].map((n) => `Point ${n} is long. ${"alpha ".repeat(40)}end.`);
+    const hh = harness({
+      agents: {
+        reviewer: (job, call) => (call.label === "gate-a" ? { structured: { verdict: "revise", issues } } : defaults().reviewer(job, call)),
+        architect: (job, call) => (call.label === "spec" ? { structured: revised("Revised.", "Revised check.") } : defaults().architect(job, call)),
+      },
+    });
+    const id = hh.createMission("greenfield", { plan: planSource(TWO), checkpoints: ["plan"] }).id;
+    const parked = await hh.run(id);
+    const lines = parked.checkpoint?.look.lines ?? [];
+    const first = lines.findIndex((l) => l.startsWith("The team's plan reviewer asked for changes"));
+    const asked = lines.findIndex((l) => l.startsWith("You asked:"));
+    expect(first).toBe(1);
+    expect(asked).toBeGreaterThan(first + 2); // the answer needs more than one line
+    for (const line of lines.slice(first + 1, asked)) expect(line).toMatch(/^ {2}\S/u);
+    expect(lines.slice(0, first + 1).some((l) => l.startsWith(" "))).toBe(false);
+    expect(lines.slice(asked).some((l) => l.startsWith(" "))).toBe(false); // the lines of a fact keep their lead and are not indented
+    const report = readFileSync(hh.store.reportPath(id), "utf8").split("\n");
+    const at = report.findIndex((l) => l.startsWith("- The team's plan reviewer asked for changes"));
+    expect(at).toBeGreaterThan(-1);
+    for (const piece of lines.slice(first + 1, asked)) {
+      expect(report).toContain(`  ${piece.trim()}`);
+      expect(report).not.toContain(`- ${piece.trim()}`);
+    }
+    expect(report[at + 1]).toMatch(/^ {2}\S/u);
+  });
+
+  it("indentWrapped leaves the first line, the owner's send-back line and a single line alone", () => {
+    expect(indentWrapped(["one", "two", "three"], false)).toEqual(["one", "  two", "  three"]);
+    expect(indentWrapped(["one", "two", "You sent the plan back once."], true)).toEqual(["one", "  two", "You sent the plan back once."]);
+    expect(indentWrapped(["only"], false)).toEqual(["only"]);
+    expect(indentWrapped(["You sent the plan back once."], true)).toEqual(["You sent the plan back once."]);
+    expect(indentWrapped([], false)).toEqual([]);
   });
 
   it("keeps the plan as the leader wrote it when the changes cannot be made, and says what was asked", async () => {

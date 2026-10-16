@@ -1,7 +1,7 @@
 // Text that a second AI wrote about files it did not write (its evidence and its notes). It can quote a hostile file, so before it
 // reaches a report, a pull request text, a card or a terminal it is made plain: nothing hidden, nothing that draws a picture or a
 // link, no raw HTML tag, and no web address, e-mail address or script address. The second AI's words stay readable; only the parts
-// that could do something are changed.
+// that could do something are changed. A tag becomes its name in words (`div tag`), so a sentence about a page still reads.
 
 /**
  * Control, format, private-use, unassigned, surrogate and separator characters, odd spaces, variation selectors and blank-looking
@@ -113,13 +113,52 @@ function plainAddresses(text: string, mark: string): string {
     .replace(EMAIL_ADDRESS, mark);
 }
 
+/** Longest tag name that is written out in words. A longer one is no tag name of HTML, and a tag is then just `tag`. */
+const TAG_NAME_MAX = 20;
+
+/** The letters that are said with a vowel sound when they stand alone (`an h1 tag`, `an svg tag`): ef, aitch, el, em, en, ar, ess, ex. */
+const LETTER_WITH_VOWEL_SOUND = /^[fhlmnrsx]/u;
+
 /**
- * Raw HTML out: a tag is replaced by one space (so the text around it can not join into a new tag), and a bracket that opens
- * something with no closing bracket is followed by a space, so it opens nothing. A bracket that is not followed by a letter, `/`, `!`
- * or `?` (`a < b`, `x<3`, `<-`) is plain text and stays.
+ * The words for a tag, as plain as can be: its name and nothing from inside it, so no attribute, address or script can stay.
+ * `<div class="x">` is `div tag`, `</div>` is `closing div tag`, `<!-- note -->` is `comment`. The name is cut to letters, digits and
+ * dashes and written in lower case; a tag with no usable name is just `tag`. A tag that stands by itself (at the start, or right
+ * after a quotation mark or a bracket) gets a word in front, `a div tag`, because it was the whole of what was quoted; anywhere else the
+ * writer's own words in front of it (`the <title>`, `no <script>`) do that.
  */
-function plainTags(text: string): string {
-  return text.includes("<") ? text.replace(HTML_TAG, (_all, closed: string | undefined) => (closed === undefined ? "< " : " ")) : text;
+function tagWords(tag: string, alone: boolean): string {
+  if (tag.startsWith("<!--")) return alone ? "a comment" : "comment";
+  const found = /^<(\/?)[!?]?([A-Za-z][A-Za-z0-9-]*)/u.exec(tag);
+  const name = (found?.[2] ?? "").toLowerCase();
+  if (name === "" || name.length > TAG_NAME_MAX) return alone ? "a tag" : "tag";
+  if (found?.[1] === "/") return `${alone ? "a " : ""}closing ${name} tag`;
+  // A name with a vowel is said as a word (`a div`, `an img`, `a ul`); one without is said letter by letter (`an h1`, `a td`).
+  const spokenAsLetters = !/[aeiou]/u.test(name);
+  const vowelSound = spokenAsLetters ? LETTER_WITH_VOWEL_SOUND.test(name) : /^[aeiou]/u.test(name) && !/^ul?$/u.test(name);
+  return `${alone ? (vowelSound ? "an " : "a ") : ""}${name} tag`;
+}
+
+/**
+ * Raw HTML out: a tag is replaced by its name in words (`tagWords`), or by one space when `words` is false (to find out whether anything
+ * is left to read). The words stand apart from the text around them, so that text can not join into a new tag. A bracket that opens
+ * something with no closing bracket is followed by a space, so it opens nothing. A bracket that is not followed by a letter, `/`,
+ * `!` or `?` (`a < b`, `x<3`, `<-`) is plain text and stays.
+ */
+function plainTags(text: string, words: boolean): string {
+  if (!text.includes("<")) return text;
+  return text.replace(HTML_TAG, (all: string, closed: string | undefined, at: number, whole: string) => {
+    if (closed === undefined) return "< ";
+    if (!words) return " ";
+    let back = at - 1;
+    while (back >= 0 && whole.charAt(back) === " ") back--;
+    const alone = back < 0 || /["“‘(]/u.test(whole.charAt(back));
+    // No space is put next to a quotation mark or a bracket, or at an end: `inside "a div tag" there`.
+    const before = at === 0 ? "" : whole.charAt(at - 1);
+    const after = whole.charAt(at + all.length);
+    const lead = before === "" || /[\s"“‘(]/u.test(before) ? "" : " ";
+    const trail = after === "" || /[\s"”’).,;:!?]/u.test(after) ? "" : " ";
+    return `${lead}${tagWords(all, alone)}${trail}`;
+  });
 }
 
 /**
@@ -165,9 +204,9 @@ function asText(text: unknown): string {
   return typeof text === "string" ? text : text === undefined || text === null ? "" : String(text);
 }
 
-function plain(text: unknown, max: number, mark: string, image: string, link: string): string {
+function plain(text: unknown, max: number, mark: string, image: string, link: string, tagsAsWords: boolean): string {
   // Hidden characters are gone before the addresses are looked for, so a zero-width character cannot split `https://`.
-  const clean = plainTags(plainAddresses(plainLinks(visible(asText(text)), mark, image, link), mark)).replace(/ {2,}/gu, " ").trim();
+  const clean = plainTags(plainAddresses(plainLinks(visible(asText(text)), mark, image, link), mark), tagsAsWords).replace(/ {2,}/gu, " ").trim();
   const points = Array.from(clean);
   if (points.length <= max) return clean;
   return points.slice(0, Math.max(0, max - 1)).join("").trimEnd() + "…";
@@ -177,12 +216,13 @@ function plain(text: unknown, max: number, mark: string, image: string, link: st
  * `text` as one plain line of at most `max` characters (a closing `…` when it was cut):
  * hidden, zero-width and direction-changing characters are taken out (the class the plan reader bans), line breaks and odd
  * spaces become one space, a markdown picture or link becomes its words with the place it points to in brackets, a raw HTML tag
- * is taken out (its words stay), and every web address (`http://`, `https://`, `//host.tld`, `www.host.tld`), e-mail address and
- * script address (`javascript:`, `vbscript:`, `data:`, `mailto:`) becomes the words (web address removed). Ordinary text that only
- * looks like an address stays: `//TODO`, `C://Users`, `3://4`, `www.html`. Running it twice changes nothing more.
+ * becomes its name in words (`a div tag`, `closing div tag`; the words between tags stay), and every web address (`http://`, `https://`, `//host.tld`,
+ * `www.host.tld`), e-mail address and script address (`javascript:`, `vbscript:`, `data:`, `mailto:`) becomes the words
+ * (web address removed). Ordinary text that only looks like an address stays: `//TODO`, `C://Users`, `3://4`, `www.html`.
+ * Running it twice changes nothing more.
  */
 export function cleanAiText(text: unknown, max = 300): string {
-  return plain(text, max, WEB_ADDRESS_REMOVED, "image", "link");
+  return plain(text, max, WEB_ADDRESS_REMOVED, "image", "link", true);
 }
 
 /**
@@ -198,5 +238,5 @@ export function writtenLength(text: unknown): number {
  * it said nothing, whatever its length (`https://a.example/b`, `<img src=x>`, `![](https://a.example/b.png)`).
  */
 export function hasWords(text: unknown): boolean {
-  return /[\p{L}\p{N}]/u.test(plain(text, LOOK_MAX, "", "", ""));
+  return /[\p{L}\p{N}]/u.test(plain(text, LOOK_MAX, "", "", "", false));
 }

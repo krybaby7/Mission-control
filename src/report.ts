@@ -86,21 +86,83 @@ export interface HowToRunOptions {
 }
 
 /**
+ * No feature that counts is checked by tests: every feature that is in the result (not blocked, not skipped) has a mode. The project's own
+ * checks (`npm test`) then check nothing the owner asked for, so the steps never send the owner to run them (real runs R2 and R3). A
+ * mission with a feature checked by tests, or with no feature yet, is never one of these, so its steps are as they were.
+ */
+function noneCheckedByTests(m: Pick<Mission, "features">): boolean {
+  const counted = m.features.filter((f) => f.status !== "blocked" && f.status !== "skipped");
+  return counted.length > 0 && counted.every((f) => isModeFeature(f));
+}
+
+/** A file that is read: a document. */
+const DOCUMENT_FILE = /\.(?:md|markdown|txt|rst|adoc)$/iu;
+/** A file that is looked at in a browser: a page. */
+const PAGE_FILE = /\.html?$/iu;
+/** A list of changed files this long may have been cut (the engine lists at most ten): it is not known to be all of them. */
+const FILE_LIST_CAP = 10;
+
+/** What the owner opens when the work is documents and pages only (see `openFilesOf`). */
+interface OpenFiles {
+  files: string[];
+  /** Every file is a page: it is opened in a browser. */
+  pages: boolean;
+}
+
+/** The files to open, when `files` is the whole list of changed files and every one of them is a document or a page. Otherwise undefined. */
+function openFilesOf(files: readonly unknown[]): OpenFiles | undefined {
+  const names = [...new Set(files.filter((f): f is string => typeof f === "string" && f !== ""))];
+  if (names.length === 0 || files.length >= FILE_LIST_CAP) return undefined;
+  if (!names.every((f) => DOCUMENT_FILE.test(f) || PAGE_FILE.test(f))) return undefined;
+  return { files: names, pages: names.every((f) => PAGE_FILE.test(f)) };
+}
+
+/** The files of the finished mission, when it is documents and pages only and no test checks any feature: what the owner opens. */
+function filesToOpen(m: Mission): OpenFiles | undefined {
+  if (!noneCheckedByTests(m)) return undefined;
+  const done = m.features.filter((f) => f.status === "done" && isModeFeature(f));
+  if (done.some((f) => !Array.isArray(f.checked?.files))) return undefined; // a feature whose files are not known: the files are not all known
+  return openFilesOf(done.flatMap((f) => f.checked?.files ?? []));
+}
+
+/**
  * Shell commands that let the user try the result, or [] when no feature was finished (there is nothing new
  * to try, and a greenfield app may not even exist yet). Greenfield apps use the house Next.js stack. A changed app
- * is started with its own "dev" (or "start") script when its package.json has one, else its checks are run.
+ * is started with its own "dev" (or "start") script when its package.json has one, else its checks are run, unless no
+ * feature is checked by tests. When the work is documents and pages only, there is nothing to install or start: the
+ * owner opens the files (`filesToOpen`).
  */
 export function howToRun(m: Mission, opts: HowToRunOptions = {}): string[] {
   if (!m.repoPath || !m.features.some((f) => f.status === "done")) return [];
   const steps = [`cd ${shownPath(m.repoPath, opts.inContainer ?? inContainer())}`];
   const checkout = checkoutStep(m);
   if (checkout) steps.push(checkout);
-  if (m.kind === "greenfield") return [...steps, "npm install", "npm run dev", "open http://localhost:3000"];
+  const reads = filesToOpen(m) !== undefined;
+  if (m.kind === "greenfield") return reads ? steps : [...steps, "npm install", "npm run dev", "open http://localhost:3000"];
+  if (reads) return steps;
   if (m.verify?.install) steps.push(m.verify.install);
   const start = startCommand(m.repoPath);
   if (start) return [...steps, start];
-  if (m.verify?.full) steps.push(m.verify.full);
+  if (m.verify?.full && !noneCheckedByTests(m)) steps.push(m.verify.full);
   return steps;
+}
+
+/**
+ * The sentence that names the files to open, with the Windows path of the app's folder that "How to try it" already uses:
+ * Then open docs/USAGE.md in your app folder (in Windows File Explorer: \\wsl.localhost\Ubuntu\home\<your Ubuntu name>\mc-apps\word-tools\docs\USAGE.md).
+ * `folder` is the app's folder under ~/mc-apps as seen from Ubuntu, when the container runs and it is there (`appsSubfolder`).
+ */
+function openText(open: OpenFiles, folder: string | undefined): string {
+  const named = open.files.slice(0, 5);
+  const more = open.files.length - named.length;
+  const list = listWords([...named.map((f) => code(f)), ...(more > 0 ? [`${more} more`] : [])]);
+  const where = open.pages ? "in your browser" : "in your app folder";
+  if (folder === undefined) return `Then open ${list} ${where}.`;
+  const windows = `\\\\wsl.localhost\\Ubuntu\\home\\<your Ubuntu name>\\mc-apps\\${folder.replaceAll("/", "\\")}`;
+  const first = open.files[0] ?? "";
+  return open.files.length === 1
+    ? `Then open ${list} ${where} (in Windows File Explorer: ${code(`${windows}\\${first.replaceAll("/", "\\")}`)}).`
+    : `Then open ${list} ${where} (in Windows File Explorer, the app's folder is ${code(windows)}).`;
 }
 
 /** "npm run dev" or "npm start" when the app's package.json has that script; best effort, never throws. */
@@ -193,9 +255,15 @@ export function buildReportFacts(m: Mission, usage: UsageRecord[]): string {
     `Totals: ${summary.totalRuns} agent runs (${summary.limitedRuns} stopped by usage limits), ` +
       `${formatCount(tokens)} tokens, estimated list-price cost $${cost.toFixed(2)}, ` +
       `about ${formatDuration(totalDurationMs(runs))} of agent time.`,
-    ...factSection("How to try it", howToRun(m)),
+    ...factSection("How to try it", [...howToRun(m), ...openFact(m)]),
   );
   return stripControlChars(lines.join("\n") + "\n");
+}
+
+/** For a mission that is documents and pages only: what is opened after the steps (the fact sheet has no Markdown, so the files are named plainly). */
+function openFact(m: Mission): string[] {
+  const open = filesToOpen(m);
+  return open ? [`Then open ${open.files.slice(0, 5).join(", ")} ${open.pages ? "in your browser" : "in your app folder"}. Nothing needs to be run.`] : [];
 }
 
 function factSection(title: string, items: string[]): string[] {
@@ -336,9 +404,39 @@ const NEVER_SAY: readonly RegExp[] = [
   /\bthe\s+engine\b/iu,
 ];
 
-/** True when `text` holds a word or phrase of the never-say list. */
+/** Words that may stand between "no" and "tests" in a denial: "no automated tests", "no new unit tests". A fixed list, so "no ... tests" cannot reach across a sentence. */
+const DENIAL_QUALIFIER = String.raw`(?:(?:automated|new|extra|additional|separate|unit|real|actual|formal|written|browser|software|code|end-to-end|usual|specific|other|more)\s+)*`;
+
+/**
+ * Phrases in which the AI says that no test was written, run or claimed: "No automated tests were written for the guide", "rather than
+ * on test results", "was not tested", "checked without tests". They hold the word "test" and say the opposite of what the list is
+ * there to keep out (real run R2: an honest summary was thrown away for saying so). Each one is taken out of the text before the list is
+ * applied, so a claim next to a denial still stands: "No tests were written, but it was tested twice" keeps "tested".
+ * "No tests failed" is no denial: it says that tests ran.
+ */
+const DENIALS: readonly RegExp[] = [
+  new RegExp(String.raw`\bno\s+${DENIAL_QUALIFIER}tests?\s+(?:(?:was|were|are|is|has\s+been|have\s+been|had\s+been|will\s+be)\s+(?:written|run|ran|added|made|used|needed|claimed|involved|done|created|included|available|possible|asked\s+for)|for|exist|exists|existed|at\s+all|here|yet)\b`, "giu"),
+  new RegExp(String.raw`\b(?:no|any|the)\s+${DENIAL_QUALIFIER}tests?\s+(?:were|was|are|is)\s+not\s+(?:written|run|ran|claimed)\b`, "giu"),
+  new RegExp(String.raw`\b(?:has|have|had|with)\s+no\s+${DENIAL_QUALIFIER}tests?\b`, "giu"),
+  new RegExp(String.raw`\bwithout\s+(?:any\s+)?${DENIAL_QUALIFIER}tests?\b`, "giu"),
+  new RegExp(String.raw`\b(?:not|never)\s+(?:been\s+)?tested\b`, "giu"),
+  /\bnothing(?:\s+\w+){0,2}\s+(?:has\s+been|have\s+been|was|is|got)\s+tested\b/giu,
+  /\bnone\s+of\s+(?:it|them|this|these|those|the\s+\w+)\s+(?:has\s+been|have\s+been|was|were|is|are)\s+tested\b/giu,
+  new RegExp(String.raw`\b(?:not|never)\s+(?:been\s+)?checked\s+by\s+(?:any\s+)?${DENIAL_QUALIFIER}tests?\b`, "giu"),
+  new RegExp(String.raw`\bnot\s+by\s+(?:any\s+|the\s+)?${DENIAL_QUALIFIER}tests?\b`, "giu"),
+  new RegExp(String.raw`\b(?:rather\s+than|instead\s+of)\s+(?:on\s+|by\s+)?(?:the\s+|any\s+)?(?:test\s+results?|${DENIAL_QUALIFIER}tests?)\b`, "giu"),
+  /\bno\s+test\s+results?\b/giu,
+];
+
+/** `text` without the phrases that deny a test (see `DENIALS`). */
+function withoutDenials(text: string): string {
+  return DENIALS.reduce((rest, re) => rest.replace(re, " "), text);
+}
+
+/** True when `text` holds a word or phrase of the never-say list, other than inside a phrase that says no test was written, run or claimed. */
 export function holdsNeverSay(text: string): boolean {
-  return NEVER_SAY.some((re) => re.test(text));
+  const rest = withoutDenials(text);
+  return NEVER_SAY.some((re) => re.test(rest));
 }
 
 /**
@@ -407,7 +505,7 @@ function waitingSection(m: Mission, cp: PendingCheckpoint, container: boolean, r
     // Above the look, so a long plan can never push it out of the first lines `mc report` shows.
     planLine(m),
     `**${oneLine(shown(look.headline))}**`,
-    bulletList(look.lines.map((line) => shown(String(line))), ""),
+    lookBullets(look.lines),
   ].filter((p) => p !== "");
   if (look.files && look.files.length > 0) parts.push(`Files that changed: ${listWords(look.files.map((p) => code(shown(p))))}.`);
   const howTo = lookHowTo(m, cp, container);
@@ -416,6 +514,20 @@ function waitingSection(m: Mission, cp: PendingCheckpoint, container: boolean, r
     parts.push(look.screenshots.map((p) => `![${screenshotCaption(p)}](${imageLink(p, reportDir)})`).join("\n\n"));
   }
   return section("Waiting for your check", parts.join("\n\n"));
+}
+
+/**
+ * The lines of the owner's look as a list, one bullet to a line. A line that starts with a space goes on with the line before it (a long
+ * sentence that was wrapped without a lead of its own): it stays under that bullet, indented as `mc plan show` indents a wrapped line, and
+ * is not a bullet of its own (real run R3).
+ */
+function lookBullets(lines: readonly unknown[]): string {
+  return lines
+    .map((line, i) => {
+      const text = String(line);
+      return i > 0 && /^\s/u.test(text) ? `  ${shown(text)}` : `- ${shown(text)}`;
+    })
+    .join("\n");
 }
 
 function sendBackEffect(cp: PendingCheckpoint, sent: number): string {
@@ -433,11 +545,15 @@ function lookHowTo(m: Mission, cp: PendingCheckpoint, container: boolean): strin
   const branch = cp.look.branch;
   if (cp.kind === "plan" || !branch || !m.repoPath) return "";
   const steps = [`cd ${shownPath(m.repoPath, container)}`, `git checkout --detach ${shellQuote(branch)}`];
-  if (m.kind === "greenfield") steps.push("npm install", "npm run dev", "open http://localhost:3000");
-  else {
-    if (m.verify?.install) steps.push(m.verify.install);
-    const start = startCommand(m.repoPath);
-    steps.push(...(start ? [start] : m.verify?.full ? [m.verify.full] : []));
+  // Documents and pages only, and no feature checked by tests: the owner opens the file(s) (real runs R2 and R3); nothing is installed, started or run.
+  const open = noneCheckedByTests(m) ? openFilesOf(cp.look.files ?? []) : undefined;
+  if (open === undefined) {
+    if (m.kind === "greenfield") steps.push("npm install", "npm run dev", "open http://localhost:3000");
+    else {
+      if (m.verify?.install) steps.push(m.verify.install);
+      const start = startCommand(m.repoPath);
+      steps.push(...(start ? [start] : m.verify?.full && !noneCheckedByTests(m) ? [m.verify.full] : []));
+    }
   }
   const starts = steps.some((cmd) => cmd === "npm run dev" || cmd === "npm start");
   const leave = [
@@ -451,6 +567,7 @@ function lookHowTo(m: Mission, cp: PendingCheckpoint, container: boolean): strin
       ? "In the Ubuntu window, run `mc shell` first: it opens a terminal inside Mission Control's container, which has everything the app needs. Then run these one at a time:"
       : "Open a terminal and run these one at a time:",
     steps.map((cmd, i) => `${i + 1}. ${describeStep(m, cmd)}`).join("\n"),
+    ...(open ? [openText(open, appsSubfolder(m, container))] : []),
     `When you're done, ${listWords(leave)}.`,
   ].join("\n\n");
 }
@@ -578,7 +695,9 @@ function howToTrySection(m: Mission, container: boolean): string {
     steps.map((cmd, i) => `${i + 1}. ${describeStep(m, cmd)}`).join("\n"),
   );
   const starts = steps.some((cmd) => cmd === "npm run dev" || cmd === "npm start");
-  if (m.kind === "feature") {
+  const open = filesToOpen(m);
+  if (open) parts.push(openText(open, folder));
+  else if (m.kind === "feature") {
     parts.push(starts ? "Then open the address it prints (often http://localhost:3000) in your browser." : "Then start your app the way you usually do.");
   }
   const leaveSteps = [
@@ -835,7 +954,7 @@ function technicalSection(m: Mission, generatedAt: string, proseLeftOut = false)
   if (notes.length > 0) parts.push("### Run notes", bulletList(notes, ""));
   if (proseLeftOut) {
     parts.push(
-      "The AI-written summary was left out, because it described how the work was checked in words that do not match Mission Control's records. The summary at the top was written by Mission Control.",
+      "The AI-written summary was left out, because it described how the work was checked in words that Mission Control could not confirm from its own records. The summary at the top was written by Mission Control.",
     );
   }
   return parts.join("\n\n");
@@ -863,10 +982,19 @@ function attemptLine(a: Attempt): string {
   return `${a.at} · rung ${a.rung} ${a.action} · ${a.provider} ${code(a.model)} (${a.effort}) · ${a.outcome}${signature}${summary}`;
 }
 
-/** Operator notes, minus the assumptions the dispatcher also copies into them (already shown above). */
+/** The architect's notes for the planner, which the dispatcher keeps in the mission's notes (`Onboarding: ...`). */
+const ONBOARDING_NOTE = /^Onboarding: /u;
+
+/**
+ * Operator notes, minus the assumptions the dispatcher also copies into them (already shown above). For a mission whose plan came from the
+ * leader, the architect's notes for the planner are also left out: they are guesses made before that plan was read, written for a planner
+ * that is skipped, and the plan can have chosen the opposite (real run R1: the note said an empty text should probably give "!", the plan
+ * said an empty text stays empty, and both were in one report).
+ */
 function runNotes(m: Mission): string[] {
   const assumptions = new Set(m.spec?.assumptions ?? []);
-  return m.notes.filter((n) => !assumptions.has(n));
+  const leaderPlan = planOf(m) !== undefined;
+  return m.notes.filter((n) => !assumptions.has(n) && !(leaderPlan && ONBOARDING_NOTE.test(n)));
 }
 
 // ───────────────────────────── Small formatting helpers ─────────────────────────────

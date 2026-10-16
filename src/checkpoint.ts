@@ -354,7 +354,9 @@ function asked(issues: string[]): string {
 /** What the owner did, in the words of the confirmations: "you approved the plan for “Shout”". */
 export function didWhat(m: Mission, cp: Pick<PendingCheckpoint, "kind" | "featureId">, decision: CheckpointAnswer["decision"]): string {
   const subject = subjectOf(m, cp);
-  return decision === "approve" ? `you approved ${subject} for “${title(m)}”` : `you sent ${subject} for “${title(m)}” back`;
+  // A feature that has the mission's own title is named once: "you approved “Usage guide”", not "... “Usage guide” for “Usage guide”" (real run R2).
+  const forMission = subject === `“${title(m)}”` ? "" : ` for “${title(m)}”`;
+  return decision === "approve" ? `you approved ${subject}${forMission}` : `you sent ${subject}${forMission} back`;
 }
 
 /** The phone notice after an answer was recorded (default priority), so an answer you did not give shows up. */

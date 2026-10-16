@@ -1,0 +1,228 @@
+{
+ "review": {
+  "checks": [
+   "The landing page exists as the file site/index.html, and it is a single self-contained HTML file with its styles inside a <style> element.",
+   "The page's <title> is word-tools.",
+   "The page has exactly one <h1> headline, and it contains the text word-tools.",
+   "The page lists exactly three benefits inside an element with data-testid=\"benefits\". Each benefit is an element with data-testid=\"benefit\", and each has a short heading and one sentence that relate to word-tools, such as having no dependencies, being tiny or giving simple text helpers like capitalize.",
+   "The page has one button or button-styled link with data-testid=\"get-started\" whose visible text is exactly Get started.",
+   "At a screen width of 375px the three benefits are stacked in one column, one below the other. The page includes <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">, and no element has a fixed width wider than 375px, so nothing scrolls sideways.",
+   "At a screen width of 1280px the three benefits sit side by side in three equal columns on one row. The CSS makes this explicit, for example with a media query at min-width 768px that sets grid-template-columns: repeat(3, 1fr) or a three-item flex row.",
+   "The page loads no outside scripts, stylesheets, fonts or images. There are no http:// or https:// URLs in src or href attributes and no @import of remote files.",
+   "No existing file under src/ is changed, and npm test still passes."
+  ],
+  "answer": {
+   "verdict": "changes",
+   "results": [
+    {
+     "number": 1,
+     "check": "The landing page exists as the file site/index.html, and it is a single self-contained HTML file with its styles inside a <style> element.",
+     "result": "pass",
+     "evidence": "site/index.html exists, and all of its CSS sits in one \"<style>\" block (lines 8–25). It has no <link> or <script> tags.",
+     "basis": "text"
+    },
+    {
+     "number": 2,
+     "check": "The page's <title> is word-tools.",
+     "result": "pass",
+     "evidence": "site/index.html line 7: \"<title>word-tools</title>\".",
+     "basis": "text"
+    },
+    {
+     "number": 3,
+     "check": "The page has exactly one <h1> headline, and it contains the text word-tools.",
+     "result": "pass",
+     "evidence": "site/index.html has a single h1, \"<h1>word-tools</h1>\" (line 30). The benefit headings are h2.",
+     "basis": "text"
+    },
+    {
+     "number": 4,
+     "check": "The page lists exactly three benefits inside an element with data-testid=\"benefits\". Each benefit is an element with data-testid=\"benefit\", and each has a short heading and one sentence that relate to word-tools, such as having no dependencies, being tiny or giving simple text helpers like capitalize.",
+     "result": "pass",
+     "evidence": "site/index.html: inside \"<div class=\"benefits\" data-testid=\"benefits\">\" there are three \"<section class=\"benefit\" data-testid=\"benefit\">\" elements. Their headings are \"No dependencies\", \"Tiny\" and \"Simple helpers\", each followed by one sentence, for example \"Use capitalize(word) to upper-case the first letter and lower-case the rest.\" That sentence matches what src/capitalize.js does.",
+     "basis": "text"
+    },
+    {
+     "number": 5,
+     "check": "The page has one button or button-styled link with data-testid=\"get-started\" whose visible text is exactly Get started.",
+     "result": "pass",
+     "evidence": "site/index.html line 32: \"<a class=\"button\" data-testid=\"get-started\" href=\"../README.md\">Get started</a>\". The .button class gives it button styling.",
+     "basis": "text"
+    },
+    {
+     "number": 6,
+     "check": "At a screen width of 375px the three benefits are stacked in one column, one below the other. The page includes <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">, and no element has a fixed width wider than 375px, so nothing scrolls sideways.",
+     "result": "pass",
+     "evidence": "The phone screenshot shows the three benefit cards stacked in one column, with nothing cut off on the right. site/index.html has \"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\" and a base rule of \".benefits { display: grid; grid-template-columns: 1fr; gap: 20px; }\". The only width set is \"max-width: 1100px\", which is a cap, not a fixed width.",
+     "basis": "picture"
+    },
+    {
+     "number": 7,
+     "check": "At a screen width of 1280px the three benefits sit side by side in three equal columns on one row. The CSS makes this explicit, for example with a media query at min-width 768px that sets grid-template-columns: repeat(3, 1fr) or a three-item flex row.",
+     "result": "pass",
+     "evidence": "The desktop screenshot shows three cards of equal width side by side on one row. site/index.html has \"@media (min-width: 768px)\" containing \".benefits { grid-template-columns: repeat(3, 1fr); }\".",
+     "basis": "picture"
+    },
+    {
+     "number": 8,
+     "check": "The page loads no outside scripts, stylesheets, fonts or images. There are no http:// or https:// URLs in src or href attributes and no @import of remote files.",
+     "result": "pass",
+     "evidence": "site/index.html has no script, link, img or @import. The only href is the relative \"../README.md\", and the file contains no http:// or https:// at all.",
+     "basis": "text"
+    },
+    {
+     "number": 9,
+     "check": "No existing file under src/ is changed, and npm test still passes.",
+     "result": "cannot_judge",
+     "evidence": "The diff changes only \"site/index.html\", so nothing under src/ was touched. I cannot run commands and saw no npm test output; the brief says only that the script's checks passed and does not say npm test was among them.",
+     "basis": "text"
+    }
+   ],
+   "seen": [
+    "site/index.html",
+    "src/capitalize.js",
+    "/work/missions/2026-10-16-landing-page/screenshots/look__landing-page__1__site-index__phone.png",
+    "/work/missions/2026-10-16-landing-page/screenshots/look__landing-page__1__site-index__desktop.png"
+   ],
+   "notes": [
+    {
+     "severity": "minor",
+     "file": null,
+     "description": "The phone screenshot appears to be about 390px wide, not the 375px named in check 6. The single-column layout and the CSS make the 375px result very likely, but nobody captured that exact width."
+    }
+   ]
+  },
+  "page": "landing-review.html"
+ },
+ "owner": {
+  "checks": [
+   "The file site/index.html exists, and the page title (the <title> element) is word-tools.",
+   "The page has exactly one main headline (one <h1>), and it contains the text word-tools.",
+   "The page lists exactly three benefits inside an element with data-testid=\"benefits\". Each benefit has data-testid=\"benefit\", a short heading and one sentence that describes a real feature of word-tools, such as small text helpers, no dependencies, or simple to use.",
+   "The page has one button or link labelled exactly Get started, with data-testid=\"get-started\".",
+   "At 375px wide the three benefits are stacked in a single column, one under the other, and the page has no sideways scrolling: no element is wider than the screen.",
+   "At 1280px wide the three benefits sit side by side in three equal columns in one row.",
+   "The layout change comes from a CSS media query or a responsive grid in the page's own styles, so a reader can see the 1-column and 3-column rules in the file.",
+   "Spacing is consistent: the benefits use the same gap between them, and the sections use the same padding at each screen width.",
+   "Font sizes are readable: body text is at least 16px, and the headline is clearly larger than the benefit headings, which in turn are larger than the body text.",
+   "Text contrast is good: dark text on a light background, or the reverse, with no light-grey-on-white or similar low-contrast text.",
+   "The Get started button stands out visually: it has a solid background colour that differs from the page background, contrasting text, padding and rounded corners, and it is the only element styled that way.",
+   "The page loads no outside scripts, fonts, stylesheets or pictures. All styles are in a <style> block in the same file.",
+   "The owner makes the final judgement on how the page looks."
+  ],
+  "answer": {
+   "verdict": "changes",
+   "results": [
+    {
+     "number": 1,
+     "check": "The file site/index.html exists, and the page title (the <title> element) is word-tools.",
+     "result": "pass",
+     "evidence": "site/index.html exists and contains \"<title>word-tools</title>\".",
+     "basis": "text"
+    },
+    {
+     "number": 2,
+     "check": "The page has exactly one main headline (one <h1>), and it contains the text word-tools.",
+     "result": "pass",
+     "evidence": "site/index.html has a single \"<h1>word-tools</h1>\". The other headings are all <h2>.",
+     "basis": "text"
+    },
+    {
+     "number": 3,
+     "check": "The page lists exactly three benefits inside an element with data-testid=\"benefits\". Each benefit has data-testid=\"benefit\", a short heading and one sentence that describes a real feature of word-tools, such as small text helpers, no dependencies, or simple to use.",
+     "result": "pass",
+     "evidence": "site/index.html has \"<div class=\\\"benefits\\\" data-testid=\\\"benefits\\\">\" containing three \"data-testid=\\\"benefit\\\"\" divs headed \"Small text helpers\", \"No dependencies\" and \"Simple to use\", each with one sentence. These match the repo: README.md says \"Tiny text helpers, with no dependencies.\" and src/index.js exports capitalize from one entry point.",
+     "basis": "text"
+    },
+    {
+     "number": 4,
+     "check": "The page has one button or link labelled exactly Get started, with data-testid=\"get-started\".",
+     "result": "pass",
+     "evidence": "site/index.html has one link: \"<a class=\\\"cta\\\" href=\\\"../README.md\\\" data-testid=\\\"get-started\\\">Get started</a>\".",
+     "basis": "text"
+    },
+    {
+     "number": 5,
+     "check": "At 375px wide the three benefits are stacked in a single column, one under the other, and the page has no sideways scrolling: no element is wider than the screen.",
+     "result": "pass",
+     "evidence": "The phone screenshot shows the three benefit cards stacked one under the other. Every card and all text fit inside the screen, and nothing is cut off on the right.",
+     "basis": "picture"
+    },
+    {
+     "number": 6,
+     "check": "At 1280px wide the three benefits sit side by side in three equal columns in one row.",
+     "result": "pass",
+     "evidence": "The desktop screenshot shows the three cards (Small text helpers, No dependencies, Simple to use) side by side in one row, all the same width and height.",
+     "basis": "picture"
+    },
+    {
+     "number": 7,
+     "check": "The layout change comes from a CSS media query or a responsive grid in the page's own styles, so a reader can see the 1-column and 3-column rules in the file.",
+     "result": "pass",
+     "evidence": "In site/index.html the base rule is \"grid-template-columns: 1fr;\", and inside \"@media (min-width: 768px)\" it changes to \".benefits { grid-template-columns: repeat(3, 1fr); gap: 24px; }\".",
+     "basis": "text"
+    },
+    {
+     "number": 8,
+     "check": "Spacing is consistent: the benefits use the same gap between them, and the sections use the same padding at each screen width.",
+     "result": "pass",
+     "evidence": "site/index.html uses \"gap: 24px;\" at both widths. All sections share \"padding: 32px 16px;\", which becomes \"section { padding: 48px 32px; }\" at 768px and wider.",
+     "basis": "text"
+    },
+    {
+     "number": 9,
+     "check": "Font sizes are readable: body text is at least 16px, and the headline is clearly larger than the benefit headings, which in turn are larger than the body text.",
+     "result": "pass",
+     "evidence": "site/index.html sets body \"font-size: 16px;\", h2 \"font-size: 24px;\", and h1 \"font-size: 40px;\", which becomes \"h1 { font-size: 56px; }\" on desktop.",
+     "basis": "text"
+    },
+    {
+     "number": 10,
+     "check": "Text contrast is good: dark text on a light background, or the reverse, with no light-grey-on-white or similar low-contrast text.",
+     "result": "pass",
+     "evidence": "site/index.html sets body \"color: #1a1a1a;\" on \"background: #ffffff;\", and the button uses \"color: #ffffff;\" on \"background: #0b4fd1;\". The light grey #c9c9c9 is used only for the card borders, not for any text.",
+     "basis": "text"
+    },
+    {
+     "number": 11,
+     "check": "The Get started button stands out visually: it has a solid background colour that differs from the page background, contrasting text, padding and rounded corners, and it is the only element styled that way.",
+     "result": "pass",
+     "evidence": "In site/index.html, .cta has \"padding: 14px 32px;\", \"border-radius: 8px;\", \"background: #0b4fd1;\" and \"color: #ffffff;\". The benefit cards have rounded corners and a border but no background fill, so the button is the only element with a solid colour, as both screenshots show.",
+     "basis": "text"
+    },
+    {
+     "number": 12,
+     "check": "The page loads no outside scripts, fonts, stylesheets or pictures. All styles are in a <style> block in the same file.",
+     "result": "pass",
+     "evidence": "site/index.html has no <script>, <link>, <img> or @import. The only styles are in the \"<style>\" block, and the font is \"system-ui, -apple-system, \\\"Segoe UI\\\", Arial, sans-serif\".",
+     "basis": "text"
+    },
+    {
+     "number": 13,
+     "check": "The owner makes the final judgement on how the page looks.",
+     "result": "cannot_judge",
+     "evidence": "This check depends on the owner's own judgement of how the page looks. I cannot see or stand in for that judgement, so I cannot pass it.",
+     "basis": "text"
+    }
+   ],
+   "seen": [
+    "site/index.html",
+    "/work/missions/2026-10-16-landing-page-owner-look/screenshots/look__landing-owner__1__site-index__phone.png",
+    "/work/missions/2026-10-16-landing-page-owner-look/screenshots/look__landing-owner__1__site-index__desktop.png",
+    "README.md",
+    "src/index.js",
+    "src/capitalize.js",
+    "src/capitalize.test.js",
+    "package.json"
+   ],
+   "notes": [
+    {
+     "severity": "minor",
+     "file": "site/index.html",
+     "description": "The first benefit says \"Each helper does one job, like capitalize\", which suggests there are several helpers. The repo has only one: src/index.js exports just capitalize. A reader could expect more helpers than actually exist."
+    }
+   ]
+  },
+  "page": "landing-owner.html"
+ }
+}

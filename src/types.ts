@@ -424,6 +424,12 @@ export interface FeatureChecked {
   /** What Mission Control's own script found in the last attempt: the problems left (at most 10, each at most 200 characters) and the facts. */
   scripted: { problems: string[]; facts: string[] };
   /**
+   * The files the feature changed that the second AI could read (repo-relative, at most 10, each at most 200 characters). The report names
+   * them when it tells the owner what to open: a guide or a page is read by opening its file, not by running the app. Absent when there
+   * were none, and in a mission file written before this key existed.
+   */
+  files?: string[];
+  /**
    * The pictures of the page as it first loads (`taken`). `why` is set only when none were taken and a page was expected.
    * `images` is the number of changed raster images that were copied for the owner and given to the second AI; it is left out
    * when there were none or the second AI was not given them.

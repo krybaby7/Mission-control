@@ -356,6 +356,44 @@ describe("buildReportFacts", () => {
     expect(notes).not.toContain("No login");
   });
 
+  // R1-3 of the real runs: the architect's guess for the planner ("probably return !") sat next to the leader plan's own choice ("stays empty").
+  describe("the architect's notes for the planner, when the leader wrote the plan (R1-3)", () => {
+    const GUESS =
+      'Onboarding: To match capitalize\'s conventions, shout should probably throw a TypeError for non-string input. For an empty string it should probably return "!". The planner should state both explicitly.';
+    const withGuess = (plan: boolean): Mission => {
+      const base = realisticMission();
+      const m: Mission = { ...base, notes: [...base.notes, GUESS] };
+      return plan ? { ...m, plan: { spec: m.spec as never, sha256: `bcd846ce${"0".repeat(56)}`, at: "2026-10-12T09:00:00.000Z" } } : m;
+    };
+
+    it("leaves the note out of the report and out of the facts for the AI that writes the summary", () => {
+      const m = withGuess(true);
+      const report = render(m, { prose: null });
+      expect(report).not.toContain("should probably");
+      expect(report).not.toContain("Onboarding:");
+      expect(buildReportFacts(m, [])).not.toContain("should probably");
+      // the other run notes stay
+      expect(sectionText(report, "Technical details")).toContain("### Run notes\n\n- Restored src/app/page.tsx, which the test author changed.");
+    });
+
+    it("keeps the note for a mission the team's planner planned (nothing changes there)", () => {
+      const m = withGuess(false);
+      expect(sectionText(render(m, { prose: null }), "Technical details")).toContain(`- ${GUESS}`);
+      expect(buildReportFacts(m, [])).toContain(GUESS);
+    });
+
+    it("leaves out no other note of a plan mission, and drops the Run notes block when only that note was there", () => {
+      const m = withGuess(true);
+      const only: Mission = { ...m, notes: [GUESS] };
+      expect(sectionText(render(only, { prose: null }), "Technical details")).not.toContain("Run notes");
+      const other: Mission = { ...m, notes: [GUESS, "Onboarding is a word that may start a note of its own", "Stopped early: the quota ran out."] };
+      const tech = sectionText(render(other, { prose: null }), "Technical details");
+      expect(tech).toContain("- Onboarding is a word that may start a note of its own");
+      expect(tech).toContain("- Stopped early: the quota ran out.");
+      expect(tech).not.toContain("should probably");
+    });
+  });
+
   it("says (none) for empty lists so the writer doesn't invent anything", () => {
     const m: Mission = {
       ...realisticMission(),
@@ -927,8 +965,200 @@ describe("a report for a mission that has a feature no test checks", () => {
     expect(report).toContain("| ✅ | Landing page | Built; a second AI checked it against your list (3 of 3 passed); it was queued without a stop for your look |");
     expect(report).toContain("| ✅ | Setup guide | Built; 1 check was not judged by anyone; it was queued without a stop for your look |");
     expect(report).toContain(
-      "Checked: 1 feature by tests; 1 feature by a second AI against your list, except 1 check it could not judge (it was queued without a stop for your look); 1 feature by a second AI against your list (it was queued without a stop for your look).",
+      "Checked: 1 feature by tests; 1 feature by a second AI against your list; 1 check could not be judged; it was queued without a stop for your look; 1 feature by a second AI against your list (it was queued without a stop for your look).",
     );
+  });
+
+  // R2-3 and R3-6 of the real runs: a guide or a page is read by opening its file; `npm test` checks nothing of it.
+  describe("a document or a page is opened, not run", () => {
+    const WINDOWS = "\\\\wsl.localhost\\Ubuntu\\home\\<your Ubuntu name>\\mc-apps\\word-tools";
+
+    beforeEach(() => {
+      vi.stubEnv("HOME", "/home/pwuser");
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    /** A change to an existing app (word-tools), finished: one feature checked by reading, whose changed files are `files`. */
+    function guideMission(files: string[] | undefined, over: Partial<Mission> = {}): Mission {
+      const m = realisticMission();
+      return {
+        ...m,
+        kind: "feature",
+        status: "done",
+        stage: "complete",
+        decisionsNeeded: [],
+        repoPath: "/home/pwuser/mc-apps/word-tools",
+        features: [
+          feature({
+            id: "guide",
+            title: "Usage guide",
+            status: "done",
+            acceptance: ["a", "b"],
+            mode: "owner",
+            checked: checked(["pass", "pass"], files === undefined ? {} : { files }),
+          }),
+        ],
+        checkpointLog: [log("feature:guide", "approve")],
+        ...over,
+      };
+    }
+
+    const tryIt = (m: Mission): string => sectionText(render(m, { inContainer: true }), "How to try it");
+
+    it("names the file of a guide, with the Windows path of the app's folder, and runs nothing", () => {
+      const text = tryIt(guideMission(["docs/USAGE.md"]));
+      expect(text).toContain("1. `cd ~/mc-apps/word-tools`: go to the app's folder");
+      expect(text).toMatch(/\n2\. `git checkout mc\/[^`]+`: switch to the version with the new work\n/);
+      expect(text).not.toMatch(/\n3\./);
+      expect(text).toContain(`Then open \`docs/USAGE.md\` in your app folder (in Windows File Explorer: \`${WINDOWS}\\docs\\USAGE.md\`).`);
+      expect(text).not.toMatch(/npm|install|start your app|project's own checks/);
+      expect(text).toContain("When you're done, put the folder back on your own version with `git checkout main` and type `exit`.");
+      expect(howToRun(guideMission(["docs/USAGE.md"]), { inContainer: true })).toEqual(["cd ~/mc-apps/word-tools", expect.stringMatching(/^git checkout mc\//)]);
+    });
+
+    it("sends the owner to a browser for a page, and to the app's folder for several files", () => {
+      expect(tryIt(guideMission(["site/index.html"]))).toContain(`Then open \`site/index.html\` in your browser (in Windows File Explorer: \`${WINDOWS}\\site\\index.html\`).`);
+      expect(tryIt(guideMission(["site/index.html", "site/about.htm"]))).toContain(`Then open \`site/index.html\` and \`site/about.htm\` in your browser (in Windows File Explorer, the app's folder is \`${WINDOWS}\`).`);
+      expect(tryIt(guideMission(["docs/USAGE.md", "site/index.html"]))).toContain("Then open `docs/USAGE.md` and `site/index.html` in your app folder (");
+      expect(tryIt(guideMission(["a.md", "b.md", "c.md", "d.md", "e.md", "f.md", "g.md"]))).toContain("Then open `a.md`, `b.md`, `c.md`, `d.md`, `e.md` and 2 more in your app folder (");
+      // a file that is listed twice, in two features, once
+      const two = guideMission(["docs/USAGE.md"]);
+      two.features.push(feature({ id: "again", title: "Again", status: "done", acceptance: ["a"], mode: "review", checked: checked(["pass"], { files: ["docs/USAGE.md"] }) }));
+      expect(tryIt(two)).toContain("Then open `docs/USAGE.md` in your app folder (in Windows File Explorer: ");
+    });
+
+    it("outside the container there is no Windows path", () => {
+      const text = sectionText(render(guideMission(["docs/USAGE.md"]), { inContainer: false }), "How to try it");
+      expect(text).toContain("Then open `docs/USAGE.md` in your app folder.");
+      expect(text).not.toContain("wsl.localhost");
+      expect(text).not.toMatch(/npm|start your app/);
+    });
+
+    it("says the same to the AI that writes the summary", () => {
+      const facts = buildReportFacts(guideMission(["docs/USAGE.md"]), []);
+      expect(facts).toContain("Then open docs/USAGE.md in your app folder. Nothing needs to be run.");
+      expect(facts.slice(facts.indexOf("How to try it:"))).not.toMatch(/npm/);
+    });
+
+    it("keeps the old steps where something is not a document or a page, or not known, or checked by tests", () => {
+      // code next to a guide: the app is started the way it was, but the project's own checks are not offered as a way to try it
+      const code = tryIt(guideMission(["docs/USAGE.md", "src/index.js"]));
+      expect(code).toContain("3. `npm install`: download what the app needs (slow the first time)");
+      expect(code).toContain("Then start your app the way you usually do.");
+      expect(code).not.toContain("npm run verify");
+      expect(code).not.toContain("Then open");
+      // a mission file from before the files were recorded
+      const old = tryIt(guideMission(undefined));
+      expect(old).toContain("Then start your app the way you usually do.");
+      expect(old).not.toContain("npm run verify");
+      // a long list may have been cut, so it is not known to be all documents
+      const many = tryIt(guideMission(Array.from({ length: 10 }, (_, i) => `docs/part${i}.md`)));
+      expect(many).not.toContain("Then open");
+      // a feature checked by tests in the same mission: the project's own checks are a way to try it, as before
+      const mixedTests = guideMission(["docs/USAGE.md"]);
+      mixedTests.features.push(feature({ id: "code", title: "Code", status: "done", acceptance: ["a"], frozenTests: [{ path: "a.test.ts", sha256: "x" }] }));
+      const withTests = tryIt(mixedTests);
+      expect(withTests).toContain("`npm run verify`: run the project's own checks");
+      expect(withTests).not.toContain("Then open");
+      // a feature that was blocked does not count either way
+      const blocked = guideMission(["docs/USAGE.md"]);
+      blocked.features.push(feature({ id: "stuck", title: "Stuck", status: "blocked", blockedReason: "x" }));
+      expect(tryIt(blocked)).toContain("Then open `docs/USAGE.md`");
+    });
+
+    it("leaves a mission with no mode feature exactly as it was", () => {
+      const m = realisticMission();
+      expect(sectionText(render(m, { inContainer: true }), "How to try it")).toContain("3. `npm run dev`: start the app (leave this window open while you try it)");
+      expect(sectionText(render(m, { inContainer: true }), "How to try it")).not.toContain("Then open");
+      // a change to an app with no start script, checked by tests: the project's own checks are the last step, as before
+      const change: Mission = { ...m, kind: "feature", repoPath: "/home/pwuser/mc-apps/no-start" };
+      expect(howToRun(change, { inContainer: true })).toEqual(["cd ~/mc-apps/no-start", expect.stringMatching(/^git checkout /), "npm install", "npm run verify"]);
+    });
+
+    describe("at the owner's look", () => {
+      const lookOf = (files: string[], over: Partial<Mission> = {}): Mission => {
+        const base = guideMission(["docs/USAGE.md"]);
+        const f = { ...(base.features[0] as Feature), status: "reviewing" as const };
+        return {
+          ...base,
+          status: "stopped",
+          stage: "features",
+          features: [f],
+          checkpointLog: [],
+          checkpoint: {
+            id: "feature:guide#1",
+            scope: "feature:guide",
+            kind: "feature",
+            featureId: "guide",
+            round: 1,
+            state: "pending",
+            parkedAt: "2026-10-10T04:00:00.000Z",
+            look: { headline: "Check “Usage guide” before it is added", lines: ["It is built."], branch: "mc/2026-10-10-word-tools--guide", files },
+          },
+          ...over,
+        };
+      };
+      const lookText = (m: Mission): string => {
+        const report = render(m, { inContainer: true });
+        return report.slice(report.indexOf("To look at it yourself:"), report.indexOf("## ", report.indexOf("To look at it yourself:")));
+      };
+
+      it("names the file to open and runs no project check", () => {
+        const text = lookText(lookOf(["docs/USAGE.md"]));
+        expect(text).toContain("1. `cd ~/mc-apps/word-tools`: go to the app's folder");
+        expect(text).toContain("2. `git checkout --detach mc/2026-10-10-word-tools--guide`: switch to the version with the new work");
+        expect(text).not.toMatch(/\n3\./);
+        expect(text).toContain(`Then open \`docs/USAGE.md\` in your app folder (in Windows File Explorer: \`${WINDOWS}\\docs\\USAGE.md\`).`);
+        expect(text).not.toMatch(/npm|start your app|project's own checks/);
+        expect(text.indexOf("Then open")).toBeLessThan(text.indexOf("When you're done"));
+      });
+
+      it("opens a page in a browser", () => {
+        expect(lookText(lookOf(["site/index.html"]))).toContain("Then open `site/index.html` in your browser (in Windows File Explorer: ");
+      });
+
+      it("keeps the project's own checks away from a mission that no test checks, but not from one a test checks", () => {
+        const code = lookText(lookOf(["docs/USAGE.md", "src/index.js"]));
+        expect(code).toContain("3. `npm install`: download what the app needs (slow the first time)");
+        expect(code).not.toMatch(/npm run verify|Then open/);
+        const mixedTests = lookOf(["docs/USAGE.md"]);
+        mixedTests.features.push(feature({ id: "code", title: "Code", status: "pending", acceptance: ["a"] }));
+        const text = lookText(mixedTests);
+        expect(text).toContain("3. `npm install`");
+        expect(text).toContain("4. `npm run verify`: run the project's own checks");
+        expect(text).not.toContain("Then open");
+        // ten files listed: the list may have been cut
+        expect(lookText(lookOf(Array.from({ length: 10 }, (_, i) => `docs/part${i}.md`)))).not.toContain("Then open");
+      });
+    });
+  });
+
+  // R2-5 and R3-7 of the real runs: a taste check ends "(the CEO decides)", and the second AI always says it cannot judge it.
+  it("says a taste check is left for you, and keeps that clause apart from the approval (real runs R2 and R3)", () => {
+    const m = mixed();
+    m.features = [
+      feature({
+        id: "guide",
+        title: "Usage guide",
+        status: "done",
+        acceptance: ["It has an Install part.", "It has a Use part.", "The guide reads as friendly (the CEO decides)."],
+        mode: "owner",
+        checked: checked(["pass", "pass", "cannot_judge"]),
+      }),
+    ];
+    m.checkpointLog = [log("feature:guide", "approve")];
+    const report = render(m, { prose: null });
+    expect(report).toContain("Checked: 1 feature by a second AI against your list; 1 check left for you; approved by you.\n");
+    expect(report).toContain("| ✅ | Usage guide | Built; 1 check left for you; approved by you |");
+    expect(report).not.toMatch(/except|not judged by anyone|could not judge/);
+    // the fact sheet the AI writes the summary from says the same
+    expect(buildReportFacts(m, [])).toContain("Checked by: a second AI against your list; 1 check left for you; approved by you. No tests were written for it.");
+    // queued without a stop: nobody is asked, so it was not judged by anyone
+    const queued = { ...m, ownerStops: false as const, checkpointLog: [] };
+    expect(render(queued, { prose: null })).toContain("Checked: 1 feature by a second AI against your list; 1 check could not be judged; it was queued without a stop for your look.\n");
+    expect(render(queued, { prose: null })).toContain("| ✅ | Usage guide | Built; 1 check was not judged by anyone; it was queued without a stop for your look |");
   });
 
   it("counts the review notes only where the words do not already point to them", () => {
@@ -979,7 +1209,7 @@ describe("a report for a mission that has a feature no test checks", () => {
       expect(report).not.toContain(prose.narrative);
       expect(report).toContain("All 3 features are built. The “Checked” line");
       expect(sectionText(report, "What you can do now")).toContain("**Setup guide**: You can setup guide.");
-      expect(sectionText(report, "Technical details")).toContain("The AI-written summary was left out, because it described how the work was checked in words that do not match Mission Control's records.");
+      expect(sectionText(report, "Technical details")).toContain("The AI-written summary was left out, because it described how the work was checked in words that Mission Control could not confirm from its own records.");
       expect(sectionText(report, "What you can do now")).not.toContain("Everything is tested");
     }
     // a summary that says nothing about tests is kept
@@ -1016,7 +1246,7 @@ describe("a report for a mission that has a feature no test checks", () => {
       const report = render(mixed(), { prose });
       expect(report).not.toContain(text);
       expect(report).toContain("All 3 features are built. The “Checked” line");
-      expect(sectionText(report, "Technical details")).toContain("The AI-written summary was left out, because it described how the work was checked in words that do not match Mission Control's records.");
+      expect(sectionText(report, "Technical details")).toContain("The AI-written summary was left out, because it described how the work was checked in words that Mission Control could not confirm from its own records.");
     }
   });
 
@@ -1040,6 +1270,91 @@ describe("a report for a mission that has a feature no test checks", () => {
     for (const [label, text] of NEVER_SAY_TEXTS) expect(holdsNeverSay(text), label).toBe(true);
     expect(holdsNeverSay("The guide and the page are ready.")).toBe(false);
     expect(holdsNeverSay("")).toBe(false);
+  });
+
+  // R2-1 of the real runs: an honest summary that says no test was written was thrown away, and the footnote blamed Mission Control's records.
+  const REAL_R2_SUMMARY: ReportProseOutput = {
+    narrative:
+      "The word-tools project now has a short usage guide with two parts: how to install it, and how to use its capitalize feature. A second AI reviewer checked the guide against your request, and it approved everything except one point it could not judge, which you approved yourself. No automated tests were written for the guide, so its correctness rests on that review and your approval rather than on test results. Nothing from the request was skipped or left unfinished, and no decisions are needed from you.",
+    whatYouCanDo: ["Read a short guide that explains how to install word-tools", "Read a guide that shows how to use capitalize, with an example of its output"],
+  };
+
+  it("keeps the real honest summary of run R2, which says that no test was written", () => {
+    const report = render(mixed(), { prose: REAL_R2_SUMMARY });
+    expect(report).toContain("No automated tests were written for the guide, so its correctness rests on that review and your approval rather than on test results.");
+    expect(sectionText(report, "What you can do now")).toBe("- Read a short guide that explains how to install word-tools\n- Read a guide that shows how to use capitalize, with an example of its output");
+    expect(sectionText(report, "Technical details")).not.toContain("left out");
+    expect(report).not.toContain("do not match Mission Control's records");
+  });
+
+  // Denials: the AI says that nothing was tested. These have the word and mean the opposite of a claim.
+  const DENIALS_LET_THROUGH: string[] = [
+    "No tests were written for the guide.",
+    "No automated tests were written for the guide, so it rests on the review rather than on test results.",
+    "No new unit tests were added, and none were run.",
+    "No test was written for this page.",
+    "No tests were run.",
+    "No tests are claimed for it.",
+    "No test is claimed.",
+    "There are no tests for the guide.",
+    "The guide has no tests.",
+    "It has no automated tests at all.",
+    "The guide was not tested, and nobody says it was.",
+    "Nothing here has been tested.",
+    "None of it was tested.",
+    "It was never tested.",
+    "It was checked by a second AI, not by tests.",
+    "It was checked without tests.",
+    "It was checked without any automated tests.",
+    "It is not checked by tests.",
+    "It rests on the review instead of tests.",
+    "The tests were not written, because this is a guide.",
+    "There are no test results to show.",
+    "NO TESTS WERE WRITTEN FOR IT.",
+    "No\ntests\nwere written.",
+  ];
+
+  it.each(DENIALS_LET_THROUGH)("lets a denial through: %s", (text) => {
+    expect(holdsNeverSay(text)).toBe(false);
+    for (const prose of [{ narrative: text, whatYouCanDo: ["Read the guide"] }, { narrative: "The guide is ready.", whatYouCanDo: [text] }]) {
+      const report = render(mixed(), { prose });
+      expect(sectionText(report, "Technical details")).not.toContain("left out");
+      expect(report.replace(/\s+/g, " ")).toContain(text.replace(/\s+/g, " "));
+    }
+  });
+
+  // Claims, also next to a denial, still leave the summary out.
+  const CLAIMS_STILL_CAUGHT: string[] = [
+    "All the tests passed.",
+    "No tests failed.",
+    "No tests were written first, but the guide was tested twice.",
+    "No tests were written for the page, and the tests passed for the guide.",
+    "It was tested and it works. No tests were written for the other page.",
+    "Nobody wrote tests, but they all pass.",
+    "The tests were written and run, and none were left out.",
+    "Without any problems, the tests passed.",
+    "It was checked by tests.",
+    "It was checked by a second AI and by tests.",
+    "We ran the tests rather than reading it.",
+    "No tests were written. The page was verified and it is correct.",
+    "No tests were written, and the steps are guaranteed to work.",
+    "Testing showed no problems.",
+    "It was tested without any trouble.",
+  ];
+
+  it.each(CLAIMS_STILL_CAUGHT)("still leaves out a claim: %s", (text) => {
+    expect(holdsNeverSay(text)).toBe(true);
+    const report = render(mixed(), { prose: { narrative: text, whatYouCanDo: ["Read the guide"] } });
+    expect(report).not.toContain(text);
+    expect(sectionText(report, "Technical details")).toContain("The AI-written summary was left out");
+  });
+
+  it("the footnote for a summary that was left out never says that its words do not match the records", () => {
+    for (const text of CLAIMS_STILL_CAUGHT) {
+      const tech = sectionText(render(mixed(), { prose: { narrative: text, whatYouCanDo: [] } }), "Technical details");
+      expect(tech).toContain("The AI-written summary was left out, because it described how the work was checked in words that Mission Control could not confirm from its own records. The summary at the top was written by Mission Control.");
+      expect(tech).not.toContain("do not match");
+    }
   });
 
   it("the plain narrative that stands in for it holds none of these words", () => {

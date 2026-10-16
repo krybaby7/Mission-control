@@ -64,6 +64,13 @@ describe("prompts/maker.md and prompts/checker.md", () => {
     expect(files.checker).toContain("Quotes must be exact.");
   });
 
+  it("R3-1: the checker is told what to quote: visible text, style rules or markup it can copy, and no quotation marks inside a quote", () => {
+    expect(files.checker).toContain("Quote visible text, a rule of the style sheet, or markup that you can copy letter for letter.");
+    expect(files.checker).toContain("Avoid quotation marks inside a quote: for a tag with attributes, quote the words between the tags, or say in words which attribute you saw.");
+    // The line about a quote of a picture stays: the checker quotes files, never pictures.
+    expect(files.checker).toContain("Quote files, never pictures.");
+  });
+
   it("are not the prompts of the five roles", () => {
     for (const role of ["architect", "engineer", "test_author", "reviewer", "scout"] as const) {
       expect(loadRolePrompt(role)).not.toBe(files.maker);
@@ -227,6 +234,49 @@ describe("the briefs of a mission that has a mode feature", () => {
     const text = specPrompt(m, null, { previous: { ...modeSpec, summary: "s" }, issues: ["Split it"] });
     expect(text).toContain("Some features are judged by reading the result and not by tests. Their ids are: `track-habit`, `about-page`. Keep every one of these ids, do not split, merge or drop these features, and write their checks as statements a reader can judge from the files, not as tests.");
     expect(specPrompt(m, null, { previous: SPEC, issues: ["Split it"] })).not.toContain("judged by reading the result");
+  });
+
+  it("R3-2: gate A says how a feature checked by reading is judged, keeps the owner's checks and the taste check, and names the real widths", () => {
+    const text = gateAPrompt(m);
+    expect(text).toContain("A feature marked as checked by a second AI is judged only by reading its files and, for a page, by looking at two pictures of it, drawn 390 px wide (phone) and 1280 px wide (desktop). No command is run for it.");
+    expect(text).toContain("So do not ask for a check that needs a command to run, such as the project's tests passing, or one that needs the owner's judgement to be answered, and do not ask for any other pixel width.");
+    expect(text).toContain("Their checks are the owner's own words: do not ask to rewrite, add or replace them.");
+    expect(text).toContain("A taste check that ends with “(the CEO decides)” is left for the owner to answer, and it is not an error: keep it.");
+    // A plan with no mode gets none of it (its whole text is also pinned by the golden file).
+    expect(gateAPrompt(mission())).not.toMatch(/second AI|pixel|CEO decides/);
+  });
+
+  it("R3-2 and R3-3: the revision tells the planner to keep the checks as written, keep the taste check, and name no pixel width but the two drawn ones", () => {
+    const text = specPrompt(m, null, { previous: { ...modeSpec, summary: "s" }, issues: ["Split it"] });
+    expect(text).toContain("Those features are judged only by reading their files and, for a page, by looking at two pictures of it, drawn 390 px wide (phone) and 1280 px wide (desktop). No command is run for them.");
+    expect(text).toContain("So no check may need a command to run, such as the project's tests passing, and no check may need the owner's judgement to be answered. A page is never drawn at any other width, so name no other pixel width.");
+    expect(text).toContain("The checks of these features are the owner's own words. A taste check that ends with “(the CEO decides)” is left for the owner to answer, and it stays too.");
+    expect(text).toContain("Keep every check of these features exactly as it is in the previous spec, in the same order, with none added and none taken away, even when an issue below asks for another change to one of them. Make the other changes.");
+    const noMode = specPrompt(mission(), null, { previous: SPEC, issues: ["Split it"] });
+    expect(noMode).not.toMatch(/second AI|pixel|CEO decides|owner's own words/);
+    expect(noMode).toBe(specPrompt(mission(), null, { previous: SPEC, issues: ["Split it"], byOwner: true }));
+  });
+
+  it("R3-2: when the owner sent the plan back, the note may change a check, and nothing else may", () => {
+    const text = specPrompt(m, null, { previous: { ...modeSpec, summary: "s" }, issues: ["The owner asked for this change to the plan: shorter"], byOwner: true });
+    expect(text).toContain("Change a check only where the owner's note asks for it, and keep every other check exactly as it is in the previous spec, in the same order. A taste check that ends with “(the CEO decides)” stays unless the note asks to change it.");
+    expect(text).not.toContain("even when an issue below asks for another change");
+    expect(text).toContain("A page is never drawn at any other width");
+  });
+
+  it("R3-3: the two widths in the briefs are the two widths the pages are drawn at", () => {
+    const render = readFileSync(join(packageRoot(), "src", "render.ts"), "utf8");
+    expect(render).toMatch(/phone: \{ width: 390, height: 844 \}/);
+    expect(render).toMatch(/desktop: \{ width: 1280, height: 800 \}/);
+  });
+
+  it("the added sentences follow the wording rules: no long dash, no time of day, never the word objective", () => {
+    const texts = [gateAPrompt(m), specPrompt(m, null, { previous: { ...modeSpec, summary: "s" }, issues: ["x"] }), specPrompt(m, null, { previous: { ...modeSpec, summary: "s" }, issues: ["x"], byOwner: true })];
+    for (const text of texts) {
+      expect(text).not.toMatch(HIDDEN_OR_LONG_DASH);
+      expect(text).not.toMatch(/objective/i);
+      expect(text.replace(/midn[i]ght/gi, "")).not.toMatch(/n[i]ght|mor[n]ing/i);
+    }
   });
 
   it("gate C gets the added paragraph only when a done feature has a mode, and says how each done feature was checked", () => {

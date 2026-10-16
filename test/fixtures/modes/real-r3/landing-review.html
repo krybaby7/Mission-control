@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="word-tools: tiny text helpers, with no dependencies.">
+<title>word-tools</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; line-height: 1.5; color: #1a1a2e; background: #f7f7fb; }
+  main { max-width: 1100px; margin: 0 auto; padding: 48px 20px; }
+  header { text-align: center; margin-bottom: 40px; }
+  h1 { font-size: 2.25rem; margin: 0 0 12px; }
+  .lead { font-size: 1.125rem; margin: 0 0 24px; color: #444; }
+  .button { display: inline-block; padding: 14px 32px; border-radius: 8px; background: #3b3bd6; color: #fff; font-weight: 600; text-decoration: none; }
+  .button:hover, .button:focus { background: #2a2aa8; }
+  .benefits { display: grid; grid-template-columns: 1fr; gap: 20px; }
+  .benefit { background: #fff; border: 1px solid #dcdce8; border-radius: 8px; padding: 20px; }
+  .benefit h2 { font-size: 1.25rem; margin: 0 0 8px; }
+  .benefit p { margin: 0; }
+  @media (min-width: 768px) {
+    h1 { font-size: 3rem; }
+    .benefits { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>word-tools</h1>
+    <p class="lead">Tiny text helpers, with no dependencies.</p>
+    <a class="button" data-testid="get-started" href="../README.md">Get started</a>
+  </header>
+  <div class="benefits" data-testid="benefits">
+    <section class="benefit" data-testid="benefit">
+      <h2>No dependencies</h2>
+      <p>word-tools installs on its own, with nothing else to download.</p>
+    </section>
+    <section class="benefit" data-testid="benefit">
+      <h2>Tiny</h2>
+      <p>The whole library is a few lines of plain JavaScript that are easy to read.</p>
+    </section>
+    <section class="benefit" data-testid="benefit">
+      <h2>Simple helpers</h2>
+      <p>Use capitalize(word) to upper-case the first letter and lower-case the rest.</p>
+    </section>
+  </div>
+</main>
+</body>
+</html>

@@ -172,6 +172,17 @@ describe("mc approve", () => {
     expect(out).toContain("Recorded: you approved the finished app for “Other”.");
   });
 
+  it("names a feature that has the mission's own title once, not “X” for “X” (real run R2)", async () => {
+    const feature = { id: "usage-guide", title: "Usage guide", story: "", acceptance: [], kind: "standard" as const, deps: [], status: "reviewing" as const, rung: 0, attempts: [], frozenTests: [], reviewRounds: 0, openFindings: [] };
+    const a = parked("Usage guide", pending("feature", 1, "usage-guide"), { features: [feature] });
+    expect(await mc("approve", a.id)).toBe(0);
+    expect(out).toBe(`Recorded: you approved “Usage guide”.\nIt continues on the next run, for example: mc run --mission ${a.id}\n`);
+    const b = parked("Usage guide", pending("feature", 1, "usage-guide"), { features: [feature] });
+    expect(await mc("send-back", b.id, "--note", "shorter")).toBe(0);
+    expect(out).toContain("Recorded: you sent “Usage guide” back.");
+    expect(out).not.toMatch(/for “Usage guide”/);
+  });
+
   it("sends one phone notice of default priority, without the note", async () => {
     expect(await mc("config", "set", "notify.ntfyUrl", "https://ntfy.example/topic")).toBe(0);
     const m = parked();

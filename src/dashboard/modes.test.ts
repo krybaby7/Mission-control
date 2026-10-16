@@ -124,6 +124,32 @@ describe("T-MODES-2: how a finished feature was checked (the table of spec 10.1)
     expect(row(reading("a", ["pass"], { mode: "owner" })).row).toBe(7);
   });
 
+  // R2-5 of the real runs: a taste check ends "(the CEO decides)", and the second AI can only say that it cannot judge it.
+  it("a taste check that nobody judged is left for the owner, and only where the owner is asked", () => {
+    const TASTE = "(the CEO decides)"; // all the page keeps of the text of a taste check (read.ts); every other check is kept as ""
+    const taste = (results: CheckResult[], o: Partial<Feature> = {}) => reading("a", results, { mode: "owner", acceptance: ["", "", TASTE], ...o });
+    const m = mission([]);
+    expect(checkedFacts(m, taste(["pass", "pass", "cannot_judge"]))).toMatchObject({ row: 6, unjudged: 1, left: 1 });
+    expect(checkedFacts(m, taste(["pass", "cannot_judge", "cannot_judge"]))).toMatchObject({ row: 6, unjudged: 2, left: 1 });
+    // judged by the second AI, or an ordinary check: nothing is left for the owner, and the key is absent
+    expect(checkedFacts(m, taste(["pass", "pass", "pass"]))).not.toHaveProperty("left");
+    expect(checkedFacts(m, taste(["pass", "cannot_judge", "pass"]))).not.toHaveProperty("left");
+    expect(checkedFacts(m, taste(["fail", "pass", "pass"]))).not.toHaveProperty("left");
+    expect(checkedFacts(m, reading("a", ["pass", "pass", "cannot_judge"], { mode: "owner", acceptance: ["", "", ""] }))).not.toHaveProperty("left");
+    // queued without a stop for the owner's look: nobody answers it, so it is not left for anyone
+    expect(checkedFacts(mission([], { ownerStops: false }), taste(["pass", "pass", "cannot_judge"]))).toMatchObject({ row: 6, unjudged: 1, queuedWithoutLook: true });
+    expect(checkedFacts(mission([], { ownerStops: false }), taste(["pass", "pass", "cannot_judge"]))).not.toHaveProperty("left");
+    // approved after all: the owner was asked
+    const f = taste(["pass", "pass", "cannot_judge"]);
+    expect(checkedFacts(mission([f], { ownerStops: false, checkpointLog: [answer("a", "approve")] }), f)).toMatchObject({ approved: true, left: 1 });
+    // a review that did not finish has no checks left for anyone
+    expect(checkedFacts(m, taste([], { checked: checkedOf([], { unfinished: true }) }))).not.toHaveProperty("left");
+    // the number of the check is the one the engine wrote
+    const lastOnly: Feature = taste(["pass", "pass", "cannot_judge"]);
+    lastOnly.checked = { ...(lastOnly.checked as FeatureChecked), results: [{ n: 1, result: "pass", evidence: "", basis: "text" }, { n: 3, result: "pass", evidence: "", basis: "text" }], unjudged: 1 };
+    expect(checkedFacts(m, lastOnly)).not.toHaveProperty("left"); // check 3 was judged; the one nobody judged is check 2
+  });
+
   it("queued without a stop for the owner's look: only with ownerStops false, never once approved, and only where the stop would have been", () => {
     const flag = (f: Feature, o: Partial<Mission> = {}) => checkedFacts(mission([f], { ownerStops: false, ...o }), f).queuedWithoutLook;
     expect(flag(reading("a", ["pass"], { mode: "owner" }))).toBe(true);
@@ -176,6 +202,19 @@ describe("T-MODES-3: the words of the Results line (spec 11.4)", () => {
     expect(checkedByWords(h(6, { unjudged: 3 }))).toBe("Checked by a second AI against your list; 3 checks were not judged");
     expect(checkedByWords(h(6, { unjudged: 1 }))).toBe("Checked by a second AI against your list; 1 check was not judged");
     expect(checkedByWords(h(7))).toBe("Checked by a second AI against your list");
+  });
+
+  it("row 6 names the checks left for you apart from the checks that were not judged, one clause each (R2-5, R3-7)", () => {
+    expect(checkedByWords(h(6, { unjudged: 1, left: 1, approved: true }))).toBe("Checked by a second AI against your list; 1 check left for you; approved by you");
+    expect(checkedByWords(h(6, { unjudged: 1, left: 1 }))).toBe("Checked by a second AI against your list; 1 check left for you");
+    expect(checkedByWords(h(6, { unjudged: 3, left: 1, approved: true }))).toBe("Checked by a second AI against your list; 2 checks were not judged; 1 check left for you; approved by you");
+    expect(checkedByWords(h(6, { unjudged: 2, left: 2 }))).toBe("Checked by a second AI against your list; 2 checks left for you");
+    expect(checkedGroupWords(h(6, { unjudged: 1, left: 1, approved: true }))).toBe("by a second AI against your list (1 check left for you) and approved by you");
+    expect(checkedGroupWords(h(6, { unjudged: 3, left: 1 }))).toBe("by a second AI against your list (2 checks not judged; 1 check left for you)");
+    expect(checkedSummary([h(6, { unjudged: 1, left: 1, approved: true }), h(7)])).toBe("1 by a second AI against your list (1 check left for you) and approved by you, 1 by a second AI against your list");
+    for (const text of [checkedByWords(h(6, { unjudged: 1, left: 1, approved: true })), checkedGroupWords(h(6, { unjudged: 1, left: 1, approved: true }))]) {
+      expect(text).not.toMatch(/except|\btest(s|ed|ing)?\b|looked at it|different AI/i);
+    }
   });
 
   it("rows 4 to 7 take an ending: approved by you, or queued without a stop for your look; row 2 takes the approval", () => {

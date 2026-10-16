@@ -402,6 +402,12 @@ function queuedText(h: CheckedFacts): string {
   return h.noPicture ? `${QUEUED_WITHOUT_LOOK}; ${NO_PICTURE_SHOWN}` : QUEUED_WITHOUT_LOOK;
 }
 
+/** The checks nobody judged, split in the two things that are true of them: the taste checks left for the owner, and the others the second AI could not judge. */
+function unjudgedParts(h: CheckedFacts): { left: number; other: number } {
+  const left = Math.min(h.left ?? 0, h.unjudged);
+  return { left, other: h.unjudged - left };
+}
+
 /** The line under a finished feature in "What you got". */
 export function checkedByWords(h: CheckedFacts): string {
   const ending = h.approved ? "; approved by you" : h.queuedWithoutLook ? `; ${queuedText(h)}` : "";
@@ -416,8 +422,11 @@ export function checkedByWords(h: CheckedFacts): string {
       return `Checked by Mission Control's own checks only; the second AI's check did not finish${ending}`;
     case 5:
       return `Checked by a second AI against your list; ${count(h.unmet, "check was", "checks were")} not met${ending}`;
-    case 6:
-      return `Checked by a second AI against your list; ${count(h.unjudged, "check was", "checks were")} not judged${ending}`;
+    case 6: {
+      const { left, other } = unjudgedParts(h);
+      const unjudged = [...(other > 0 ? [`${count(other, "check was", "checks were")} not judged`] : []), ...(left > 0 ? [`${count(left, "check", "checks")} left for you`] : [])];
+      return `Checked by a second AI against your list; ${unjudged.join("; ")}${ending}`;
+    }
     case 7:
       return `Checked by a second AI against your list${ending}`;
   }
@@ -445,8 +454,10 @@ export function checkedGroupWords(h: CheckedFacts): string {
       return `by Mission Control's own checks only${inBrackets(queued)}${approved}`;
     case 5:
       return `by a second AI against your list${inBrackets(`${count(h.unmet, "check", "checks")} not met`, queued)}${approved}`;
-    case 6:
-      return `by a second AI against your list${inBrackets(`${count(h.unjudged, "check", "checks")} not judged`, queued)}${approved}`;
+    case 6: {
+      const { left, other } = unjudgedParts(h);
+      return `by a second AI against your list${inBrackets(other > 0 ? `${count(other, "check", "checks")} not judged` : null, left > 0 ? `${count(left, "check", "checks")} left for you` : null, queued)}${approved}`;
+    }
     case 7:
       return h.approved ? "by a second AI and approved by you" : `by a second AI against your list${inBrackets(queued)}`;
   }
