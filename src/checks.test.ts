@@ -1370,6 +1370,38 @@ describe("judgeRubric", () => {
     expect(twelve.results[0]!.result).toBe("pass");
   });
 
+  it("W2e-R4: evidence that is nothing but a web address, a link, a picture or a tag is no evidence, however long it is written", () => {
+    const nothing = [
+      "http://x", // 8 characters
+      "a://b",
+      "www.a.b",
+      "https://a.b/c", // 13 characters, and the words that stand for the address are longer still
+      "https://example.com/a/very/long/address/that/goes/on",
+      "https://a.example/b https://c.example/d",
+      "![](https://a.example/b.png)",
+      "[](//host.example/x)",
+      "mailto:someone@example.com",
+      "someone@example.com",
+      "javascript:alert(1)",
+      "<img src=x onerror=alert(1)>",
+      "<b></b> <i></i> <br>",
+    ];
+    for (const evidence of nothing) {
+      const j = ok(judgeRubric(input(answer([{ evidence }]))));
+      expect(j.results[0], evidence).toMatchObject({ result: "cannot_judge", evidence: "No evidence was given." });
+      expect(j.downgraded, evidence).toBe(1);
+      expect(j.verdict, evidence).toBe("changes");
+    }
+  });
+
+  it("W2e-R4: evidence with words in it still counts when it also holds an address, and what was written is measured before the cleaning", () => {
+    const j = ok(judgeRubric(input(answer([{ evidence: "The guide says how to start it, see https://a.example/b" }, { evidence: "[The start section](https://a.example/b) names the command" }, { evidence: "yes it does" }]))));
+    expect(j.results.map((r) => r.result)).toEqual(["pass", "pass", "cannot_judge"]);
+    expect(j.results[0]!.evidence).toBe("The guide says how to start it, see (web address removed)");
+    expect(j.results[2]!.evidence).toBe("No evidence was given."); // 11 characters, as before
+    expect(j.downgraded).toBe(1);
+  });
+
   it("downgrades a pass whose quote is not in the files, and keeps one that is", () => {
     const j = ok(judgeRubric(input(answer([{ evidence: 'It says “Install with the magic wand” in docs/setup.md' }]))));
     expect(j.results[0]!.result).toBe("cannot_judge");

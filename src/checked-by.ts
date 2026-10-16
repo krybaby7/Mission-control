@@ -318,6 +318,19 @@ export function lookReason(m: CheckedMission, f: Feature): LookReason | undefine
 }
 
 /**
+ * The reason the owner is told for a stop at feature `f` ("The team stopped because ..."): `lookReason`, except that the old words
+ * (`you asked to look at ... first`, which `whyStopped` then uses) stay for a feature the engine did not add itself when `--checkpoint feature`
+ * is on, since that stop is the owner's own. A repair or a change the engine added is never covered by that flag, so it always says its own
+ * reason, whether that is the work it changed or a send-back. The dashboard's `lookWhy` (src/dashboard/modes.ts) is the same rule in the
+ * dashboard's own copy of the table; test/modes-look-agree.test.ts checks the two against each other on every combination.
+ */
+export function shownLookReason(m: CheckedMission, f: Feature): LookReason | undefined {
+  const reason = lookReason(m, f);
+  if (reason === undefined) return undefined;
+  return isDerivedFeature(f.id) || m.checkpoints?.includes("feature") !== true ? reason : undefined;
+}
+
+/**
  * The look's line 8 (spec 10.2): `You are asked because the plan marks this feature for your look.`,
  * `You are asked because the second AI could not judge <u> of the checks.`, `You are asked because the second AI's check did not
  * finish.`, `You are asked again because you sent it back.` `unjudged` is used only for "not_judged".

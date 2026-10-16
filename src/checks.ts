@@ -18,7 +18,7 @@ import { lstat, open, realpath } from "node:fs/promises";
 import { join, posix, sep } from "node:path";
 import type { RenderedPage } from "./render.js";
 import type { CheckedResult, Family, FeatureExpect, Finding, RubricOutput } from "./types.js";
-import { cleanAiText, isHiddenChar } from "./util/ai-text.js";
+import { cleanAiText, hasWords, isHiddenChar, writtenLength } from "./util/ai-text.js";
 
 // ───────────────────────────── Limits ─────────────────────────────
 
@@ -2327,8 +2327,9 @@ export function judgeRubric(input: RubricInput): RubricJudgement {
     let evidence = cleanEvidence(r.evidence);
     const basis = r.basis;
     if (result === "pass") {
-      if (evidence.length < MIN_EVIDENCE) {
-        // 3. A pass needs evidence.
+      if (writtenLength(r.evidence) < MIN_EVIDENCE || !hasWords(r.evidence)) {
+        // 3. A pass needs evidence. How much was written is measured before the cleaning (the words that stand for a web address are
+        // not writing), and a text that says nothing once its addresses, links and tags are taken out is no evidence at all.
         result = "cannot_judge";
         evidence = "No evidence was given.";
         downgraded++;

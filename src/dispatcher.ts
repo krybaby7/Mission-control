@@ -470,6 +470,12 @@ interface PictureFile {
 interface PictureSet {
   /** A page, a drawing or an image was to be pictured. */
   expected: boolean;
+  /**
+   * The feature changed something that is drawn: a page, a drawing, a style sheet or an image. Only then is a missing picture a reason
+   * to ask the owner. A project page that nothing changed in is also drawn, when the feature changed a file of another kind (a licence,
+   * a setting, code); that picture is an extra, and a failure to take it or to give it to the second AI is a fact, not a reason.
+   */
+  matters: boolean;
   /** PNG files the picture tool wrote. */
   taken: number;
   why?: PictureWhy;
@@ -479,7 +485,7 @@ interface PictureSet {
   images: PictureFile[];
 }
 
-const NO_PICTURES: PictureSet = { expected: false, taken: 0, pages: [], images: [] };
+const NO_PICTURES: PictureSet = { expected: false, matters: false, taken: 0, pages: [], images: [] };
 
 /** What Mission Control's own checks found in a feature that is checked by reading, with the pictures taken for it. */
 interface DeliverableResult {
@@ -2310,6 +2316,8 @@ class MissionRun {
       pages = await this.untouchedPages(wt);
       fallback = pages.length > 0;
     }
+    // The engine cannot tell which checks need a picture, so what decides is what the feature changed: a page, a drawing, a style sheet or an image.
+    const matters = changedPages.length > 0 || drawings.length > 0 || images.length > 0 || d.files.some((x) => x.kind === "style");
     const toDraw = [...pages, ...drawings].slice(0, MAX_PICTURED);
     const toShow = images.slice(0, Math.max(0, MAX_PICTURED - toDraw.length));
     if (toDraw.length === 0 && toShow.length === 0) return none;
@@ -2326,6 +2334,9 @@ class MissionRun {
     }
     const drawn = new Map<string, RenderedPage>(result.pages.map((page) => [page.path, page]));
     const outcomes: RuleOutcome[] = [];
+    if (!matters && toDraw.length > 0 && result.taken === 0) {
+      outcomes.push({ problems: [], facts: [`No picture of the page that nothing changed in was taken${result.why !== undefined ? `: ${pictureReason(result.why)}` : ""}.`] });
+    }
     for (const path of pages) {
       const page = drawn.get(path);
       if (page) outcomes.push(checkPageRendered(page, fallback ? { factsOnly: true } : {}));
@@ -2354,8 +2365,8 @@ class MissionRun {
     );
     const imageFiles = this.copyImages(f, wt, toShow);
     const pageText = changedPages.concat(fallback ? pages : []).flatMap((path) => [drawn.get(path)?.phone?.facts.text, drawn.get(path)?.desktop?.facts.text]).filter((t): t is string => t !== undefined && t !== "");
-    const why = result.taken === 0 && toDraw.length > 0 ? result.why : undefined;
-    return { pictures: { expected: true, taken: result.taken, ...(why !== undefined && { why }), pages: pageFiles, images: imageFiles }, pageText, outcomes };
+    const why = matters && result.taken === 0 && toDraw.length > 0 ? result.why : undefined;
+    return { pictures: { expected: true, matters, taken: result.taken, ...(why !== undefined && { why }), pages: pageFiles, images: imageFiles }, pageText, outcomes };
   }
 
   /** The pictures of the work as it is at HEAD, again (after a fix was rolled back). */
@@ -2506,7 +2517,7 @@ class MissionRun {
     const { judged } = answered;
     const pictures = check.pictures;
     const shownPictures = pictures.pages.length + pictures.images.length;
-    const why: PictureWhy | undefined = shownPictures > 0 && !answered.offered ? "reviewer" : shownPictures === 0 ? pictures.why : undefined;
+    const why: PictureWhy | undefined = pictures.matters && shownPictures > 0 && !answered.offered ? "reviewer" : shownPictures === 0 ? pictures.why : undefined;
     f.checked = {
       round: (f.checked?.round ?? 0) + 1,
       reviewer: answered.reviewer,
@@ -2981,8 +2992,8 @@ class MissionRun {
         const unreviewed = this.scratch.unit(feature.id).reviewSkipped === true;
         const notes = feature.openFindings;
         const files = await this.changedFilesOf(feature.worktree, m.integrationBranch);
-        // Only the final repair of a mixed mission gets a reason here (it changed work the owner approved); every other stop of a
-        // feature checked by tests keeps the lines it always had.
+        // Only the final repair of a mixed mission gets a reason here (it changed work the owner approved, and later: the owner sent it
+        // back); every other stop of a feature checked by tests keeps the lines it always had.
         const reason = lookReason(m, feature);
         return {
           headline: `Check “${shown(feature.title)}” before it is added`,
@@ -2991,7 +3002,7 @@ class MissionRun {
             `“${shown(feature.title)}” is built and passed its checks${unreviewed ? ", but its review did not finish" : ", and was reviewed"}.`,
             ...(built ? [`What was built: ${shown(built)}`] : []),
             ...(notes.length > 0 ? [`The reviewer left ${plural(notes.length, notes.every((n) => n.severity === "minor") ? "small note" : "note")}: ${notes.slice(0, 3).map((n) => shown(n.description)).join("; ")}${notes.length > 3 ? ` and ${notes.length - 3} more` : ""}.`] : []),
-            ...(reason === "repair" ? [askedBecause(reason, 0, approvedTitles(m, feature))] : []),
+            ...(reason !== undefined ? [askedBecause(reason, 0, approvedTitles(m, feature))] : []),
             ...warning,
           ],
           ...(feature.branch !== undefined && { branch: feature.branch }),

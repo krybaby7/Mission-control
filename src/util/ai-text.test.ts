@@ -1,7 +1,8 @@
-// What a second AI writes about files it read is made plain before anyone sees it (V2-10): nothing hidden, no picture or link, no web address.
+// What a second AI writes about files it read is made plain before anyone sees it (V2-10): nothing hidden, no picture or link, no web address,
+// no raw HTML tag, no e-mail address and no script address (W2e-R3), and ordinary text that only looks like an address is left alone (W2e-R10).
 import { describe, expect, it } from "vitest";
 import { HIDDEN as PLAN_HIDDEN } from "../plan.js";
-import { cleanAiText, isHiddenChar, WEB_ADDRESS_REMOVED } from "./ai-text.js";
+import { cleanAiText, hasWords, isHiddenChar, WEB_ADDRESS_REMOVED, writtenLength } from "./ai-text.js";
 
 /** Characters are written as code points, so this file holds none of the characters it talks about. */
 const u = (...codes: number[]): string => String.fromCodePoint(...codes);
@@ -82,7 +83,7 @@ describe("cleanAiText: web addresses", () => {
     ["(//evil.example)", `(${GONE})`],
     ["see www.evil.example/a/b now", `see ${GONE} now`],
     ["WWW.EVIL.EXAMPLE", GONE],
-    ["a<img src=\"https://evil.example/x.png\">b", `a<img src="${GONE}">b`],
+    ["a<img src=\"https://evil.example/x.png\">b", "a b"],
     ["<https://evil.example/x>", `<${GONE}>`],
   ])("%s", (text, expected) => {
     expect(cleanAiText(text)).toBe(expected);
@@ -115,6 +116,161 @@ describe("cleanAiText: readable text stays as it is", () => {
   });
 });
 
+describe("cleanAiText: raw HTML (W2e-R3)", () => {
+  /** What the reviewer's battery put through a markdown viewer: the first group draws or runs something, the second is tags in odd shapes. */
+  const HOSTILE = [
+    "<img src=x onerror=alert(1)>",
+    '<a href="javascript:alert(1)">go</a>',
+    "<svg onload=alert(1)>",
+    "<script>alert(1)</script>",
+    "<style>body{display:none}</style>",
+    '<img src="data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=">',
+    "<iframe src=//evil.example/x></iframe>",
+    '<img alt=">" src=x onerror=alert(1)>',
+    "<!-- hidden --> text <![CDATA[ x ]]> <!DOCTYPE html> <?php echo 1; ?>",
+    "<<b>script>alert(1)</b>",
+    "<<<img src=x onerror=alert(1)>>>",
+    "<img src=x onerror=alert(1)",
+    "<scr<script>ipt>alert(1)</scr</script>ipt>",
+    "<IMG SRC=x ONERROR=alert(1)>",
+    "<a/b onclick=alert(1)>x",
+    "</div><div>",
+    "<javascript:alert(1)>",
+    "<mailto:a@b.example>",
+    "<data:text/html,<script>alert(1)</script>>",
+  ];
+
+  it.each(HOSTILE)("leaves no tag of %s", (text) => {
+    const out = cleanAiText(text);
+    expect(out).not.toMatch(/<[A-Za-z/!?]/u);
+    expect(out).not.toMatch(/(?:javascript|vbscript):/iu);
+    expect(out).not.toMatch(/\bdata:[\w.+-]*\//iu);
+    expect(cleanAiText(out), "cleaning twice").toBe(out);
+  });
+
+  it.each([
+    ["<img src=x onerror=alert(1)>", ""],
+    ['<a href="javascript:alert(1)">go</a>', "go"],
+    ["<script>alert(1)</script>", "alert(1)"],
+    ["Before <b>bold</b> after.", "Before bold after."],
+    ["a<br>b", "a b"],
+    ["<<b>script>x", "< script>x"],
+    ["<img src=x onerror=alert(1)", "< img src=x onerror=alert(1)"],
+    ["<!-- hidden --> text", "text"],
+    ["List<string> and Map<K, V> are types.", "List and Map are types."],
+  ])("%s", (text, expected) => {
+    expect(cleanAiText(text)).toBe(expected);
+  });
+
+  it("keeps a bracket that is not the start of a tag, and the hidden-character marks that Mission Control writes itself", () => {
+    for (const text of ["when a < b and c > d", "x<3 and y>2, 1 <2", "arrows -> and => and <- and <= and >=", "a << b and c >> d", "a file named docs/setup.md<U+202E> and <U+200B>"]) {
+      expect(cleanAiText(text), text).toBe(text);
+    }
+  });
+
+  it("does not let the words around a tag join into a new one", () => {
+    expect(cleanAiText("<<b></b>img src=x onerror=alert(1)>")).not.toMatch(/<[A-Za-z/!?]/u);
+    expect(cleanAiText("ht<b></b>tp://evil.example/x")).not.toMatch(/evil/u);
+    expect(cleanAiText("<scr<i></i>ipt>alert(1)")).not.toMatch(/<[A-Za-z/!?]/u);
+  });
+});
+
+describe("cleanAiText: script, data and mail addresses (W2e-R3)", () => {
+  it.each([
+    ["[x](javascript:alert(1))", `x ${GONE})`],
+    ["[x](<javascript:alert(1)>)", `x ${GONE}>)`],
+    ["[x](  JaVaScRiPt:alert(1) )", `x ${GONE} )`],
+    ["[x](vbscript:msgbox(1))", `x ${GONE})`],
+    ["[x](data:text/html;base64,PHNjcmlwdD4=)", `x ${GONE}`],
+    ["[mail me](mailto:a@b.example)", `mail me ${GONE}`],
+    ["![x](data:image/svg+xml;base64,PHN2Zz4=)", `x ${GONE}`],
+    ["see javascript:alert(1) now", `see ${GONE} now`],
+    ["see VBScript:msgbox(1) now", `see ${GONE} now`],
+    ["see mailto:a@b.example, or data:text/html,hi.", `see ${GONE}, or ${GONE}.`],
+    ["<a href=\"mailto:a@b.example\">mail</a>", "mail"],
+    [`java${u(0x200b)}script:alert(1)`, GONE],
+    ["write to a@b.example.", `write to ${GONE}.`],
+    ["write to first.last+tag@mail.example.co.uk, then stop", `write to ${GONE}, then stop`],
+    ["[x]: javascript:alert(1)", `[x]: ${GONE}`],
+  ])("%s", (text, expected) => {
+    expect(cleanAiText(text)).toBe(expected);
+  });
+
+  it("leaves words that are not addresses", () => {
+    for (const text of [
+      "JavaScript: The Good Parts is a book.",
+      "The data: three columns and two rows.",
+      "Metadata:name and the {data:1} object.",
+      "Use the mailto link, and the javascript word.",
+      "Write to @claude about npm i @scope/pkg@1.2.3 please.",
+      "Contact: someone at example dot com.",
+      "user@host has no dot, and a@b.c has a short ending.",
+    ]) {
+      expect(cleanAiText(text), text).toBe(text);
+    }
+  });
+});
+
+describe("cleanAiText: text that only looks like an address stays (W2e-R10)", () => {
+  it.each([
+    "The file has a //TODO comment on line 3.",
+    "The file has a //TODO: fix this comment, and a // note.",
+    "Line 4 reads //FIXME and line 9 reads ///separator.",
+    "paths like C://Users are Windows",
+    "paths like D://data/backup are Windows",
+    "a ratio of 3://4 is odd",
+    "a page named www.html and a word www. alone",
+    "the files www.css and www.js are mine",
+    "a drive C:\\Users and a path src//app",
+    "a.b.c ratios like 1.5://2.5",
+    "x://y is not a scheme, and 7://8 is not one",
+  ])("%s", (text) => {
+    expect(cleanAiText(text)).toBe(text);
+  });
+
+  it.each([
+    ["see http://example.com now", `see ${GONE} now`],
+    ["see ab://c and xy://host/path?q=1 now", `see ${GONE} and ${GONE} now`],
+    ["a custom scheme my-app+x.y://open/file", `a custom scheme ${GONE}`],
+    ["see //example.com now", `see ${GONE} now`],
+    ["see //host.tld/path now", `see ${GONE} now`],
+    ["see //cdn.example.co.uk:8080/a.js?x=1#y now", `see ${GONE} now`],
+    ["see //127.0.0.1/admin now", `see ${GONE} now`],
+    ["see //user:pw@host.example/x now", `see ${GONE} now`],
+    ["(//evil.example), then //evil.example.", `(${GONE}), then ${GONE}.`],
+    ["see www.example.com now", `see ${GONE} now`],
+    ["see WWW.A.EXAMPLE/x?y now", `see ${GONE} now`],
+    ["see www.host.tld. Then www.a.example/b, www.a.xn--p1ai", `see ${GONE}. Then ${GONE}, ${GONE}`],
+    ["a TODO //TODO and a link //evil.example/x in one line", `a TODO //TODO and a link ${GONE} in one line`],
+    ["C://Users and https://evil.example/x", `C://Users and ${GONE}`],
+    ["[a](//TODO) and [b](www.html) and [c](C://Users) and [d](www.example.com)", `a ${GONE} and b (www.html) and c ${GONE} and d ${GONE}`],
+  ])("still takes out %s", (text, expected) => {
+    expect(cleanAiText(text)).toBe(expected);
+  });
+});
+
+describe("evidence that says nothing (W2e-R4)", () => {
+  it("measures how much was written before anything is taken out, after only the hidden characters", () => {
+    expect(writtenLength("http://x")).toBe(8);
+    expect(writtenLength("https://a.b/c")).toBe(13);
+    expect(writtenLength(`  yes${u(0x200b)}  it \n does  `)).toBe("yes it does".length);
+    expect(writtenLength(undefined)).toBe(0);
+    expect(writtenLength(42)).toBe(2);
+  });
+
+  it("says no when nothing is left but the places that were taken out", () => {
+    for (const text of ["https://a.b/c", "http://example.com/a/very/long/address", "![](https://a.example/b.png)", "[](//host.example/x)", "<img src=x onerror=alert(1)>", "<b></b> <i></i>", "mailto:a@b.example", "a@b.example", "javascript:alert(1)", "https://a.example/b https://c.example/d", "   ", "", "...", "()"]) {
+      expect(hasWords(text), text).toBe(false);
+    }
+  });
+
+  it("says yes when there is a word or a number, whatever else is in the text", () => {
+    for (const text of ["yes it does", "See https://a.example/b", "[the guide](https://a.example/b)", "<b>bold</b>", "Step 3", "日本語", "a"]) {
+      expect(hasWords(text), text).toBe(true);
+    }
+  });
+});
+
 describe("cleanAiText: length, repeat and bad input", () => {
   it("cuts at the limit, with a closing mark, and never splits a pair of code units", () => {
     expect(cleanAiText("x".repeat(500)).length).toBe(300);
@@ -143,7 +299,7 @@ describe("cleanAiText: length, repeat and bad input", () => {
   });
 
   it("is fast on text built to be slow", () => {
-    const shapes = ["a.".repeat(60_000), "[a](".repeat(30_000), "[".repeat(100_000), "![".repeat(50_000), ")".repeat(100_000) + "x", "//".repeat(50_000), "://".repeat(30_000), "www.".repeat(30_000), "https://".repeat(15_000), `${u(0x200b)}`.repeat(100_000), "a:/".repeat(40_000)];
+    const shapes = ["a.".repeat(60_000), "[a](".repeat(30_000), "[".repeat(100_000), "![".repeat(50_000), ")".repeat(100_000) + "x", "//".repeat(50_000), "://".repeat(30_000), "www.".repeat(30_000), "https://".repeat(15_000), `${u(0x200b)}`.repeat(100_000), "a:/".repeat(40_000), "<".repeat(100_000), "<a ".repeat(40_000), "<!--".repeat(30_000), "<a".repeat(50_000), "@".repeat(100_000), "a@b.".repeat(30_000), "a@".repeat(50_000), "x".repeat(100_000) + "@", "javascript:".repeat(10_000), "data:text/".repeat(10_000), "a.b".repeat(40_000) + "@", "www.a.".repeat(20_000), "//a.".repeat(20_000), "//".repeat(20_000) + "a.bc"];
     for (const shape of shapes) {
       const start = Date.now();
       const out = cleanAiText(shape, 300);

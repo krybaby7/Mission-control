@@ -1,6 +1,6 @@
 // Keeps a read-only agent run read-only where no sandbox can: snapshots the git working tree it runs in, and
 // afterwards puts back whatever the run changed (files, the index, the branch and its commits).
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runProcess } from "../util/process.js";
@@ -18,6 +18,8 @@ export interface WorktreeSnapshot {
   indexPath: string;
   /** The index file's bytes, or null when there was none. */
   index: Buffer | null;
+  /** The index file's modification time, in milliseconds (rounded down), or null when there was no index. Git needs it to be put back with the bytes. */
+  indexMtimeMs: number | null;
 }
 
 /**
@@ -42,7 +44,8 @@ export async function snapshotWorktree(cwd: string): Promise<WorktreeSnapshot | 
   const withUntracked = untracked.ok && untracked.out.split("\0").filter(Boolean).length <= MAX_UNTRACKED_FILES;
   const tree = await contentTree(root, indexPath, withUntracked);
   if (tree === undefined) return undefined;
-  return { root, ...(await headState(root)), tree, withUntracked, indexPath, index: readIfExists(indexPath) };
+  const index = readIndex(indexPath);
+  return { root, ...(await headState(root)), tree, withUntracked, indexPath, index: index.bytes, indexMtimeMs: index.mtimeMs };
 }
 
 /**
@@ -66,7 +69,10 @@ export async function restoreWorktree(snap: WorktreeSnapshot): Promise<string[]>
   if (tree !== snap.tree) changed.push(...(await restoreFiles(root, snap.tree, tree)));
   if (indexChanged) {
     if (snap.index === null) rmSync(snap.indexPath, { force: true });
-    else writeFileSync(snap.indexPath, snap.index);
+    else {
+      writeFileSync(snap.indexPath, snap.index);
+      setModified(snap.indexPath, snap.indexMtimeMs);
+    }
     if (changed.length === 0) changed.push("(the git index)");
   }
   return changed;
@@ -105,15 +111,56 @@ async function restoreFiles(root: string, before: string, after: string | undefi
   return differing;
 }
 
-/** The working tree's content as a tree object, via a copy of the index (git's stat cache keeps this fast). */
+/**
+ * The working tree's content as a tree object, via a copy of the index (git's stat cache keeps this fast). The copy keeps the original's
+ * modification time: see `copyIndex`.
+ */
 async function contentTree(root: string, indexPath: string, withUntracked: boolean): Promise<string | undefined> {
   return withTempIndex(async (env, tempIndex) => {
-    if (existsSync(indexPath)) copyFileSync(indexPath, tempIndex);
+    if (existsSync(indexPath)) copyIndex(indexPath, tempIndex);
     const add = await git(root, ["add", withUntracked ? "-A" : "-u"], env);
     if (!add.ok) return undefined;
     const tree = await git(root, ["write-tree"], env);
     return tree.ok ? tree.out.trim() : undefined;
   });
+}
+
+/**
+ * Copies the index file and gives the copy the original's modification time.
+ *
+ * For each file, the index saves the file's size and time. Git takes a file as unchanged when the file still has them, except for a
+ * file whose saved time is in the same second as the index file's own time, or later: that file could have been changed again, with the
+ * same size, in the second the index was written, so git reads it again. A copy made now is newer than every saved time, so with a copy
+ * that second look never happened: a file changed with the same size in the second the index was written looked unchanged once the
+ * second was over (the flaky failure of worktree-guard.test.ts in a full run). Giving the copy the original's time makes git treat it
+ * as it treats the original.
+ */
+function copyIndex(from: string, to: string): void {
+  const before = statSync(from);
+  copyFileSync(from, to);
+  setModified(to, Math.min(before.mtimeMs, statSync(from).mtimeMs));
+}
+
+/** Sets the modification time of `path` to `ms` milliseconds, rounded down (earlier is the safe side: git then reads more files again). Does nothing for null. */
+function setModified(path: string, ms: number | null): void {
+  if (ms === null) return;
+  try {
+    const seconds = Math.floor(ms) / 1000;
+    utimesSync(path, seconds, seconds);
+  } catch {
+    // the time is a safeguard against a missed change; without it the guard works as it did
+  }
+}
+
+/** The index file's bytes and modification time (rounded down; the older of the two readings when the file was rewritten meanwhile), or nulls when there is none. */
+function readIndex(path: string): { bytes: Buffer | null; mtimeMs: number | null } {
+  try {
+    const before = statSync(path).mtimeMs;
+    const bytes = readFileSync(path);
+    return { bytes, mtimeMs: Math.floor(Math.min(before, statSync(path).mtimeMs)) };
+  } catch {
+    return { bytes: null, mtimeMs: null };
+  }
 }
 
 async function diffPaths(root: string, from: string, to: string, filter?: string): Promise<string[]> {

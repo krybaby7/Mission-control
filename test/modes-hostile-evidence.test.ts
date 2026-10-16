@@ -6,7 +6,7 @@
 // the end, `mc report`, `mc plan show`, `mc logs`, the phone notices, the dashboard (card, timeline, Results page, everything the snapshot
 // holds), the draft pull request text (the real host script), the brief the builder gets for the fix, and the mission file. None holds a
 // hidden character, a picture, a link or a web address, and the readable words of the second AI are still there. Nothing calls an AI.
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderReport } from "../src/report.js";
@@ -168,6 +168,45 @@ describe("hostile evidence from the second AI", () => {
     const shown = (await w.mc(["plan", "show", run.id])).out;
     expect(problemsIn("plan show", shown)).toEqual([]);
     expect(shown).toContain("Evidence: Raw words. reversedzeroisobom chart (web address removed)");
+  }, 120_000);
+
+  it("W2e-R9: the owner's look, the card and the phone notice show the evidence cleaned, even when the mission file holds hostile text", async () => {
+    // The first two tests cannot reach this: the engine cleans the evidence before it stores it, and a hand-made file is only read by the
+    // report and `mc plan show`. The look is built when the team stops, from what the file holds (`Dispatcher.modeLook`), and it cleans the
+    // evidence again; this stops the team a second time at a feature whose file holds raw text.
+    w = await openWorld({ agents: { reviewer: hostileChecker() as never } });
+    const { id } = await w.queue(EXAMPLE_A);
+    await w.run(id); // the plan stop
+    await w.approve(id);
+    const first = await w.run(id); // the feature stop: the second AI could not judge a check
+    expect(first.checkpoint).toMatchObject({ kind: "feature", state: "pending" });
+
+    // As if the file were written by hand or by older code: raw words and hostile text in the evidence, and the stop asked for again.
+    const file = join(w.h.home, "missions", id, "mission.json");
+    const raw = JSON.parse(readFileSync(file, "utf8")) as Mission;
+    const hostile = `Raw words.${HOSTILE}`;
+    const checked = raw.features[0]!.checked!;
+    checked.results = checked.results.map((r) => ({ ...r, evidence: hostile }));
+    expect(checked.results.some((r) => r.result === "cannot_judge")).toBe(true);
+    delete raw.checkpoint;
+    writeFileSync(file, JSON.stringify(raw));
+    w.h.notifications.length = 0;
+
+    const again = await w.run(id);
+    expect(again.checkpoint).toMatchObject({ kind: "feature", featureId: first.checkpoint?.featureId, state: "pending" });
+    expect(again.features[0]?.checked?.results.map((r) => r.evidence)).toEqual(checked.results.map(() => hostile)); // the file still holds the raw text
+    const look = again.checkpoint!.look.lines.join("\n");
+    expect(look).toContain("Raw words. reversedzeroisobom chart (web address removed)");
+    expect(problemsIn("the owner's look", look)).toEqual([]);
+
+    // The card is built from the look in the file, and the notice from the stop; neither holds a hidden character, a picture or an address.
+    const snapshot = strings(w.snapshot()).join("\n");
+    expect(snapshot).toContain("Raw words. reversedzeroisobom chart (web address removed)");
+    expect(problemsIn("the card", snapshot)).toEqual([]);
+    const notices = w.h.notifications.map((n) => `${n.title}\n${n.message}`).join("\n");
+    expect(notices).toContain("please check");
+    expect(problemsIn("the phone notice", notices)).toEqual([]);
+    expect(problemsIn("the look in the file", JSON.stringify(w.h.load(id).checkpoint?.look))).toEqual([]);
   }, 120_000);
 
   it("the same cleaning holds with the flag that turns the owner's stop off: no stop, and the report is still plain", async () => {

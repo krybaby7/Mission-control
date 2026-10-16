@@ -1,6 +1,7 @@
 // Text that a second AI wrote about files it did not write (its evidence and its notes). It can quote a hostile file, so before it
 // reaches a report, a pull request text, a card or a terminal it is made plain: nothing hidden, nothing that draws a picture or a
-// link, and no web address. The second AI's words stay readable; only the parts that could do something are changed.
+// link, no raw HTML tag, and no web address, e-mail address or script address. The second AI's words stay readable; only the parts
+// that could do something are changed.
 
 /**
  * Control, format, private-use, unassigned, surrogate and separator characters, odd spaces, variation selectors and blank-looking
@@ -16,7 +17,7 @@ export function isHiddenChar(ch: string): boolean {
   return HIDDEN.test(ch) || ch.codePointAt(0) === 0x2800;
 }
 
-/** What stands where a web address was. */
+/** What stands where a web address, an e-mail address or a script address was. */
 export const WEB_ADDRESS_REMOVED = "(web address removed)";
 
 /** How many characters of the text are looked at: the rest is far more than any message keeps. */
@@ -26,22 +27,61 @@ const LOOK_MAX = 8_000;
 const MARKDOWN_LINK = /(!?)\[([^[\]]*)\]\(([^)]*)\)/gu;
 /** What ends an address in running text: white space, and the marks that close an attribute or a bracket of a tag or an automatic link. */
 const ADDRESS_END = /[\s"<>`]/u;
-/** An address that starts with two slashes and a host: `//host/path`. Not `a//b`, not a comment like `// note`. */
-const SLASH_ADDRESS = /(^|[^\w:/.~-])\/{2,}[^\s/"<>`][^\s"<>`]*/gu;
-/** An address that starts with `www.`. */
-const WWW_ADDRESS = /(^|[^\w.-])www\.[^\s"<>`]+/giu;
+
+/**
+ * A host as it is written in an address: names with dots whose last part has two or more letters (`example.com`, `a.b.example`,
+ * `xn--p1ai`), or four numbers with dots (`127.0.0.1`). A single word (`TODO`), a name with one dot and a short ending (`e.g`), and
+ * a ratio (`3`, `4`) are not hosts.
+ */
+const HOST = String.raw`(?:(?:[\p{L}\p{N}-]+\.)+\p{L}[\p{L}\p{N}-]*\p{L}|\d{1,3}(?:\.\d{1,3}){3})`;
+/** An address that starts with two slashes and a host, perhaps with a user name before it: `//host.tld/path`. Not `a//b`, not `//TODO`, not `// note`. */
+const SLASH_ADDRESS = new RegExp(String.raw`(^|[^\w:/.~-])\/{2,}(?=(?:[^\s/@"<>\x60]*@)?${HOST})[^\s"<>\x60]+`, "giu");
+/** An address that starts with `www.` and a host: `www.host.tld`. Not the word `www.html`. */
+const WWW_ADDRESS = new RegExp(String.raw`(^|[^\w.-])www\.(?=${HOST})[^\s"<>\x60]+`, "giu");
+/**
+ * The addresses of a link that run a script, show data or open a mail program, written `name:` and then the rest with no space
+ * (`javascript:alert(1)`, `mailto:a@b.example`, `data:text/html,...`). A name that ends a longer word (`metadata:`) is not one, and
+ * neither are the words as they stand in a sentence (`JavaScript: The Good Parts`, `data: three columns`, `{data:1}`).
+ */
+const SCRIPT_ADDRESS = /(?<![\p{L}\p{N}_-])(?:javascript|vbscript|livescript|mailto|data(?=:(?:[\w.+-]+\/|[;,]))):[^\s"<>`]+/giu;
+/** An e-mail address: a name, an @ and a host (a viewer makes a link of it). */
+const EMAIL_ADDRESS = new RegExp(String.raw`(?<![\w.+-])[\w.+-]+@${HOST}`, "giu");
+/**
+ * The start of a raw HTML tag, comment, declaration or instruction, and the rest of it up to the closing bracket when there is one:
+ * `<img src=x onerror=alert(1)>`, `</a>`, `<!-- -->`, `<?php ?>`, `<javascript:alert(1)>`. Not `<U+202E>`: that is how Mission Control
+ * itself shows a hidden character in a file name (`plainName`), and no tag has that name.
+ */
+const HTML_TAG = /<(?!U\+[0-9A-F]{4,6}>)(?=[A-Za-z/!?])([^<>]*>)?/gu;
 /** Marks that end a sentence or close a bracket or a quote: they stay in the text after the address is taken out of it. */
 const SENTENCE_MARKS = new Set(Array.from('.,;:!?)]}"\'”’»>'));
 
-/** The words that stand for an address, followed by the marks that most likely belonged to the sentence around it. */
-function removeAddress(token: string): string {
+/**
+ * The words that stand for an address, followed by the marks that most likely belonged to the sentence around it. A closing bracket
+ * that closes a bracket opened inside the address (`javascript:alert(1)`, `.../Foo_(bar)`) belongs to the address.
+ */
+function removeAddress(token: string, mark: string): string {
+  let opens = 0;
+  let closes = 0;
+  for (const c of token) {
+    if (c === "(") opens++;
+    else if (c === ")") closes++;
+  }
   let end = token.length;
-  while (end > 0 && SENTENCE_MARKS.has(token.charAt(end - 1))) end--;
-  return WEB_ADDRESS_REMOVED + token.slice(end);
+  while (end > 0 && SENTENCE_MARKS.has(token.charAt(end - 1))) {
+    if (token.charAt(end - 1) === ")") {
+      if (opens > closes - 1) break;
+      closes--;
+    }
+    end--;
+  }
+  return mark + token.slice(end);
 }
 
-/** Every web address that has a scheme (`http://`, `https://`, `ftp://`, ...), from the first letter of the scheme to where it ends (ADDRESS_END). */
-function plainSchemeAddresses(text: string): string {
+/**
+ * Every web address that has a scheme (`http://`, `https://`, `ftp://`, ...), from the first letter of the scheme to where it ends
+ * (ADDRESS_END). A scheme has two letters at least: `C://Users` (a drive) and `3://4` (a ratio) are not addresses.
+ */
+function plainSchemeAddresses(text: string, mark: string): string {
   const parts: string[] = [];
   let from = 0;
   for (;;) {
@@ -49,49 +89,68 @@ function plainSchemeAddresses(text: string): string {
     if (at < 0) break;
     let start = at;
     while (start > from && /[a-z0-9+.-]/iu.test(text.charAt(start - 1))) start--;
+    // A scheme starts with a letter.
+    while (start < at && !/[a-z]/iu.test(text.charAt(start))) start++;
+    if (at - start < 2) {
+      parts.push(text.slice(from, at + 3));
+      from = at + 3;
+      continue;
+    }
     let end = at + 3;
     while (end < text.length && !ADDRESS_END.test(text.charAt(end))) end++;
-    parts.push(text.slice(from, start), removeAddress(text.slice(start, end)));
+    parts.push(text.slice(from, start), removeAddress(text.slice(start, end), mark));
     from = end;
   }
   parts.push(text.slice(from));
   return parts.join("");
 }
 
-function plainAddresses(text: string): string {
-  return plainSchemeAddresses(text)
-    .replace(SLASH_ADDRESS, (all, before: string) => before + removeAddress(all.slice(before.length)))
-    .replace(WWW_ADDRESS, (all, before: string) => before + removeAddress(all.slice(before.length)));
+function plainAddresses(text: string, mark: string): string {
+  return plainSchemeAddresses(text, mark)
+    .replace(SLASH_ADDRESS, (all, before: string) => before + removeAddress(all.slice(before.length), mark))
+    .replace(WWW_ADDRESS, (all, before: string) => before + removeAddress(all.slice(before.length), mark))
+    .replace(SCRIPT_ADDRESS, (all) => removeAddress(all, mark))
+    .replace(EMAIL_ADDRESS, mark);
 }
 
-/** True when `where` (what a markdown link points to) starts as a web address. */
+/**
+ * Raw HTML out: a tag is replaced by one space (so the text around it can not join into a new tag), and a bracket that opens
+ * something with no closing bracket is followed by a space, so it opens nothing. A bracket that is not followed by a letter, `/`, `!`
+ * or `?` (`a < b`, `x<3`, `<-`) is plain text and stays.
+ */
+function plainTags(text: string): string {
+  return text.includes("<") ? text.replace(HTML_TAG, (_all, closed: string | undefined) => (closed === undefined ? "< " : " ")) : text;
+}
+
+/**
+ * What a markdown link points to, when it is an address: any scheme with two slashes, two slashes and a name (a link to `//TODO` goes to
+ * the host TODO, whatever a comment would mean), `www.` and a host (a link to `www.html` is a link to a file), or a script address.
+ */
+const LINK_ADDRESS = new RegExp(String.raw`^<?(?:[a-z][a-z0-9+.-]*:\/\/|\/{2,}[^\s/]|www\.${HOST}|(?:javascript|vbscript|livescript|mailto|data):)`, "iu");
+
+/** True when `where` (what a markdown link points to) starts as a web address, an e-mail address or a script address. */
 function isAddress(where: string): boolean {
-  return /^(?:[a-z][a-z0-9+.-]*:\/\/|\/{2,}[^\s/]|www\.\S)/iu.test(where);
+  return LINK_ADDRESS.test(where);
 }
 
 /**
  * A link or a picture of markdown as plain words: the words of the link, then where it points, with a web address taken out.
  * What is left of the syntax afterwards (a picture mark whose brackets do not close, a bracket pair that touches a bracket)
- * cannot make a link or a picture either.
+ * cannot make a link or a picture either. `mark` stands where an address was, and `image` and `link` stand for a picture or a link
+ * with no words.
  */
-function plainLinks(text: string): string {
+function plainLinks(text: string, mark: string, image: string, link: string): string {
   const out = text.replace(MARKDOWN_LINK, (_all, bang: string, label: string, target: string) => {
-    const words = label.trim() === "" ? (bang === "!" ? "image" : "link") : label.trim();
+    const words = label.trim() === "" ? (bang === "!" ? image : link) : label.trim();
     const where = target.trim();
     if (where === "") return words;
-    return isAddress(where) ? `${words} ${WEB_ADDRESS_REMOVED}` : `${words} (${where})`;
+    return isAddress(where) ? `${words} ${mark}` : `${words} (${where})`;
   });
   return out.replace(/!\[/gu, "[").replace(/\]\(/gu, "] (");
 }
 
-/**
- * `text` as one plain line of at most `max` characters (a closing `…` when it was cut):
- * hidden, zero-width and direction-changing characters are taken out (the class the plan reader bans), line breaks and odd
- * spaces become one space, a markdown picture or link becomes its words with the place it points to in brackets, and every web
- * address (`http://`, `https://`, `//host`, `www.`) becomes the words (web address removed). Running it twice changes nothing more.
- */
-export function cleanAiText(text: unknown, max = 300): string {
-  const input = typeof text === "string" ? text : text === undefined || text === null ? "" : String(text);
+/** The text with the hidden characters out and odd white space made one plain space. Nothing else is changed. */
+function visible(input: string): string {
   let seen = "";
   let looked = 0;
   for (const ch of input) {
@@ -99,9 +158,45 @@ export function cleanAiText(text: unknown, max = 300): string {
     if (SPACE_LIKE.test(ch)) seen += " ";
     else if (!isHiddenChar(ch)) seen += ch;
   }
+  return seen;
+}
+
+function asText(text: unknown): string {
+  return typeof text === "string" ? text : text === undefined || text === null ? "" : String(text);
+}
+
+function plain(text: unknown, max: number, mark: string, image: string, link: string): string {
   // Hidden characters are gone before the addresses are looked for, so a zero-width character cannot split `https://`.
-  const plain = plainAddresses(plainLinks(seen)).replace(/ {2,}/gu, " ").trim();
-  const points = Array.from(plain);
-  if (points.length <= max) return plain;
+  const clean = plainTags(plainAddresses(plainLinks(visible(asText(text)), mark, image, link), mark)).replace(/ {2,}/gu, " ").trim();
+  const points = Array.from(clean);
+  if (points.length <= max) return clean;
   return points.slice(0, Math.max(0, max - 1)).join("").trimEnd() + "…";
+}
+
+/**
+ * `text` as one plain line of at most `max` characters (a closing `…` when it was cut):
+ * hidden, zero-width and direction-changing characters are taken out (the class the plan reader bans), line breaks and odd
+ * spaces become one space, a markdown picture or link becomes its words with the place it points to in brackets, a raw HTML tag
+ * is taken out (its words stay), and every web address (`http://`, `https://`, `//host.tld`, `www.host.tld`), e-mail address and
+ * script address (`javascript:`, `vbscript:`, `data:`, `mailto:`) becomes the words (web address removed). Ordinary text that only
+ * looks like an address stays: `//TODO`, `C://Users`, `3://4`, `www.html`. Running it twice changes nothing more.
+ */
+export function cleanAiText(text: unknown, max = 300): string {
+  return plain(text, max, WEB_ADDRESS_REMOVED, "image", "link");
+}
+
+/**
+ * How many characters `text` has when only the hidden characters are out and white space is one plain space: how much the writer
+ * wrote, before anything was taken out of it (so the words that stand for an address are not counted as writing).
+ */
+export function writtenLength(text: unknown): number {
+  return visible(asText(text)).replace(/ {2,}/gu, " ").trim().length;
+}
+
+/**
+ * True when `text` still holds a letter or a number once its pictures, links, addresses and tags are taken out: when it does not,
+ * it said nothing, whatever its length (`https://a.example/b`, `<img src=x>`, `![](https://a.example/b.png)`).
+ */
+export function hasWords(text: unknown): boolean {
+  return /[\p{L}\p{N}]/u.test(plain(text, LOOK_MAX, "", "", ""));
 }

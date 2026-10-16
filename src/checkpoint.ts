@@ -3,7 +3,7 @@
 // mission: the state machine the dispatcher follows at a gate, the one function that records an answer, and the
 // plain-language texts the command line, the report and the phone notices share. The dispatcher (dispatcher.ts)
 // does the stopping, the reworking and the carrying on.
-import { isDerivedFeature, lookReason, stoppedBecause } from "./checked-by.js";
+import { isDerivedFeature, shownLookReason, stoppedBecause } from "./checked-by.js";
 import { type MissionStore, planOf } from "./state.js";
 import type { CheckpointAnswer, CheckpointKind, CheckpointRecord, Mission, MissionEvent, PendingCheckpoint, PlanReview } from "./types.js";
 import { stripControlChars } from "./util/terminal.js";
@@ -288,11 +288,11 @@ export function whyStopped(
 ): string {
   if (isLeaderPlanStop(m, cp)) return `the leader wrote this plan, and you look at such a plan first. Read all of it with: mc plan show ${m.id}`;
   // A feature stop the owner did not ask for with `--checkpoint feature` says why it stops: the plan marks the feature, the second AI could not judge it, ...
-  // The repair of the final review is never covered by `--checkpoint feature`, so it always says its own reason.
+  // The repair of the final review (and the change a send-back at the final stop adds) is never covered by `--checkpoint feature`, so it always says its own reason.
   if (cp.kind === "feature") {
     const f = m.features.find((x) => x.id === cp.featureId);
-    const reason = f ? lookReason(m, f) : undefined;
-    if (reason !== undefined && (reason === "repair" || m.checkpoints?.includes("feature") !== true)) return stoppedBecause(reason, featureTitle(m, cp.featureId));
+    const reason = f ? shownLookReason(m, f) : undefined;
+    if (reason !== undefined) return stoppedBecause(reason, featureTitle(m, cp.featureId));
   }
   return `you asked to look at ${what} first`;
 }

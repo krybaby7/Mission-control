@@ -5,9 +5,10 @@
 // that passed the layout checks from the text anyway let the feature merge with no stop and no sentence anywhere. Now "a page was expected
 // and the second AI was shown no picture of it" is a reason to stop of its own (unless the plan was queued without the stops for the
 // owner's look, and then every surface says that no picture was shown).
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { type AgentHandler, buildOutput, checkerBehavior, checksInBrief, fakeRenderer, MissionHarness, planSource, writeDeliverable, writeFile } from "../test/fixtures/mission-harness.js";
+import { type AgentHandler, buildOutput, checkerBehavior, checksInBrief, createFixtureRepo, type FakeRenderer, fakeRenderer, MissionHarness, planSource, writeDeliverable, writeFile } from "../test/fixtures/mission-harness.js";
 import { applyAnswer } from "./checkpoint.js";
 import type { Mission } from "./types.js";
 
@@ -126,5 +127,98 @@ describe("a page feature whose second AI was shown no picture", () => {
     expect(stopped.checkpoint?.look.lines).toContain("You are asked because the plan marks this feature for your look.");
     expect(stopped.checkpoint?.look.lines).toContain("No pictures were taken: no browser was found in the container.");
     expect(stopped.checkpoint?.look.lines.join("\n")).not.toContain("shown no picture");
+  });
+});
+
+// ───────────────────────────── A feature that changed no page (W2e-R7) ─────────────────────────────
+//
+// A project page that nothing changed in is drawn for its picture only, when the feature changed a file of another kind (a licence, a setting,
+// code). That picture is an extra. The stop "the second AI was shown no picture of the page" is for a feature that changed something that is
+// drawn (a page, a drawing, a style sheet, an image), so a feature that wrote only a licence is not stopped because the extra picture failed.
+
+describe("a feature that changed no page", () => {
+  const LICENSE = "MIT License\n\nPermission is hereby granted, free of charge, to any person.\n";
+  const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40"><rect width="40" height="40" fill="#336699"/></svg>\n';
+
+  /** A change to a project that has a page, `index.html`, which the feature does not touch. The feature writes `extra` and the file of its checks. */
+  async function inProject(extra: Record<string, string>, opts: ConstructorParameters<typeof MissionHarness>[0] = {}, init: { roleOverrides?: { role: "reviewer"; family: "codex" }[] } = {}) {
+    const hh: MissionHarness = new MissionHarness({
+      ...opts,
+      agents: {
+        engineer: (job, call) =>
+          call.label === "build-guide" || call.label === "fix-guide"
+            ? {
+                edit: (cwd) => {
+                  for (const [path, text] of Object.entries(extra)) writeFile(cwd, path, text);
+                  writeDeliverable(cwd, "guide", checksInBrief(job.prompt));
+                },
+                structured: buildOutput("made it"),
+              }
+            : hh.defaults.engineer(job, call),
+        reviewer: (job, call) => (call.label.startsWith("review-") ? checkerBehavior(job, undefined, { openPictures: true }) : hh.defaults.reviewer(job, call)),
+      },
+    });
+    h = hh;
+    const repo = join(hh.workspace, "existing");
+    await createFixtureRepo(hh.git, repo);
+    writeFileSync(join(repo, "index.html"), PAGE);
+    await hh.git.commitAll(repo, "a page");
+    const id = hh.createMission("feature", { repoPath: repo, baseBranch: "main", plan: planSource(PLAN("mode: review")), ...init }).id;
+    return { hh, id };
+  }
+
+  const tooSlow = { renderer: fakeRenderer({ why: "too_slow" }) };
+
+  it("is not stopped because the picture of the unchanged page could not be taken: it is a fact, not a reason to ask", async () => {
+    const { hh, id } = await inProject({ LICENSE }, tooSlow);
+    const m = await hh.run(id);
+    expect(m.status).toBe("done");
+    expect(m.checkpoint).toBeUndefined();
+    expect(parkedIds(hh, id)).toEqual([]);
+    expect((hh.renderer as FakeRenderer).requests).toHaveLength(1); // the page was still tried
+    expect(guideOf(m).checked?.pictures).toEqual({ taken: 0 });
+    expect(guideOf(m).checked?.scripted.facts).toContain("No picture of the page that nothing changed in was taken: the page took too long to load.");
+    expect(report(hh, id)).not.toContain("shown no picture");
+    expect(hh.jobsLabeled("review-guide")[0]?.prompt).not.toContain("No pictures were taken");
+  });
+
+  it("says nothing more about it when the picture was taken", async () => {
+    const { hh, id } = await inProject({ LICENSE });
+    const m = await hh.run(id);
+    expect(m.status).toBe("done");
+    expect((hh.renderer as FakeRenderer).requests[0]?.pages).toEqual([{ path: "index.html", n: 1 }]);
+    expect(guideOf(m).checked?.pictures).toEqual({ taken: 2 });
+    expect(guideOf(m).checked?.scripted.facts.join("\n")).not.toContain("was taken:");
+  });
+
+  it("is not stopped when the extra pictures could not be given to the second AI (a reviewer pinned to Codex)", async () => {
+    const { hh, id } = await inProject({ LICENSE }, {}, { roleOverrides: [{ role: "reviewer", family: "codex" }] });
+    const m = await hh.run(id);
+    expect(hh.jobsLabeled("review-guide")[0]?.provider).toBe("codex");
+    expect(m.status).toBe("done");
+    expect(guideOf(m).checked?.pictures).toEqual({ taken: 2 });
+    expect(parkedIds(hh, id)).toEqual([]);
+  });
+
+  it.each([
+    ["a style sheet", { "styles.css": "body { margin: 0; }\n" }],
+    ["a style sheet and a licence", { "styles.css": "body { margin: 0; }\n", LICENSE }],
+    ["a page", { "about.html": PAGE.replace("Get started", "About") }],
+    ["a drawing", { "logo.svg": SVG }],
+  ] as const)("still stops when the feature changed %s and no picture could be taken", async (_name, extra) => {
+    const { hh, id } = await inProject(extra, tooSlow);
+    const m = await hh.run(id);
+    expect(guideOf(m).checked).toMatchObject({ pictures: { taken: 0, why: "too_slow" } });
+    expect(m.status).toBe("stopped");
+    expect(m.checkpoint).toMatchObject({ kind: "feature", featureId: "guide", state: "pending" });
+    expect(m.checkpoint?.look.lines).toContain("No pictures were taken: the page took too long to load.");
+    expect(m.checkpoint?.look.lines).toContain("You are asked because the second AI was shown no picture of the page.");
+  });
+
+  it("still stops when the feature changed a style sheet and the pictures could not be given to the second AI", async () => {
+    const { hh, id } = await inProject({ "styles.css": "body { margin: 0; }\n" }, {}, { roleOverrides: [{ role: "reviewer", family: "codex" }] });
+    const m = await hh.run(id);
+    expect(guideOf(m).checked).toMatchObject({ pictures: { why: "reviewer" } });
+    expect(m.checkpoint?.look.lines).toContain("You are asked because the second AI was shown no picture of the page.");
   });
 });

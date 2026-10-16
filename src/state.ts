@@ -134,11 +134,18 @@ export class MissionStore {
   load(id: string): Mission {
     const file = this.missionFile(id);
     if (!existsSync(file)) throw new Error(`no mission with id "${id}" (looked for ${file})`);
-    const data = readJson<unknown>(file);
+    let data: unknown;
+    try {
+      data = readJson<unknown>(file);
+    } catch (err) {
+      throw new MissionFileError(err instanceof Error ? err.message : String(err), FILE_PROBLEM.unreadable, { cause: err });
+    }
     const badField = invalidMissionField(data);
-    if (badField !== undefined) throw new Error(`${file} is not a valid mission file (bad or missing ${badField})`);
+    if (badField !== undefined) {
+      throw new MissionFileError(`${file} is not a valid mission file (bad or missing ${badField})`, /\.(?:mode|effort)$/u.test(badField) ? FILE_PROBLEM.unknownHowChecked : FILE_PROBLEM.invalid);
+    }
     const mission = data as Mission;
-    if (mission.id !== id) throw new Error(`${file} holds mission "${mission.id}", expected "${id}"`);
+    if (mission.id !== id) throw new MissionFileError(`${file} holds mission "${mission.id}", expected "${id}"`, FILE_PROBLEM.otherMission);
     return mission;
   }
 
@@ -163,19 +170,22 @@ export class MissionStore {
 
   /**
    * The mission folders whose file is there but cannot be used (damaged, edited by hand into something the engine does not know, or
-   * written by another version), with a short plain reason. `list()` leaves them out, so nothing else shows them. A folder with no file
-   * at all is half-made and is not named.
+   * written by another version). `reason` is a plain phrase for the owner, with no parser message and no path (it finishes the sentence
+   * "<id> ... will not run: <reason>."); `detail` is the exact cause for a programmer or a log, with the path left out. `list()` leaves
+   * these folders out, so nothing else shows them. A folder with no file at all is half-made and is not named, and neither is a folder
+   * whose name is not a safe mission id (`list()` skips it the same way, and no mission can have been made there).
    */
-  damaged(): { id: string; reason: string }[] {
-    const found: { id: string; reason: string }[] = [];
+  damaged(): { id: string; reason: string; detail: string }[] {
+    const found: { id: string; reason: string; detail: string }[] = [];
     for (const id of this.missionDirNames()) {
+      if (!isSafeId(id)) continue;
       const file = this.missionFile(id);
       if (!existsSync(file)) continue;
       try {
         this.load(id);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        found.push({ id, reason: message.split(file).join("its file") });
+        found.push({ id, reason: err instanceof MissionFileError ? err.plain : FILE_PROBLEM.unusable, detail: message.split(file).join("its file") });
       }
     }
     return found;
@@ -323,10 +333,38 @@ export class MissionStore {
   }
 }
 
+/** False for ids that would escape the missions directory when used as a path segment. */
+function isSafeId(id: string): boolean {
+  return !(id === "" || id === "." || id === ".." || /[/\\\0]/.test(id));
+}
+
 /** Rejects ids that would escape the missions directory when used as a path segment. */
 function assertSafeId(id: string): string {
-  if (id === "" || id === "." || id === ".." || /[/\\\0]/.test(id)) throw new Error(`invalid mission id "${id}"`);
+  if (!isSafeId(id)) throw new Error(`invalid mission id "${id}"`);
   return id;
+}
+
+/** What `mc status` says of a mission file that cannot be used: plain phrases that finish "<id> ... will not run: ...". */
+const FILE_PROBLEM = {
+  unreadable: "its file cannot be read",
+  invalid: "its file is not a valid mission file",
+  unknownHowChecked: "one of its features has a way of being checked that Mission Control does not know",
+  otherMission: "its file belongs to another mission",
+  unusable: "its file cannot be used",
+} as const;
+
+/**
+ * A mission file that cannot be used. The message is for programs and logs: it has the path and the words of the parser, and tests and
+ * callers rely on it. `plain` is the phrase for the owner (see `FILE_PROBLEM`).
+ */
+export class MissionFileError extends Error {
+  readonly plain: string;
+
+  // No parameter property (`readonly plain` in the signature): Node strips types without compiling them, and the tests start state.ts that way.
+  constructor(message: string, plain: string, options?: ErrorOptions) {
+    super(message, options);
+    this.plain = plain;
+  }
 }
 
 const MISSION_FIELD_CHECKS = {

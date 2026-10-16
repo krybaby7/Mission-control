@@ -109,21 +109,26 @@ export type LookWhy = "owner" | "not_judged" | "unfinished" | "sent_back" | "rep
 
 /**
  * The reason for the stop at feature `f`, or undefined when the old words fit: the owner asked for it (`--checkpoint feature`), the
- * feature has no mode, or no rule of the spec applies. `sentBack` is how many times the owner sent this stop back. When several rules
- * apply: sent back first, then "owner", then the review that did not finish, then the checks not judged, then no picture shown (the engine's order too).
+ * feature has no mode, or no rule of the spec applies. `sentBack` is how many times the owner sent this stop back.
+ *
+ * This is the engine's rule (`lookReason` and `shownLookReason` in src/checked-by.ts), in the dashboard's own copy of the table, and the
+ * order is the engine's: for a feature the engine did not add itself, `--checkpoint feature` first (the old words); then sent back (a
+ * feature with a mode, or the final review's repair whether or not it has a mode, since the repair of a mixed mission is checked by
+ * tests); then the repair that changed approved work; then `ownerStops` false; then "owner", the review that did not finish, the checks
+ * not judged, and no picture shown. A feature the engine added itself (`gate-c-fix-N`, `owner-change-N`) is never covered by
+ * `--checkpoint feature` or by the flag that turns the other stops off. test/modes-look-agree.test.ts checks the two against each other.
  */
 export function lookWhy(m: ModeMission, f: Feature, sentBack: number): LookWhy | undefined {
+  const derived = DERIVED.test(f.id);
+  const repair = FINAL_REPAIR.test(f.id);
+  if (!derived && m.checkpoints?.includes("feature") === true) return undefined;
+  if ((isModeFeature(f) || repair) && sentBack > 0) return "sent_back";
   // The final review's repair stops when it changed a file of work the owner approved (the engine's rule (d), `changesApproved`).
-  // `--checkpoint feature` does not cover it, and neither does the flag that turns the other stops off.
-  if (FINAL_REPAIR.test(f.id)) {
-    if (isModeFeature(f) && sentBack > 0) return "sent_back";
+  if (repair) {
     const changed = new Set(Array.isArray(f.changesApproved) ? f.changesApproved : []);
     if (m.features.some((x) => x.id !== f.id && changed.has(x.id) && (isModeFeature(x) || DERIVED.test(x.id)) && isApproved(m, x))) return "repair";
   }
-  if (m.checkpoints?.includes("feature") === true) return undefined;
-  if (!isModeFeature(f) || DERIVED.test(f.id)) return undefined;
-  if (sentBack > 0) return "sent_back";
-  if (m.ownerStops === false) return undefined;
+  if (m.ownerStops === false || !isModeFeature(f) || derived) return undefined;
   if (f.mode === "owner") return "owner";
   const checked = f.checked;
   if (checked === undefined || checked.unfinished === true) return "unfinished";
