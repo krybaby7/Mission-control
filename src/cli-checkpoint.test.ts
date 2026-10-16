@@ -265,7 +265,7 @@ describe("mc send-back", () => {
     [
       "feature",
       pending("feature", 1, "add-shout"),
-      "Recorded: you sent “add-shout” for “Shout” back.\nThe engineer changes it with your note, the reviewer looks again, and it asks you again (change 1 of 2).\n",
+      "Recorded: you sent “add-shout” for “Shout” back.\nThe team changes it with your note, a second AI looks again, and it asks you again (change 1 of 2).\n",
     ],
     ["final", pending("final"), "Recorded: you sent the finished app for “Shout” back.\nThe team adds your change as a new feature, checks it, and asks you again (change 1 of 2).\n"],
   ])("says what happens to a %s that is sent back", async (_kind, checkpoint, expected) => {

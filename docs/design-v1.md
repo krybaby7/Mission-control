@@ -1,5 +1,7 @@
 # Mission Control: design v1
 
+> **Note.** This is the first design. [`mvp-spec.md`](./mvp-spec.md) and the code win where they differ. Two things changed: there is no `mc resume` (the next `mc run` continues where a run stopped), and the state is kept in JSON files in `~/.mission-control`, not in SQLite.
+
 This builds on [`brainstorm.md`](./brainstorm.md). It turns the brainstorm into concrete decisions based on your answers:
 
 | You said | Design consequence |

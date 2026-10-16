@@ -62,10 +62,10 @@ Examples:
   mc doctor                                 check that everything is set up
   mc new "A habit tracker with a weekly streak chart" --name "Habit tracker"
   mc feature ~/mc-apps/habit-tracker "Add a dark mode"
-  mc run --until 07:00                      stop working at 07:00 (24-hour clock)
+  mc run --until 17:00                      stop working at 17:00 (24-hour clock)
   mc status                                 see how every mission is doing
   mc report                                 read the latest report
-  mc stop                                   stop a run after its current step`;
+  mc stop                                   stop a run now; the step in progress is redone next time`;
 
 /** Runs `mc` with the given argv (as in process.argv) and returns the exit code. */
 export async function main(argv: string[], given: CliIO = processIO): Promise<number> {
@@ -199,7 +199,7 @@ function buildProgram(io: CliIO, setExit: (code: number) => void): Command {
 
   program
     .command("stop")
-    .description("stop the current run after its current step; its progress is kept")
+    .description("stop the current run; the step in progress is cancelled and redone next time, saved progress is kept")
     .action(() => stopCommand(io));
 
   program
@@ -497,7 +497,7 @@ function newCommand(io: CliIO, idea: string, opts: MissionOptions): void {
     `Queued your new app “${mission.title}”.`,
     `Mission id: ${mission.id}`,
     ...stopLine(checkpoints),
-    `It starts on the next run, for example: mc run --until 07:00`,
+    `It starts on the next run, for example: mc run --until 17:00`,
   );
 }
 
@@ -525,7 +525,7 @@ async function featureCommand(io: CliIO, folder: string, requestText: string, op
     `Queued a change to ${repoPath}: “${mission.title}” (starting from branch ${baseBranch}).`,
     `Mission id: ${mission.id}`,
     ...stopLine(checkpoints),
-    `It starts on the next run, for example: mc run --until 07:00`,
+    `It starts on the next run, for example: mc run --until 17:00`,
   );
 }
 
@@ -1106,8 +1106,8 @@ function stopCommand(io: CliIO): void {
   lenientStore(io).requestStop();
   say(
     io.stdout,
-    "Stop requested. A run that is going stops its current step, saves its progress, writes the report and notifies you.",
-    'The next "mc run" continues where it stopped.',
+    "Stop requested. A run that is going cancels the AI step it is working on, saves its progress, writes the report and notifies you.",
+    'The next "mc run" continues where it stopped. The step that was cancelled is done again.',
   );
 }
 
@@ -1177,7 +1177,7 @@ function afterSendBack(kind: CheckpointKind): string {
     case "plan":
       return "The planner revises it with your note and asks you again";
     case "feature":
-      return "The engineer changes it with your note, the reviewer looks again, and it asks you again";
+      return "The team changes it with your note, a second AI looks again, and it asks you again";
     case "final":
       return "The team adds your change as a new feature, checks it, and asks you again";
   }

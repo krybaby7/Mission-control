@@ -585,7 +585,7 @@ function sendBackEffect(cp: PendingCheckpoint, sent: number): string {
   if (sent >= MAX_SEND_BACKS) return `Sending it back again stops the work here: ${endState(cp.kind)}.`;
   const how: Record<PendingCheckpoint["kind"], string> = {
     plan: "The planner revises the plan with your note, then shows it to you again.",
-    feature: "The engineer changes it with your note, the reviewer looks again, then it is shown to you again.",
+    feature: "The team changes it with your note, a second AI looks again, then it is shown to you again.",
     final: "The team adds your change as a new feature, checks everything again, then shows the result to you again.",
   };
   return `${how[cp.kind]} You can do this ${MAX_SEND_BACKS - sent === 1 ? "one more time" : `${MAX_SEND_BACKS - sent} more times`}.`;
@@ -1136,7 +1136,7 @@ function formatCount(n: number): string {
 }
 
 function formatCost(usd: number): string {
-  if (usd <= 0) return "—";
+  if (usd <= 0) return "none reported";
   return usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`;
 }
 

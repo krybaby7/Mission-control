@@ -1,6 +1,6 @@
 # Checkpoints: the pipeline stops, you look, it carries on
 
-Status: design, not built. Branch `feat/checkpoints`. Line numbers refer to the code on this branch before any checkpoint work (`src/dispatcher.ts` 2674 lines, `src/run.ts` 605, `src/cli.ts` 958, `src/state.ts` 548).
+Status: built. This page is kept as the design record, as it was decided before the build; where the code differs, the code wins. The stops were used in the real runs recorded in `docs/real-runs.md`. Branch `feat/checkpoints`, which is now part of `feat/any-task`. Line numbers refer to the code on this branch before any checkpoint work (`src/dispatcher.ts` 2674 lines, `src/run.ts` 605, `src/cli.ts` 958, `src/state.ts` 548).
 
 The owner's words: "it's okay if the graph stops and prompts me to check something myself then continues after I check." A checkpoint is a place where one mission stops on purpose, shows the owner what to look at, and carries on only after the owner answers: approve, or send back with a note. It is the first step toward work no automated test can judge (visual work, research, writing), where a human look is the real quality check.
 
@@ -211,7 +211,7 @@ Success text:
 |---|---|
 | `approve`, no run active | `Recorded: you approved the plan for “Shout”.` / `It continues on the next run, for example: mc run --mission <id>` |
 | `approve`, run active | `Recorded: you approved the plan for “Shout”.` / `The run that is going picks it up within a few seconds. If it has just ended, continue it with: mc run --mission <id>` |
-| `send-back`, round 1 or 2 | `Recorded: you sent the plan for “Shout” back.` / `The planner revises it with your note and asks you again (change <n> of 2).` (feature: `The engineer changes it ... and the reviewer looks again`; final: `The team adds your change as a new feature, checks it, and asks you again`) |
+| `send-back`, round 1 or 2 | `Recorded: you sent the plan for “Shout” back.` / `The planner revises it with your note and asks you again (change <n> of 2).` (feature: `The team changes it ... and a second AI looks again`; final: `The team adds your change as a new feature, checks it, and asks you again`) |
 | `approve` or `send-back` of a feature | `Recorded: you approved “Add shout” for “Shout”.` / `Recorded: you sent “Add shout” for “Shout” back.` When the feature has the mission's own title (one feature, named like the mission), it is named once: `Recorded: you approved “Usage guide”.` (real run R2). |
 | `send-back` that hits the cap | `Recorded. You have sent this back twice before, so the work stops here: <end state sentence>. The report says what to do next.` |
 
@@ -357,7 +357,7 @@ Engine end to end with the mock harness (`src/dispatcher-checkpoint.test.ts`, ab
 
 Crash and resume (same file): kill after the nonce save and before the mission save; after the mission save and before the notice (next run sends it, once); after the event and before the mission save (answer re-applies, one state change); mid-rework for each kind (`reworkFrom` prevents a second architect call / fix round / owner-change feature); reboot while parked then approve then run; `mc stop` while another mission works; deadline while parked.
 
-Forged approval (`src/checkpoint-forgery.test.ts`, about 150 lines): hand-edited `state: "answered"` with no event is ignored, nonce replaced, high-priority notice sent; inbox file with a proof made from the wrong nonce, the right nonce with another decision, an old round's id, or a pre-written file for a future checkpoint is rejected; a command run as a child of the lock holder's pid is refused (the test spawns a child of the test process that holds the lock); replaying an applied file is rejected; the nonce is absent from `mission.json`, `events.jsonl`, the report and the dashboard snapshot (grep test).
+Forged approval (planned as `src/checkpoint-forgery.test.ts`; the built tests are in `src/checkpoint.test.ts` and the files next to it): hand-edited `state: "answered"` with no event is ignored, nonce replaced, high-priority notice sent; inbox file with a proof made from the wrong nonce, the right nonce with another decision, an old round's id, or a pre-written file for a future checkpoint is rejected; a command run as a child of the lock holder's pid is refused (the test spawns a child of the test process that holds the lock); replaying an applied file is rejected; the nonce is absent from `mission.json`, `events.jsonl`, the report and the dashboard snapshot (grep test).
 
 CLI (`src/cli-checkpoint.test.ts`, about 200 lines, using `main()` as `cli.test.ts` does): flags validate and repeat; queue text; each success and error text of section 7 verbatim; idle path applies at once and leaves no inbox file; active path (a held lock) writes the inbox file; a second answer is "already answered"; `status` and `status --json` for pending and answered.
 

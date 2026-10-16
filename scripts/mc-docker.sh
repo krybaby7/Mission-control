@@ -242,7 +242,7 @@ On this PC, with your own GitHub login (never inside the container):
 Everything else goes to Mission Control inside the container, for example:
   doctor [--live]              Check the setup
   new "<idea>"                 Queue a new app
-  run --until 07:00            Work until 7:00 (only one run at a time)
+  run --until 17:00            Work until 17:00, which is 5:00 PM (only one run at a time)
   status | report | stop       See progress, read the report, stop a run
   plan preview|queue|show      Plans written outside the team (write - after preview or queue to send the plan in)
 
@@ -468,7 +468,7 @@ remember_notify_url() {
 }
 
 build_image() {
-  say "building $IMAGE. The first build downloads about 2 GB and can take 5 to 15 minutes."
+  say "building $IMAGE. The first build downloads about 2 GB and can take 5 to 15 minutes (a guess: the image has not been built yet)."
   docker build \
     --file "$REPO_DIR/docker/Dockerfile" \
     --tag "$IMAGE" \
@@ -547,7 +547,7 @@ run_dashboard() {
         shift 2
         ;;
       --until)
-        [ "$#" -ge 2 ] || die "dashboard: --until needs a time, for example: mc dashboard --until 07:00"
+        [ "$#" -ge 2 ] || die "dashboard: --until needs a time, for example: mc dashboard --until 17:00"
         stop_time="$2"
         shift 2
         ;;
@@ -565,7 +565,7 @@ run_dashboard() {
     die "dashboard: \"$port\" is not a port number. Use a whole number from 1 to 65535."
   fi
   if [ -n "$stop_time" ] && ! [[ "$stop_time" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then
-    die "dashboard: \"$stop_time\" is not a time of day. Write it as HH:MM in 24-hour time, for example 07:00."
+    die "dashboard: \"$stop_time\" is not a time of day. Write it as HH:MM in 24-hour time, for example 17:00."
   fi
   local running
   running="$(docker container inspect --format '{{.State.Running}}' "$DASHBOARD_CONTAINER" 2>/dev/null || true)"

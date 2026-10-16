@@ -4,7 +4,7 @@ The team stopped here on purpose, because you asked to look at “Tick off a hab
 
 What your answer does:
 - **Approve** lets the team carry on from here: `mc approve 2026-10-09-habit-tracker`. You can add `--note "..."`; it is kept in this report.
-- **Send back** with what to change: `mc send-back 2026-10-09-habit-tracker --note "what to change"`. The engineer changes it with your note, the reviewer looks again, then it is shown to you again. You can do this 2 more times.
+- **Send back** with what to change: `mc send-back 2026-10-09-habit-tracker --note "what to change"`. The team changes it with your note, a second AI looks again, then it is shown to you again. You can do this 2 more times.
 
 **Check it**
 

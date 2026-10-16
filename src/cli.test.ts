@@ -75,7 +75,7 @@ describe("mc (program)", () => {
       expect(out).toContain(command);
     }
     expect(out).toContain("Examples:");
-    expect(out).toContain("mc run --until 07:00");
+    expect(out).toContain("mc run --until 17:00");
   });
 
   it("says run, and never frames the work around a time of day, in its help and in what stop prints", async () => {
@@ -87,12 +87,12 @@ describe("mc (program)", () => {
     }
     expect(await mc("--help")).toBe(0);
     expect(out).toContain("Mission Control builds and improves apps with Claude Code and Codex.");
-    expect(out).toContain("mc run --until 07:00");
+    expect(out).toContain("mc run --until 17:00");
     expect(await mc("run", "--help")).toBe(0);
     expect(out).toContain("use this profile for this run");
     expect(out).toContain("change one role for this run");
     expect(await mc("stop")).toBe(0);
-    expect(out).toContain("Stop requested. A run that is going stops its current step");
+    expect(out).toContain("Stop requested. A run that is going cancels the AI step it is working on");
     expect(out).not.toMatch(timeOfDay);
   });
 

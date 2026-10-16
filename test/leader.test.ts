@@ -487,7 +487,7 @@ describe("leader/CLAUDE.md: GitHub in and out (docs/github-setup.md)", () => {
     // The owner's pages explain why: the AI team can change the address, and the note and --to stand in the way.
     expect(LEADER_README).toContain("`publish` refuses a repository other than the one named, and a folder that `get` downloaded refuses any other repository for good.");
     expect(LEADER_DOC).toContain("**Where the work goes is never taken on trust.**");
-    expect(LEADER_DOC).toContain("the engine's own guard for git settings does not cover `remote.<name>.url`");
+    expect(LEADER_DOC).toContain("Mission Control's own guard for git settings does not cover `remote.<name>.url`");
   });
 
   it("tells the leader what a new app is: no pull request, the owner uploads it once, later changes can be published", () => {
@@ -1033,7 +1033,7 @@ describe("the user-facing steps", () => {
 
   it("setup-windows.md opens the dashboard with the commands the script and the program really have", async () => {
     expect(setup).toContain("## Optional: watch the team on a web page (the dashboard)");
-    expect(setup).toContain("mc dashboard --until 07:00");
+    expect(setup).toContain("mc dashboard --until 17:00");
     expect(setup).toContain("docker stop mission-control-dashboard");
     const usage = spawnSync(BASH, [path.join(REPO_DIR, "scripts", "mc-docker.sh"), "help"], { encoding: "utf8" });
     expect(usage.status).toBe(0);
@@ -1101,7 +1101,7 @@ describe("the work modes documents (docs/modes-spec.md, 12.5 and the owner's gui
   const plansSpec = read("docs", "plans-spec.md");
   const keys = ["mode", "effort", "heading", "mention", "words", "columns", "rows"];
   const SKIP_OWNER = "Skip your look at these features? The team will add them without stopping for you. Yes or no?";
-  const PARALLEL = "Mission Control is made for one feature at a time: one loop over the features, one copy of the mission in memory that is written whole at every save, one run lock, one line of merges into a single branch, pacing that assumes one AI call at a time, and a timeline and stops that assume one feature is in flight.";
+  const PARALLEL = "Mission Control is made for one feature at a time. It has one loop over the features. It keeps one copy of the mission in memory, which is written whole at every save. It has one run lock and one line of merges into a single branch. Its pacing assumes one AI call at a time. Its timeline and stops assume one feature is in flight.";
 
   it("the leader's README and the technical page list the flag and the seven keys, and say what was not verified", () => {
     for (const [name, text] of [["leader/README.md", LEADER_README], ["docs/leader.md", LEADER_DOC]] as const) {

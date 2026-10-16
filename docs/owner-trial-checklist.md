@@ -4,9 +4,9 @@ This list is for you, at your desk. It tries Mission Control on your own Windows
 
 **What was tried before you, and what was not.**
 
-- **Tried for real:** a real Claude did small test jobs on a tiny practice app, on a cloud test machine: a code job, a guide, a web page (twice) and a table with a script. The record is in [docs/real-runs.md](real-runs.md).
+- **Tried for real:** a real Claude did small test jobs on a tiny practice app, on a cloud test machine: a code job, a guide, a web page (three times) and a table with a script. The record is in [docs/real-runs.md](real-runs.md).
 - **Tested here only:** everything else that was built, with stand-in AIs and automated tests. That includes the fixes made after those test jobs. It also includes the step that sends work to GitHub: it was tried only with a folder standing in for GitHub, a fake `gh` and a fake Docker, although a real Claude built the work that was sent.
-- **Never tried by anyone:** Windows, WSL, Docker Desktop, a real GitHub, the real `gh` tool, the Claude Code permission prompts, the iPad, Codex, and the leader chatting with a person.
+- **Never tried by anyone:** Windows, WSL, Docker Desktop (so the team has never run inside Docker for real), a real GitHub, the real `gh` tool, the Claude Code permission prompts, the iPad, Codex, building a new app from nothing, and the leader chatting with a person.
 
 So if a step fails, that is useful news and not your mistake. **Stop at the step that fails. Do not try to fix it.** Go to [Step 10](#10-if-something-fails-what-to-send-back).
 
@@ -16,17 +16,17 @@ So if a step fails, that is useful news and not your mistake. **Stop at the step
 
 | | What | What it costs |
 |---|---|---|
-| 1 | **Install and check** (Step 1) | Nothing from your allowance, except a very small amount for `mc doctor --live` (one tiny request to each AI; nobody measured it). About an hour of your time, mostly waiting for downloads. |
-| 2 | **One small code job through the leader** (Steps 2 and 3) | About 1 percent of one week of your Claude plan. The real test job used 8 AI calls and about a minute of team time. |
+| 1 | **Install and check** (Step 1) | Nothing from your allowance, except a very small amount for `mc doctor --live` (one tiny request to each AI; nobody measured it). About an hour of your time, mostly waiting for downloads (an estimate; nobody has timed it). |
+| 2 | **One small code job through the leader** (Steps 2 and 3) | On the test account (its plan size is not known) such a job moved the weekly reading by 1 percent or less. Your plan may be smaller, so the share may be bigger. Look at your own reading after Step 3. The real test job used 8 AI calls and about a minute of team time. |
 | 3 | **Send that job to a throwaway GitHub repository** (Step 7) | Nothing. Sending makes no AI call (read in the script; the stand-in test made none). |
 
 Steps 4, 5, 6, 8 and 9 can wait until these three work.
 
 ## What the jobs cost
 
-All figures come from the real test jobs: a real Claude, Claude only, a tiny practice app. “About 1 percent of one week” is the most a small job moved the weekly reading. That reading goes up in whole percents, so it cannot show less. The dollar figures are the engine's own estimate at list price. (The engine is the part of Mission Control that runs the team.) They are not what your plan charges you.
+All figures come from the real test jobs: a real Claude, Claude only, a tiny practice app. The percent was read from the cloud test account. The size of its plan is not known, and other use of that account is in the reading too. On a smaller plan the same job is a bigger share of your week. The reading goes up in whole percents, so it cannot show less than 1. The dollar figures are Mission Control's own estimate at list price. They are not what your plan charges you.
 
-| Job | AI calls | Team time | Engine's estimate at list price | Part of one week |
+| Job | AI calls | Team time | Estimate at list price | Part of one week (test account) |
 |---|---|---|---|---|
 | Code job (Step 3) | 8 | 1 to 1.5 minutes | $0.24 to $0.41 | about 1 percent or less |
 | Guide with your look (Step 4) | 7 | about 1 minute | $0.26 | about 1 percent or less |
@@ -34,7 +34,7 @@ All figures come from the real test jobs: a real Claude, Claude only, a tiny pra
 | Script and table, sent back once (Step 6) | 15 | about 3 minutes | $0.59 | about 1 percent or less |
 | Send to GitHub (Step 7) | 0 | seconds | nothing | nothing |
 
-Steps 3 to 6 together: at most about 4 percent of one week, if nothing goes wrong. A job that needs more rounds costs more. Your own apps are bigger than the practice app, so a real job will cost more, and nobody has measured by how much. The leader's chat and Step 9 also use your plans, and those were not measured. Mission Control stops starting new work when the week reaches 85 percent.
+Steps 3 to 6 together: about 4 percent or less on the test account, if nothing goes wrong. Your share depends on your plan. A job that needs more rounds costs more. Your own apps are bigger than the practice app, so a real job will cost more, and nobody has measured by how much. The leader's chat and Step 9 also use your plans, and those were not measured. Mission Control stops starting new work when the week reaches 85 percent.
 
 ## The practice app
 
@@ -44,7 +44,7 @@ Steps 3 to 7 use one tiny app called `word-tools`. It is the app the real test j
 
 ### 1. Install and check
 
-- **Do:** follow [docs/setup-windows.md](setup-windows.md), Steps 1 to 6. Do Step 7 there only if your PC goes to sleep. Then type `mc config set defaultProfile claude`. This makes the team use Claude only for now, as every real test job did. Step 9 switches Codex back on.
+- **Do:** follow [docs/setup-windows.md](setup-windows.md), Steps 1 to 6. Step 3 there downloads the branch `feat/any-task`. This is the branch with the new work. If you got Mission Control some other way, you may have an older version, and Steps 2 and 3 here will fail. Do Step 7 there only if your PC goes to sleep. Then type `mc config set defaultProfile claude`. This makes the team use Claude only for now, as every real test job did. Step 9 switches Codex back on.
 - **You should see:** `Hello from Docker!` (Step 2 of the guide), `mc-docker: the image is ready.` (Step 3), `Login successful` (Step 4), no ✗ line from `mc doctor` (Step 5) and a test message on your iPad (Step 6). `mc config get defaultProfile` prints `claude`.
 - **It proves:** Windows, WSL, Docker Desktop, both logins and the iPad message work with Mission Control.
 - **Never tried here:** all of it. The guide was written from the programs' own documentation and from our tests, not from a PC.
@@ -111,9 +111,9 @@ Steps 3 to 7 use one tiny app called `word-tools`. It is the app the real test j
      ```
   3. The leader asks whether the file holds personal data. Answer no: the numbers are made up.
   4. At the stop for `columns.csv`, send it back once. Tell the leader: `Make every Meaning at most 7 words.` When it comes back, read the file, then approve.
-- **You should see:** the script's totals are East 145 units and 2900.25, North 195 and 3900.50, South 110 and 2210.75. You can work them out from `data/sales.csv`. To see the totals file, use the report's checkout lines in `mc shell`, run the script the report names (in the real test: `node scripts/region-totals.js`) and open `reports/totals.csv`. After your note, the stop comes again, repeats your note in curly quotes and says that nothing checks the note was followed. You check that.
+- **You should see:** the script's totals are East 145 units and 2900.25, North 195 and 3900.50, South 110 and 2210.75. You can work them out from `data/sales.csv`. To see the totals file, ask the leader which command runs the script. In the real test it was `node scripts/region-totals.js`, and the report named it only under “Choices I made for you”. Run it in `mc shell`, using the report's checkout lines, and open `reports/totals.csv`. After your note, the stop comes again, repeats your note in curly quotes and says that nothing checks the note was followed. You check that.
 - **It proves:** tests written first for a script with exact numbers, the check of a table, and a send-back that is reworked and shown again.
-- **Never tried here:** Excel or any spreadsheet file (if Excel asks “Enable Editing”, do not press it before you have read the cells). A second send-back. In the real test the first feature also built the second feature's file ahead of time. That was not fixed: the look now lists such a file as “already there before this feature”, and that was only tested here. Windows, WSL, Docker Desktop.
+- **Never tried here:** Excel or any spreadsheet file (if Excel asks “Enable Editing”, do not press it before you have read the cells). A second send-back. In the real test the first feature also built the second feature's file ahead of time. That was not fixed: the look now lists such a file as “already there before this feature”, and that was only tested here. The repeated note at the second showing was fixed after the real test and only tested here. Windows, WSL, Docker Desktop.
 
 ### 7. Publish to a throwaway GitHub repository
 
@@ -141,7 +141,7 @@ Steps 3 to 7 use one tiny app called `word-tools`. It is the app the real test j
 ### 8. The dashboard on the iPad
 
 - **Do:** do this while a job waits for your look (during Step 4 or 5). In a second Ubuntu window run `mc dashboard --lan`. On the PC open <http://localhost:8787>. Then, in PowerShell, run `ipconfig` and find the `IPv4 Address` line of your Wi-Fi or network card. On the iPad, on the same network, open Safari and type `http://<that address>:8787`.
-- **You should see:** four tabs, **Now**, **Needs you**, **Timeline** and **Results**. A job that waits for you has an amber card, `“<name>”: please check the feature`, with two buttons that only give you a sentence to paste into the leader's chat. The page changes nothing. If it loses touch it says **Not updating**.
+- **You should see:** four tabs, **Now**, **Needs you**, **Timeline** and **Results**. A job that waits for you has an amber card. It starts with the job's name in curly quotes and says `please check` followed by the plan, or by the feature's name in curly quotes and `before it is added`. It has two buttons that only give you a sentence to paste into the leader's chat. The page changes nothing. If it loses touch it says **Not updating**.
 - **It proves:** the page works in a Windows browser, and whether the iPad can reach it through Windows and WSL2.
 - **Never tried here:** the iPad route. Nobody knows whether Windows, WSL2 and Docker Desktop let the iPad through. Also Safari on the iPad, and the page in a Windows browser. `--lan` opens the page to every device on your network, and it has no password. Use it only at home, and press Ctrl+C in its window when you are done. If the iPad cannot open it, do not change the Windows firewall yourself. Send back what Safari says.
 

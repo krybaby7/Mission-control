@@ -1,6 +1,6 @@
 # Real runs in a cloud container (for developers)
 
-A real run drives the real Claude Code CLI through the engine on a tiny throwaway app. It proves what the mock harness cannot: real AI output, real stage timing, real quota readings. It costs about 1% of the weekly Claude allowance for a one-feature job. It is for a throwaway cloud container (you are root, no Docker). **Never run it on the owner's PC.**
+A real run drives the real Claude Code CLI through the engine on a tiny throwaway app. It proves what the mock harness cannot: real AI output, real stage timing, real quota readings. On the test account (its plan size is not known) a one-feature job moved the weekly reading by 1 percent or less. It is for a throwaway cloud container (you are root, no Docker). **Never run it on the owner's PC.**
 
 ## Recipe
 

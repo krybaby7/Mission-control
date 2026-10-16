@@ -384,7 +384,7 @@ describe("the report", () => {
     expect(report).toContain("2. `git checkout --detach mc/2026-10-12-shout--add-shout`: switch to the version with the new work");
     expect(report).toContain("press Ctrl+C to stop the app");
     expect(report).toContain("put the folder back on your own version with `git checkout main`");
-    expect(report).toContain("The engineer changes it with your note, the reviewer looks again, then it is shown to you again.");
+    expect(report).toContain("The team changes it with your note, a second AI looks again, then it is shown to you again.");
   });
 
   it("does not send the owner to a main branch that has not moved yet", () => {

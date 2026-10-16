@@ -12,7 +12,7 @@ With these commands, the box where the team works (the Docker container) never g
 
 ## What was tried and what was not
 
-**Tried here:** all three commands, against a stand-in for GitHub (a folder of git repositories, reached through the same git setting an owner could use) and a stand-in for the `gh` program. The tests cover odd and hostile input, an app folder that holds git settings and hooks that would run a command, and a branch that already exists on GitHub. The work that was published in one trial was a small job done by a real Claude in a cloud test machine; the upload itself went to the stand-in.
+**Tried here:** all three commands, against a stand-in for GitHub (a folder of git repositories, reached through the same git setting an owner could use) and a stand-in for the `gh` program and a fake `docker`. The tests cover odd and hostile input, an app folder that holds git settings and hooks that would run a command, and a branch that already exists on GitHub. The work that was published in one trial was a small job done by a real Claude in a cloud test machine; the upload itself went to the stand-in. The small read-only box that reads the mission's record was never started for real: its limits were checked only as the words of the Docker command, with a fake `docker`.
 
 **Not tried:** a real GitHub. A real login. The real `gh` program opening a pull request. Private repositories. SSH keys. Git LFS (big-file storage). Windows, WSL and Docker Desktop. The steps for installing and logging in below come from GitHub's own documentation, not from anything run here. Real GitHub cannot be reached from the place this was built, so please try it once with a repository you can afford to experiment with.
 
@@ -154,7 +154,7 @@ What this cannot do: if the team changes the address before the first upload fro
 
 The app's folder is where the AI team works. An AI could, in principle, leave git settings or hooks in it that make git run a command. `mc publish` uses your GitHub login, so it must not give such a command the chance to run. Git therefore never runs inside the app's folder. The script copies the one branch (and the main branch, to compare with) into a new, empty folder that it makes for the purpose, uploads from that copy, and deletes the copy when it is done. The app's saved settings are read only as a plain text file, to find the GitHub address. If you run git yourself inside an app's folder, the warning in [docs/setup-windows.md](setup-windows.md) about git in your apps folder still applies.
 
-The mission's record lives inside Docker, which your PC cannot read directly. So `mc publish` reads it in a small, separate box: read-only, no network, no logins, no apps folder, and no variable that holds a password. It only prints a short list of facts, and your PC checks each one again before it uses it.
+The mission's record lives inside Docker, which your PC cannot read directly. So `mc publish` is built to read it in a small, separate box: read-only, no network, no logins, no apps folder, and no variable that holds a password. This was checked only as the words of the Docker command, with a fake `docker`. No real Docker has run it. The box only prints a short list of facts, and your PC checks each one again before it uses it.
 
 ## If you see a message
 

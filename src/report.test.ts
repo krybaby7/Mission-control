@@ -626,7 +626,7 @@ describe("renderReport", () => {
   it("summarizes usage per model for this mission only", () => {
     const usage = sectionText(render(realisticMission()), "Usage");
     expect(usage).toContain("5 agent runs, 1 run paused by a usage limit, about 32 min of agent time.");
-    expect(usage).toContain("| gpt-6.1-sol | Codex | 3 | 201,000 | 50,200 | — |");
+    expect(usage).toContain("| gpt-6.1-sol | Codex | 3 | 201,000 | 50,200 | none reported |");
     expect(usage).toContain("| claude-opus-5-5 | Claude Code | 1 | 50,000 | 8,000 | $1.25 |");
     expect(usage).toContain("| claude-haiku-5-5 | Claude Code | 1 | 4,000 | 500 | <$0.01 |");
     expect(usage).toContain("| **Total** |  | 5 | 255,000 | 58,700 | $1.25 |");

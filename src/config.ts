@@ -177,7 +177,8 @@ allowedModels:
 #   test_author - writes the tests that prove a feature works, before it is built
 #   reviewer    - checks the finished code
 # "other" means "the family that did NOT write the code", so the tests and the
-# review get a second opinion from a different AI. With crossFamily: false,
+# review get a second opinion from another AI session. That is the other
+# company's AI when crossFamily is true. With crossFamily: false,
 # "other" stays in the same family.
 
 # The profile used when you don't pick one with --profile.

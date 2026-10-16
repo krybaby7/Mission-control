@@ -1,25 +1,25 @@
 # Real runs: what a real Claude did, and what it did not show
 
-This is a plain record of the real test runs of Mission Control. A real run uses the real engine and the real Claude Code, with a real Claude login, on a tiny throwaway app. It shows what stand-in AIs cannot: real answers, real timing and real use of the allowance.
+This is a plain record of the real test runs of Mission Control. A real run uses Mission Control's own code and the real Claude Code, with a real Claude login, on a tiny throwaway app. It shows what stand-in AIs cannot: real answers, real timing and real use of the allowance.
 
-**How it was done.** On 16 October 2026, on a cloud test machine, with Claude only. The practice app was `word-tools`, a tiny library with one function and three tests. There was no Docker, no Windows, no Codex and no real GitHub. The tester was another Claude Code session that ran every command and wrote down what happened. It wrote every plan by hand, following the leader's written rules, and queued it with `mc plan queue`. The leader itself, the chat AI, never took part. In all there were six runs (R1 to R5, and R3b, which repeats the web page job after fixes). They made seven missions, used 62 AI calls and came to $2.84 at the engine's own list-price estimate. (The engine is the part of Mission Control that runs the team.) That estimate is not what a plan charges.
+**How it was done.** On 16 October 2026, on a cloud test machine, with Claude only. The practice app was `word-tools`, a tiny library with one function and three tests. There was no Docker, no Windows, no Codex and no real GitHub. The tester was another Claude Code session that ran every command and wrote down what happened. It wrote every plan by hand, following the leader's written rules, and queued it with `mc plan queue`. The leader itself, the chat AI, never took part. In all there were six runs (R1 to R5, and R3b, which repeats the web page job after fixes). They made seven missions, used 62 AI calls and came to $2.84 at Mission Control's own list-price estimate. That estimate is not what a plan charges.
 
 **How to read it.** “Tried for real” means a real Claude did it in these runs. “Tested here only” means stand-in AIs and automated tests, no real run. “Not tried” means neither. What the owner should try on a PC is in [docs/owner-trial-checklist.md](owner-trial-checklist.md).
 
 ## At a glance
 
-| Run | The job | How it was checked | AI calls | Team time | Engine's estimate | Verdict | Faults found |
+| Run | The job | How it was checked | AI calls | Team time | Estimate at list price | Verdict | Faults found |
 |---|---|---|---|---|---|---|---|
 | R1 | A shout function, through a plan | Tests | 8 | about 65 seconds | $0.41 | Worked | 4 small |
-| R2 | A usage guide, with your look | A second AI, then you | 7 | about 70 seconds | $0.26 | Worked with small issues | 5 small |
+| R2 | A usage guide, with your look | A second AI, then you | 7 | about 70 seconds | $0.26 | Worked with issues | 5 small |
 | R3 | A landing page, done two ways | A second AI; a second AI, then you | 16 (8 and 8) | about 2 minutes for the first | $0.82 ($0.42 and $0.40) | Worked with issues | 8, two of them major |
-| R3b | The landing page again, after the fixes | A second AI | 8 | about 90 seconds | $0.52 | Worked with small issues | 4 small |
+| R3b | The landing page again, after the fixes | A second AI | 8 | about 90 seconds | $0.52 | Worked with issues | 4 small |
 | R4 | A script and a table, sent back once | Tests; then a second AI and you | 15 | about 3 minutes | $0.59 | Worked with issues | 7, two of them major |
 | R5 | Sending work to GitHub, with stand-ins | Tests | 8 | about 80 seconds | $0.24 | Worked | 4 small |
 
-32 faults were found. Four were major. None stopped a job. In every job the tester found the work correct.
+32 faults were found. Four were major. None stopped a job. In every job the main result was right. In R3b and R4 the builder also changed files that nobody asked for.
 
-**Allowance.** The weekly reading was 23 percent before R1 and 27 percent after R5. Over R1 to R3 it rose from 23 to 24, and over R3b to R5 from 26 to 27. Between R3 and R3b it rose by 2 more, but no run was made in between, so other use of the same account must account for it. The reading shows whole percents only, so no single job can be told from zero. A small job used about 1 percent of one week or less.
+**Allowance.** The weekly reading was 23 percent before R1 and 27 percent after R5. Over R1 to R3 it rose from 23 to 24, and over R3b to R5 from 26 to 27. Between R3 and R3b it rose by 2 more, but no run was made in between, so other use of the same account must account for it. The reading shows whole percents only, so no single job can be told from zero. On the test account, whose plan size is not known, a small job moved the reading by 1 percent or less. On a smaller plan the same job is a bigger share.
 
 ## R1: a code job through a plan
 
@@ -29,7 +29,7 @@ This is a plain record of the real test runs of Mission Control. A real run uses
 - **The work.** `src/shout.js`, five new tests and a section in the README. `npm test` passed all 8 tests (3 old, 5 new). `main` was not touched.
 - **Verdict.** Worked.
 - **Found wrong, 4 small.**
-  - `plan queue` has no `--profile` option, and the instructions for the test said to use it. The instructions were wrong, not the engine. Fixed in the developer guide.
+  - `plan queue` has no `--profile` option, and the instructions for the test said to use it. The instructions were wrong, not Mission Control. Fixed in docs/dev-real-run.md (the guide for developers).
   - The preview said “a different AI reviews it”, but the reviewer was another Claude session. Fixed: “a second AI reviews it”.
   - The report's notes repeated a first guess that contradicted the plan's own choice. Fixed: left out when the leader wrote the plan.
   - The guide said every report has a line `Checked:`. A plan checked only by tests has none. Fixed in the guide.
@@ -41,7 +41,7 @@ This is a plain record of the real test runs of Mission Control. A real run uses
 - **What the team did.** 7 AI calls in about 70 seconds, $0.26. No tests were written. A second AI judged the checks. The team stopped twice: at the plan, and at the guide.
 - **What you would have seen.** At the guide: `The second AI's answers: 4 passed, 0 failed, 1 could not be judged.` The one it could not judge was the taste check, as it should. After your approval the report said `Checked: 1 feature by a second AI against your list, except 1 check it could not judge and approved by you.` That wording has changed since (see below). The lines for looking at the guide worked as written.
 - **The work.** One new file, 36 lines and 152 words. Nothing in any text called the guide tested.
-- **Verdict.** Worked with small issues.
+- **Verdict.** Worked with issues.
 - **Found wrong, 5 small.**
   - The AI's honest summary of the report was thrown away, because it said “no automated tests were written” and the word “tests” was on the banned list. The footnote gave a wrong reason. Fixed.
   - The look cut the second AI's reason in the middle of a sentence. Fixed.
@@ -74,7 +74,7 @@ This is a plain record of the real test runs of Mission Control. A real run uses
 - **What the team did.** 8 AI calls in about 90 seconds, $0.52. The plan reviewer asked for one small change (name the file), and the planner made it and nothing else.
 - **What you would have seen.** The six checks you wrote came through word for word. `6 passed, 0 failed, 0 could not be judged.` Only one stop: the plan. The report said `Checked: 1 feature by a second AI against your list.` and told you to open `site/index.html`.
 - **The work.** Right at 320, 375, 390 and 1280 pixels, and in both pictures. The builder also added a short section to the README, which nobody had asked for.
-- **Verdict.** Worked with small issues.
+- **Verdict.** Worked with issues.
 - **Found wrong, 4 small.**
   - The plan reviewer's note was cut in the middle of a word. Fixed.
   - The AI's summary of the report was thrown away again, because it said nothing had been run in a browser. Fixed: the facts now say that pictures were taken.
@@ -85,7 +85,7 @@ This is a plain record of the real test runs of Mission Control. A real run uses
 
 ## R4: a script and a table, with one send-back
 
-- **The job.** A sales file, `data/sales.csv`, with seven rows. Feature 1: a script, with tests written first, that writes `reports/totals.csv` with one row for each region. Feature 2: a file, `data/columns.csv`, that says what each column means. Feature 2 was marked for your look, and it was sent back once with the note “Make every Meaning at most 7 words.”
+- **The job.** A sales file, `data/sales.csv`, with seven rows. Feature 1: a script, with tests written first, that writes `reports/totals.csv` with one row for each region. Feature 2: a file, `data/columns.csv`, that says what each column means. Feature 2 was marked for your look, and it was sent back once with the note “Make every Meaning one short sentence of at most 7 words.”
 - **What the team did.** 15 AI calls in about 3 minutes, $0.59. The send-back (rework and a second look) cost 2 calls, $0.05 and 14 seconds. The builder of feature 2 first used the lightest AI, which changed no file, then a stronger one.
 - **What you would have seen.** The stop at the table, the send-back, the same stop again as the second showing, then your approval. The final report said `Checked: 1 feature by tests; 1 feature by a second AI against your list and approved by you.`
 - **The work.** The totals are right: East 145 and 2900.25, North 195 and 3900.50, South 110 and 2210.75. The tester added up the sales file separately and got the same numbers. The new meanings had 4, 5 and 5 words: the note was followed. Nothing checked that. The tester did.
@@ -106,7 +106,7 @@ This is a plain record of the real test runs of Mission Control. A real run uses
 - **The job.** `mc get acme/word-tools` from a folder that stood in for GitHub. A job on the copy: a function `countWords`, checked by tests. Then `mc publish-preview` and `mc publish --to acme/word-tools`, and a set of refusals. A fake `gh` and a fake `docker` stood in for the two programs the PC does not have here.
 - **What the team did.** 8 AI calls in about 80 seconds, $0.24. No rework. 11 tests passed.
 - **What you would have seen.** `mc-docker: mc/2026-10-16-count-words is now on github.com/acme/word-tools. The base branch "main" was not changed.` and `mc-docker: draft pull request: https://github.com/acme/word-tools/pull/1`. The draft's text said what was checked: tests written before the code, a separate reviewer, and the stops you answered, with “Mission Control records each answer. It cannot tell what the owner looked at.”
-- **What the stand-in GitHub held afterwards.** Only the branch `mc/<mission>`. `main` was as before. The upload was one plain push, with no force. The fake `gh` was called once, with `--draft`. No token reached the container. Git never ran inside the app's folder.
+- **What the stand-in GitHub held afterwards.** Only the branch `mc/<mission>`. `main` was as before. The upload was one plain push, with no force. The fake `gh` was called once, with `--draft`. The call that starts the small read-only box carried no token. A fake Docker recorded it, and no real box ran. Git never ran inside the app's folder.
 - **The refusals.** A mission that was not done, a wrong `--to`, an app folder whose GitHub address had been changed to another repository, an address that was not github.com, a missing `--to` and an unknown mission were all refused with a plain sentence, and nothing was uploaded.
 - **Verdict.** Worked.
 - **Found wrong, 4 small.** The draft's text cut a long line in the middle of a word and lost the reviewers' open notes. It pointed to a `report.md` that a reader on GitHub cannot open. A refusal showed the raw word “stopped”. It said “1 of 1 finished features”. All four fixed. None run again.
@@ -131,9 +131,9 @@ The six shown to hold by R3b are the quote check, the plan reviewer leaving the 
 - **A real GitHub and the real `gh`.** R5 used a folder, a fake `gh` and a fake `docker`.
 - **Codex.** Every run used Claude only. The usual team (Claude plans and reviews, Codex builds), a second AI from the other company, and Codex looking at pictures were never run.
 - **The leader writing a plan, and the Claude Code prompts.** The tester wrote every plan by hand. The leader never chatted, asked its questions, or met a permission prompt in a run.
-- **Recovery after a restart.** No run was interrupted. The cloud machine restarts about every 25 minutes, and the runs lasted one to three minutes, so none was hit. Continuing after a planned stop (`mc run --mission` after `mc approve`) worked every time. That is not a crash.
+- **Recovery after a restart.** No run was interrupted. The cloud machine is restarted from time to time. The runs lasted one to three minutes, and no restart hit a run. Continuing after a planned stop (`mc run --mission` after `mc approve`) worked every time. That is not a crash.
 - **A quote that is really missing.** No made-up quote was seen in these runs. The fixed check was tried on recorded answers only, so a made-up quote turning a pass into “not judged” was not seen for real.
-- **A fix round after a failed check.** No real check failed. The second AI never failed a check, and every tests-first feature passed on the first try. The only rework was R4's send-back. The only climb to a stronger AI was R4's first try by the lightest one.
+- **A fix round after a failed check.** The second AI never failed a check, and every tests-first feature passed on the first try. One of Mission Control's own checks failed once (R4: the lightest AI changed no file), and a stronger AI tried again. That was the only climb to a stronger AI. The only rework was R4's send-back.
 - **Limits and big jobs.** The pause at 85 percent of the week, a wait for a usage limit, a new app built from nothing, an app bigger than three tests, more than two features, `deep` effort, and a folder that holds only documents.
 - **The dashboard.** It was not looked at during a real run.
 - **How good the second AI is as a judge.** Its answers were right in the cases the tester checked. Nobody measured how often it is wrong.
