@@ -10,20 +10,22 @@ It uses the subscriptions you already pay for, and drives the official **Claude 
 | Standard | Sonnet 5.5 | GPT-6.1 Sol |
 | Light (all cheap helper work) | Haiku 5.5 | not used |
 
-> **Status:** the system is built and tested with stand-in AIs and thousands of automated tests. A few small real runs (a real Claude login, in a test container in the cloud) have been made, and the stops for your look and the plans the leader writes were tried that way. **Nothing has been tried on a Windows PC yet**, and nothing has been tried against a real GitHub. The first real run on your PC is the next step.
+> **Status:** the system is built and tested with stand-in AIs and thousands of automated tests. A few small real runs have been made, with a real Claude login, on a cloud test machine with no Docker: a code change, a guide, a web page and a table, with the stops for your look. The plans for these runs were written by hand, following the leader's rules. The leader itself has never run. The runs found 32 faults, 4 of them serious. Most were fixed. Three are not fully fixed (see [docs/real-runs.md](docs/real-runs.md)). Only the web page job was run again afterwards, so most of the fixes were tested here only. The step that sends work to GitHub was tried with a stand-in for GitHub. Codex has never been run. **Not tried anywhere:** the leader, the team running inside Docker, the Claude Code permission prompts, and building a new app from nothing. **Nothing has been tried on a Windows PC yet**, and nothing has been tried against a real GitHub. The first real run on your PC is the next step.
 
 ## Getting started
 
-Follow **[docs/setup-windows.md](docs/setup-windows.md)**. It walks a non-programmer through Windows 11 step by step: WSL2, Docker Desktop, logging in to both AIs, iPad notifications via ntfy, keeping the PC awake, starting runs on a schedule, and the one-click shortcuts for the leader and the dashboard.
+Follow **[docs/setup-windows.md](docs/setup-windows.md)**. It walks a non-programmer through Windows 11 step by step: WSL2, Docker Desktop, logging in to both AIs, iPad notifications via ntfy, keeping the PC awake, starting runs on a schedule, and the one-click shortcuts for the leader and the dashboard. Step 3 downloads the branch `feat/any-task`, which has the new work. It is not merged into the main branch yet.
 
-Daily use, from the Ubuntu window, once set up:
+Daily use, from the Ubuntu window, once set up. `mc` is the shortcut that Step 3 of the setup guide makes for `scripts/mc-docker.sh`:
 
 ```bash
-scripts/mc-docker.sh new "A habit tracker with a weekly streak chart"   # queue work
-scripts/mc-docker.sh run --until 07:00                                   # start a run
-scripts/mc-docker.sh report                                              # read the report when it finishes
-scripts/mc-docker.sh copy-reports                                        # reports + screenshots → ~/mc-reports
+mc new "A habit tracker with a weekly streak chart"   # queue work
+mc run                                                # start a run (add --until 17:00 to stop at a set time)
+mc report                                             # read the report when it finishes
+mc copy-reports                                       # reports + screenshots → ~/mc-reports
 ```
+
+Building a new app from nothing like this has not been tried with a real AI. The real test runs changed a tiny existing app.
 
 To work on a project that lives on GitHub, and send the result back as a draft pull request, see **[docs/github-setup.md](docs/github-setup.md)**.
 
@@ -48,7 +50,7 @@ your idea ─► Architect (frontier) writes a spec: small, testable features
 - Engineers can't edit frozen tests or the files that define the checks.
 - An anti-cheat scan catches skipped or weakened tests.
 - "Done" means the checks actually pass.
-- Work that has no tests (a guide, a web page, a table) is checked another way, and the report says which: Mission Control's own checks, then a second AI that judges each written check with a reason, and for some features a stop for your look. It is never called "tested" (see [docs/work-modes.md](docs/work-modes.md)).
+- Work that has no tests (a guide, a web page, a table) is checked another way, and the report says which: Mission Control's own checks, then a second AI that judges each written check with a reason, and for some features a stop for your look. It is never called "tested" (see [docs/work-modes.md](docs/work-modes.md)). Such a job needs an app that has code and its own checks: a folder that holds only documents can fail.
 
 **Guards while it works on its own:**
 - **Usage limits:** when a subscription hits its limit, its work moves to the other AI, or the run waits for the reset. Usage is paced so you keep some for your own use.
@@ -66,14 +68,15 @@ your idea ─► Architect (frontier) writes a spec: small, testable features
 | `mc new "<idea>" [--name "<title>"] [--checkpoint plan\|feature\|final]` | Queue a new app. With `--checkpoint` it stops for your look at that point (see below) |
 | `mc feature <app-folder> "<request>" [--checkpoint plan\|feature\|final]` | Queue a change to an existing app |
 | `mc plan preview [file\|-]` / `mc plan queue [file\|-]` / `mc plan show <id>` | Plans written outside the team, usually by the leader, as plain lines of text. `preview` checks a plan and queues nothing; `queue` queues it, skips the team's planner, and by default stops for your look at the plan (`--no-plan-checkpoint` turns that off); a feature marked for your look stops too (`--no-owner-checkpoint` turns that off); `show` prints the whole plan of a mission and, for a plan that has a feature checked by a second AI, how each feature was checked. A plan that is already queued is not queued twice. Write `-` to send the plan in with the command, or give a file inside `~/mc-apps` |
-| `mc run [--until HH:MM] [--profile mixed\|claude\|codex] [--role engineer=claude:frontier]` | Work through the queue |
+| `mc run [--until HH:MM] [--mission <id>] [--profile mixed\|claude\|codex] [--role engineer=claude:frontier]` | Work through the queue. Without `--until` it goes on until the queue is done or you stop it. `--mission` works on one mission only |
 | `mc status` / `mc report [id]` / `mc logs <id>` | Progress, the report, a step-by-step log |
 | `mc approve <id> [--note "<text>"]` / `mc send-back <id> --note "<what to change>"` | Answer a mission that stopped for your check (see below) |
 | `mc stop` | Stop after the current step; nothing is lost |
-| `mc dashboard [--port N] [--until HH:MM]` | Show the current progress on a web page. It only reads. Through the Docker script it runs in a container of its own (see below) |
+| `mc dashboard [--port N] [--lan] [--until HH:MM]` | Show the current progress on a web page. It only reads. Through the Docker script it runs in a container of its own (see below) |
 | `mc get <owner/repo \| github.com address> [folder-name]` | Download a GitHub repository into `~/mc-apps`. Runs on your PC with your own GitHub login, not in the container. Never overwrites a folder. Only github.com (see [docs/github-setup.md](docs/github-setup.md)) |
 | `mc publish-preview <mission>` | Say which GitHub repository a finished (or partly finished) mission's work would go to. Uploads nothing (see [docs/github-setup.md](docs/github-setup.md)) |
 | `mc publish <mission> --to <owner/repo>` | Upload a finished (or partly finished) mission's branch `mc/<mission>` to that repository and open a **draft** pull request, with the first lines of the report and a plain line about what was checked and who looked. Runs on your PC with your own login. Uploads only to the repository you name, which must be the one the app's folder was set up for. Never touches the main branch, never forces. A new app has no pull request on its first trip; the guide says what to do instead (see [docs/github-setup.md](docs/github-setup.md)) |
+| `mc build` / `mc login-claude` / `mc login-codex` / `mc shell` / `mc copy-reports` / `mc fix-permissions` | These exist only in the Ubuntu shortcut (`scripts/mc-docker.sh`), because they work with Docker: build the image (again after every update), log in to each AI once, open a terminal inside the box, copy the reports and screenshots to `~/mc-reports`, and repair the ownership of the login and data volumes. The setup guide says when to use each |
 | `mc install-leader` / `mc leader [--no-remote]` | `install-leader` saves where Mission Control is, once, so the Windows shortcuts in `scripts/windows` can find it. `leader` starts Claude Code, the leader, in the `leader` folder of this copy, wherever you are (see below) |
 
 **Checks you ask for.** Queue work with `--checkpoint plan` (before anything is built), `--checkpoint feature` (before each feature is added) or `--checkpoint final` (before the app is finished), and that one mission stops there on purpose, tells your phone, and shows at the top of its report what to look at. Other missions carry on. Read it with `mc report <id>`, then `mc approve <id>` or `mc send-back <id> --note "what to change"`. A send-back is reworked and shown to you again, up to two times; a third one ends the work there and says so. An answer can only be recorded while no run is going, and the mission continues on the next run (`mc run --mission <id>`). Without `--checkpoint` nothing changes: a mission runs straight through.
@@ -124,9 +127,11 @@ Two parts, for someone who is not technical (a CEO, say) and looks at an iPad or
 | [docs/mvp-spec.md](docs/mvp-spec.md) | The exact build contract, including verified CLI facts and the decision log |
 | [docs/setup-windows.md](docs/setup-windows.md) | Step-by-step setup for Windows 11 + iPad |
 | [docs/github-setup.md](docs/github-setup.md) | Work with GitHub: log in once, download a repository, send a finished mission back as a draft pull request |
+| [docs/owner-trial-checklist.md](docs/owner-trial-checklist.md) | A short checklist for your own try-out on your PC: what to do, what you should see, what each step proves, what was never tried, and what to send back if something fails |
 | [docs/leader.md](docs/leader.md) | The leader: what it may do, how it is limited, what is not tried |
 | [docs/work-modes.md](docs/work-modes.md) | Documents, pages and data: how work that has no tests is checked, what it costs, the privacy note, what was not tried |
 | [docs/modes-spec.md](docs/modes-spec.md) | The design behind it: the three ways of checking, the checks Mission Control runs by itself, pictures, the prompts |
+| [docs/real-runs.md](docs/real-runs.md) | The record of the real test runs with a real Claude: what each job was, what it cost, what it found wrong, what was fixed, and what no real run could show |
 | [docs/dashboard-spec.md](docs/dashboard-spec.md) | The dashboard's build contract: lamp rules, wording, data sources, tests |
 
 ## For developers

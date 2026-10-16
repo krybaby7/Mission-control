@@ -168,6 +168,41 @@ The share of the weekly allowance uses the one real anchor, `docs/dev-real-run.m
 
 **Time.** Scripted checks take milliseconds to about 3 seconds (the render of two pages took 2.4 s, spike 2.4). The AI calls take what the table of run B says for similar calls; a checker that opens a long document or pictures may take longer. No claim is made about the clock time of a two-hour job.
 
+### 3.1 Measured costs
+
+The paragraph above that begins “Nothing in this step was measured” was written before the real runs, and it is kept as it was. These are the figures that the real runs of 16 October 2026 gave (`docs/real-runs.md`): a real Claude, Claude only, a tiny app, one or two features, six runs and seven missions, 62 AI calls. Prices are the engine's own list-price estimate from the usage ledger, not what a plan is charged. The calls of one feature are counted without the fixed calls of the job, as in the table of section 3.
+
+**One feature, no fix round.**
+
+| Way of checking | Calls assumed | Calls measured | List price assumed | List price measured |
+|---|---|---|---|---|
+| `tests` | 4 | 4 | $0.2514 | $0.13 (R5), $0.21 (R4), $0.23 (R1) |
+| `review` | 3 | 3 | about $0.18 | $0.16 (R3), $0.21 (R3b) |
+| `owner` | 3 | 3 | about $0.18 | $0.14 (R2), $0.18 (R3, the way with your look) |
+| `owner` at `light` | 3, with the builder on Haiku | 4 (the Haiku builder changed no file, so a Sonnet builder was called) | about $0.04 | $0.08 (R4) |
+| One send-back at the stop | 2 more | 2 more | about $0.18 more | $0.05 more (R4, at `light`) |
+| `deep` | 3 | not run | $0.35 to $0.55 | not run |
+
+**Whole jobs.**
+
+| Job | Calls assumed | Calls measured | List price assumed | List price measured |
+|---|---|---|---|---|
+| A guide, one feature checked by a second AI | 7 | 7 (R2, with your look) | about $0.36 | $0.26 |
+| One `tests` feature in an existing app | 8 | 8 (R1, R5) | about $0.44 | $0.41 (R1), $0.24 (R5) |
+| Sales totals: one `tests` feature and one `light` feature checked by a second AI | 11 | 13 without the send-back, 15 with it (R4) | about $0.48 | $0.55 without, $0.59 with |
+| A landing page, one `owner` feature at `deep`, no send-back | 7 | 8 at `standard` (R3 both ways, R3b) | about $0.54 to $0.74 | $0.40 to $0.52 |
+| The same page with one send-back | 9 | not run | about $0.9 to $1.3 | not run |
+
+**What differs from the assumptions.**
+
+- **The planner's call is not always removed.** A plan from the leader was expected to save the planner's call. In 4 of 7 plans (R3 twice, R3b, R4) the plan reviewer asked for changes and the planner rewrote the plan: one more call each time, $0.06 to $0.11 and 8 to 31 seconds. That is the extra call in the measured column of the landing page and of the sales totals.
+- **A wasted try.** In R4 the Haiku builder of the second feature changed no file, because the first feature had already built that file. One more call, $0.01.
+- **The fixed calls** (onboard, plan review, final review, report text) were assumed to be $0.186 for a change to an existing app. Measured: $0.18 (R1), $0.12 (R2), $0.11 (R5).
+- **Share of the weekly allowance.** The rule of about 2.5 percent for each dollar of list price looks too high. Over R1 to R3 (31 calls, $1.48) the reading went from 23 to 24 percent. Over R3b to R5 (31 calls, $1.36) it went from 26 to 27. A reading in whole percents allows between almost 0 and almost 2 points for each of these, against 3 to 4 points by the rule. Other use of the same account is in these readings too, so no more than that can be said.
+- **Time.** Team time per mission was 65 seconds (R1), 70 (R2), 120 (R3, the first way), 90 (R3b), 174 (R4) and 80 (R5), without the time spent waiting for the owner. The scripted checks were not timed apart.
+
+**Still not measured.** `deep` effort, a send-back at a page, a fix round after a failed check (no real check failed), Codex or the default `mixed` profile (its builder draws on the other plan), an app bigger than three tests, a new app built from nothing, and the leader's own chat.
+
 ## 4. The plan format
 
 `mc-plan 1` stays the version. A plan that uses none of the keys below parses to the same plan, has the same plan code and makes the same mission as before (M1). Section 4.6 lists every new message; the only message of a plan that uses no new key that changes is the list of keys inside V08 (section 14 lists the three pinned test lines).

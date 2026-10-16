@@ -12,7 +12,7 @@ With these commands, the box where the team works (the Docker container) never g
 
 ## What was tried and what was not
 
-**Tried here:** both commands, against a stand-in for GitHub (a folder of git repositories, reached through the same git setting an owner could use) and a stand-in for the `gh` program. The tests cover odd and hostile input, an app folder that holds git settings and hooks that would run a command, and a branch that already exists on GitHub.
+**Tried here:** all three commands, against a stand-in for GitHub (a folder of git repositories, reached through the same git setting an owner could use) and a stand-in for the `gh` program. The tests cover odd and hostile input, an app folder that holds git settings and hooks that would run a command, and a branch that already exists on GitHub. The work that was published in one trial was a small job done by a real Claude in a cloud test machine; the upload itself went to the stand-in.
 
 **Not tried:** a real GitHub. A real login. The real `gh` program opening a pull request. Private repositories. SSH keys. Git LFS (big-file storage). Windows, WSL and Docker Desktop. The steps for installing and logging in below come from GitHub's own documentation, not from anything run here. Real GitHub cannot be reached from the place this was built, so please try it once with a repository you can afford to experiment with.
 
@@ -22,15 +22,15 @@ With these commands, the box where the team works (the Docker container) never g
 
 Do this in your own Ubuntu window, not through the leader. Only you can log in.
 
-1. Check that git is there: `git --version`. If Ubuntu says it is missing, run `sudo apt install git`.
-2. Install the GitHub tool, called `gh`. GitHub's page for it is <https://cli.github.com>. Look for the Linux steps for Debian and Ubuntu. Without `gh`, `mc publish` still uploads the branch, but you open the pull request yourself.
+1. Check that git is there: `git --version`. If Ubuntu says it is missing, run `sudo apt update && sudo apt install git`. Ubuntu asks for your password, and shows nothing while you type it.
+2. Install the GitHub tool, called `gh`. GitHub's page for it is <https://cli.github.com>. Look for the Linux steps for Debian and Ubuntu, copy the whole block, paste it in the Ubuntu window and press Enter. Check it with `gh --version`. Without `gh`, `mc publish` still uploads the branch, but you open the pull request yourself.
 3. Log in:
 
    ```
    gh auth login
    ```
 
-   When it asks, choose **GitHub.com**, then **HTTPS**, then **Login with a web browser**. Say yes when it asks whether to log git in with your GitHub login. It shows a one-time code and a web address: open the address on your PC and type the code.
+   When it asks, choose **GitHub.com**, then **HTTPS**, then **Login with a web browser**. Say yes when it asks whether to log git in with your GitHub login. It shows a one-time code and a web address: open the address on your PC and type the code. If Ubuntu tries to open a browser by itself and nothing happens, that is fine.
 4. Make git use the same login:
 
    ```
@@ -68,16 +68,18 @@ What it accepts, and nothing else:
 | You write | Example |
 |---|---|
 | owner and repository | `acme/widgets` |
-| the web address | `https://github.com/acme/widgets` (a `.git` or a `/` at the end is fine) |
+| the web address | `https://github.com/acme/widgets` (a `.git` or a `/` at the end is fine, and so is leaving out `https://`) |
 | the ssh address | `git@github.com:acme/widgets.git` |
 
 Other websites are refused, and so is anything with a space, a quote, a `;` or a web address that carries a login. The folder name must start with a letter or a digit and use only letters, digits, dots, dashes and underscores (61 characters at most). If the folder exists already, nothing is downloaded and nothing is changed.
 
-Downloading a private repository needs the login from the setup above.
+Downloading a private repository needs the login from the setup above. `mc get` needs no Docker.
+
+The team needs code and checks to work with. If the repository holds only documents (no code, no tests), a job on it can fail at the start or finish with a hollow report. See the limit in [work-modes.md](work-modes.md) and [setup-windows.md](setup-windows.md).
 
 ## Send a finished mission to GitHub: `mc publish`
 
-When a mission is done, or partly done, first look at where it would go:
+These two commands read the mission's record, so Docker Desktop must be running and `mc build` must have been done once. When a mission is done, or partly done, first look at where it would go:
 
 ```
 mc publish-preview 2026-10-12-dark-mode
@@ -162,7 +164,13 @@ The mission's record lives inside Docker, which your PC cannot read directly. So
 | `I don't understand "..." as a GitHub repository.` | The text is not one of the three forms above. Check for a space, a typo, or a part after the repository's name such as `/tree/main`. |
 | `~/mc-apps/<name> already exists, so I downloaded nothing` | The folder is already there. Use it, or choose another name: `mc get owner/repo other-name`. |
 | `I could not download owner/repo.` | Git's own words follow. Check the name. A private repository needs the login above (`gh auth login`, then `gh auth setup-git`). |
+| `git isn't installed in Ubuntu` | Run `sudo apt update && sudo apt install git`, then try again. |
+| `Docker isn't running`, or `the Mission Control image isn't built yet` | `mc publish-preview` and `mc publish` read the mission's record in a small box. Start Docker Desktop and wait for **Engine running**, or run `mc build`. |
+| `needs the name of one mission`, `"..." is not a mission name`, or `I can't find a mission called "..."` | Write the mission's name exactly as `mc status` shows it, like `2026-10-12-dark-mode`, and nothing else. |
+| `I could not read the record of the mission` | Run `mc doctor`, or try again in a moment. |
 | `"..." is not finished` | The mission is not done yet. See where it is with `mc status`. |
+| `... is waiting for your check` | The team stopped for your look. See "Checking things yourself" in [setup-windows.md](setup-windows.md). Answer with `mc approve <mission>` or `mc send-back <mission> --note "what to change"`, continue it with `mc run --mission <mission>`, and publish when it is done. |
+| `... is paused and not finished` | A run stopped it, or it is waiting for the AIs. The next `mc run` carries it on. Publish when it is done. |
 | `... stopped and needs your help` | Read what it needs: `mc report <mission>`. |
 | `I could not read the branch mc/... in ~/mc-apps/...` | The branch is not in the app's folder any more (was it replaced or deleted?), or git refused to read the folder. Git's own words follow. |
 | `There is nothing to publish` | The mission's branch has no work beyond the main branch. |

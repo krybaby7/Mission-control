@@ -2,16 +2,21 @@
 
 Mission Control builds your app ideas with Claude Code and Codex, working inside a sealed box (a Docker container) on your PC. You set it up once. After that, the routine is: describe an idea, start a run, and read the report when it finishes. Your iPad buzzes when the run is done.
 
+**What was tried, and what was not.** Mission Control was tested with stand-in AIs, and a few small jobs were run with a real Claude in a cloud test machine. **Nothing in this guide has been tried on a Windows PC.** Windows, WSL, Docker Desktop, Codex and a real GitHub were never used for it. The steps for those programs, for the logins and for GitHub come from their own documentation. The **You should see** lines say what that documentation, or our own tests, led us to expect. The words on your screen may differ a little. If a step does not do what the guide says, stop there and look in [Troubleshooting](#troubleshooting). Write down the step number and what you saw instead.
+
 **What you need**
 
-- A Windows 11 PC that can stay on while a run works, ideally with 16 GB of memory, and with 30 GB of free disk space.
+- A Windows 11 PC that can stay on while a run works, ideally with 16 GB of memory, and with 30 GB of free disk space. You must be allowed to install programs on it (an administrator login).
 - A paid Claude plan (Pro or Max) and a paid ChatGPT plan (Plus or higher, which includes Codex).
+- A free GitHub account (github.com). You need it to download Mission Control if its page is private, and for the GitHub part at the end.
 - An iPad (or iPhone) for notifications.
 - About an hour, mostly spent waiting for downloads.
 
 **How to use this guide**
 
-- Gray boxes are commands. Copy the whole box, paste it into the window named in the step (in the Ubuntu window, right-click to paste), and press Enter.
+- You will use two kinds of window. **PowerShell** is only for the few Windows commands in Step 1. **The Ubuntu window** is for everything else. To open it, click **Start**, type `Ubuntu`, and press Enter. Its last line looks like `adam@YOUR-PC:~$` (your Ubuntu name, then your PC's name). That line is called the prompt: it means the window is ready for a command. A PowerShell window's last line starts with `PS C:\`. Type each command in the window the step names.
+- Gray boxes are commands. Copy the whole box, paste it into the window named in the step (in the Ubuntu window, right-click to paste), and press Enter. Do not type the `$` sign of the prompt.
+- Some commands show nothing for a minute or more. Wait until the prompt comes back.
 - **You should see** tells you what success looks like. If you see something else, look it up in [Troubleshooting](#troubleshooting).
 - Text in `<angle brackets>` is a placeholder. Replace all of it, brackets included.
 
@@ -34,10 +39,12 @@ Mission Control lets AI agents run commands for as long as a run lasts, without 
 - **Your home network.** Agents can also reach the other devices on your network (your router's settings page, a network drive, printers) and programs on your PC that accept network connections. Keep those protected with passwords that aren't the factory defaults.
 - **Your apps folder.** Anything in `~/mc-apps` can be changed or deleted.
 - **Git in your apps folder during a run.** An agent could add git settings that make git run commands. Mission Control undoes them after every step and when a mission finishes, but while a run is working, don't run `git` in `~/mc-apps`, or open those folders in an editor, outside `mc shell`.
-- **Your usage allowance.** Each run uses a lot of your Claude and ChatGPT limits. Mission Control paces itself: by default one run uses at most about a third (35%) of each plan's weekly limit (setting `pacing.maxWeeklySharePerNight`), and it stops rather than run on paid extra usage. But it does use them.
+- **Your usage allowance.** Each run uses a lot of your Claude and ChatGPT limits. Mission Control paces itself: by default one run uses at most about a third (35%) of each plan's weekly limit, and it stops rather than run on paid extra usage. But it does use them.
 - **Mission Control itself.** Agents run as the same user as Mission Control, so a misbehaving agent could stop a run early or change Mission Control's settings and records in `~/.mission-control`. Work already saved is kept, and the next run carries on.
 
-**What the AI services can read.** Everything in your apps folder can be read or sent to the AI services (Anthropic and OpenAI) whenever an AI opens a file, and Mission Control also puts file text into what it sends them. An AI that builds can use the internet. For documents, pages and data that matters more than for code: do not put personal data, customer lists, passwords or private papers in your apps folder. If you take a private repository with `mc get`, its files go in front of the AI services as soon as a feature runs. Sending the work to GitHub sends the files you chose, public or private as that repository is. Mission Control's own checks of a document, a page or a table send nothing out. The picture step blocks the page's web requests (tried with a script, a beacon and a WebSocket; not tried with a service worker, DNS lookups or WebRTC). The browser is also started so that a page cannot make it open a connection to a web address by a link, a form, a refresh tag, a new window or a frame; that was tried with a listener on the computer's own loopback address, and not with the browser in the Docker image. The pictures themselves go to the second AI when it looks at them. The check for keys and passwords is a net with holes: it knows ten common shapes and looks only at the files of features checked by a second AI. Data for a job must already be in the app's folder, and CSV is the format to use: nothing can be uploaded through the leader. The script sets a memory limit on the container, which should keep a file bomb from filling the machine (read in the script, not run). See [docs/work-modes.md](work-modes.md).
+**What the AI services can read.** Everything in your apps folder can be read or sent to the AI services (Anthropic and OpenAI) whenever an AI opens a file, and Mission Control also puts file text into what it sends them. An AI that builds can use the internet. For documents, pages and data that matters more than for code: do not put personal data, customer lists, passwords or private papers in your apps folder. If you take a private repository with `mc get`, its files go in front of the AI services as soon as a feature runs. Sending the work to GitHub sends the files you chose, public or private as that repository is. Data for a job must already be in the app's folder, and CSV is the format to use: nothing can be uploaded through the leader.
+
+Mission Control's own checks of a document, a page or a table send nothing out. When it takes pictures of a page, it blocks the page's web connections. That was tried on a test machine, with a different browser build than the one in the Docker image, and not on Windows. The pictures themselves go to the second AI when it looks at them. The check for keys and passwords is a net with holes: it knows ten common shapes and looks only at the files of features checked by a second AI. The Docker script limits the box's memory, so that a huge file should not fill your PC. That was read in the script and was not run. [docs/work-modes.md](work-modes.md) lists exactly what was and was not tried.
 
 **So, follow these rules:**
 
@@ -57,9 +64,9 @@ WSL2 runs Linux (Ubuntu) inside Windows. Mission Control runs from there.
    wsl --install -d Ubuntu
    ```
 
-   **You should see** "Installing: Ubuntu", then a message that the operation succeeded and that you need to restart.
+   **You should see** "Installing: Ubuntu", then a message that the operation succeeded and that you need to restart. If it says that virtualization is turned off, see [Troubleshooting](#troubleshooting).
 3. Restart your PC.
-4. After the restart, Ubuntu opens by itself. If it doesn't, click **Start**, type `Ubuntu`, and open it. When it asks for a **UNIX username**, type a short lowercase name (for example `adam`) and press Enter. Then choose a password and type it twice. Nothing appears while you type a password; that is normal. Write the password down: Ubuntu sometimes asks for it.
+4. After the restart, Ubuntu opens by itself. If it doesn't, click **Start**, type `Ubuntu`, and open it. When it asks for a **UNIX username**, type a short lowercase name (for example `adam`) and press Enter. Then choose a password and type it twice. Nothing appears while you type a password; that is normal. Write the password down: Ubuntu asks for it whenever you install a program (a command that starts with `sudo`).
 
    **You should see** a line like `adam@YOUR-PC:~$`.
 5. To check that you have WSL **2**, open PowerShell (normally, not as administrator) and paste:
@@ -76,39 +83,65 @@ From now on, **the Ubuntu window** means: **Start**, type `Ubuntu`, and open it.
 
 1. Download **Docker Desktop for Windows** from <https://www.docker.com/products/docker-desktop/>. Most PCs need the AMD64 version; choose ARM64 only if your PC has an ARM processor (such as Snapdragon).
 2. Run the installer. Keep **Use WSL 2 instead of Hyper-V** checked. Restart if it asks.
-3. Open Docker Desktop and accept the terms. You can skip signing in and skip the survey. Docker Desktop is free for personal use.
+3. Open Docker Desktop and accept the terms. You can skip signing in and skip the survey. Docker Desktop is free for personal use and for small companies. A company with 250 or more employees, or more than 10 million US dollars of yearly revenue, needs a paid Docker plan. Check Docker's current terms on its website if you are not sure.
 4. Click the **gear icon** (Settings), top right:
    - **General:** check **Start Docker Desktop when you sign in to your computer**. **Use the WSL 2 based engine** should already be checked.
    - **Resources > WSL integration:** turn on **Ubuntu**, then click **Apply & restart**.
-5. Close the Ubuntu window and open a new one. Paste:
+5. Wait until the bottom left of the Docker Desktop window shows **Engine running**. From now on, Docker Desktop must be running (open, or in the tray at the bottom right of the screen) whenever you use `mc`.
+6. Close the Ubuntu window and open a new one. Paste:
 
    ```
    docker run --rm hello-world
    ```
 
-   **You should see** `Hello from Docker!` among the lines.
+   **You should see** `Hello from Docker!` among the lines. The first time, Docker downloads a small test image, so it needs the internet.
 
 ## Step 3: Download and build Mission Control
 
 In the Ubuntu window:
 
-1. Download Mission Control:
+1. Check that git is there. Git is the program that downloads Mission Control:
+
+   ```
+   git --version
+   ```
+
+   **You should see** a line like `git version 2.43.0`. If Ubuntu says `command not found`, install git. Ubuntu asks for your password (the one from Step 1; nothing appears while you type it):
+
+   ```
+   sudo apt update && sudo apt install -y git
+   ```
+
+2. Download Mission Control:
 
    ```
    cd ~ && git clone https://github.com/krybaby7/Mission-control.git
    ```
 
-   **You should see** `Cloning into 'Mission-control'...` and then the prompt again. If it asks for a username and password, the project is private: type your GitHub username, and for the password use a GitHub token (on github.com: your picture > **Settings** > **Developer settings** > **Personal access tokens** > **Fine-grained tokens** > **Generate new token**, with read access to this repository's contents).
+   **You should see** `Cloning into 'Mission-control'...` and then the prompt again. If it asks for a username and password, the project is private. Type your GitHub username. For the password you need a GitHub token, which is a long password that GitHub makes for you:
 
-2. Create the `mc` shortcut, so you can type `mc` instead of the full script path:
+   - On github.com, click your picture, then **Settings** > **Developer settings** > **Personal access tokens** > **Fine-grained tokens** > **Generate new token**.
+   - Under **Repository access**, choose **Only select repositories** and pick Mission-control.
+   - Under **Permissions** > **Repository permissions**, set **Contents** to **Read-only**.
+   - Click **Generate token**, copy it, and paste it as the password. Nothing appears while you paste. Your normal GitHub password does not work here.
+
+   If you do the GitHub login in [Optional: work on a repository on GitHub](#optional-work-on-a-repository-on-github) first, you need no token.
+
+3. Create the `mc` shortcut, so you can type `mc` instead of the full script path:
 
    ```
    echo "alias mc='~/Mission-control/scripts/mc-docker.sh'" >> ~/.bashrc && source ~/.bashrc
    ```
 
-   **You should see** nothing, just the prompt again. That means it worked.
+   **You should see** nothing, just the prompt again. Now check the shortcut:
 
-3. Build the Mission Control image (5 to 15 minutes the first time):
+   ```
+   mc help
+   ```
+
+   **You should see** a list that starts with `Usage: mc-docker.sh <command> [arguments...]`. `mc` is the shortcut for the script `mc-docker.sh`. It works in every Ubuntu window you open from now on.
+
+4. Build the sealed box that Mission Control runs in (Docker calls it an image). Docker Desktop must be running. It downloads about 2 GB and takes 5 to 15 minutes the first time:
 
    ```
    mc build
@@ -116,7 +149,7 @@ In the Ubuntu window:
 
    **You should see** many lines scroll by, ending with `mc-docker: the image is ready.`
 
-From here on, every `mc ...` command runs inside the container. Until you finish Step 4, each command also prints "not logged in to Claude yet" and "not logged in to Codex yet". That is expected.
+From here on, most `mc ...` commands run inside the container, the sealed box. Five run in Ubuntu itself, outside the box: `mc get`, `mc publish-preview`, `mc publish`, `mc install-leader` and `mc leader`. Until you finish Step 4, each command that runs inside the box also prints "not logged in to Claude yet" and "not logged in to Codex yet". That is expected.
 
 ## Step 4: Log in to Claude and Codex
 
@@ -170,7 +203,7 @@ If Claude goes straight to its prompt without asking you to log in, type `/login
    mc doctor
    ```
 
-   **You should see** a list of ✓ lines. A warning about notifications (ntfy) is expected until Step 6. Any other line that isn't ✓ explains how to fix it. Fix it, then run `mc doctor` again.
+   **You should see** a list of lines. ✓ means fine, `!` means a warning, and ✗ means a problem. The last line says `Everything looks good.`, or how many problems and warnings there are. One warning is expected until Step 6: `Notifications: Phone notifications are off.` Every other line that isn't ✓ explains how to fix it. Fix it, then run `mc doctor` again.
 3. Run the live check:
 
    ```
@@ -212,9 +245,9 @@ ntfy is a free app that shows a notification when a run finishes, when something
    curl -d "Hello from Mission Control" https://ntfy.sh/<your-topic>
    ```
 
-   **You should see** the notification on your iPad within a few seconds.
+   **You should see** the notification on your iPad within a few seconds. If Ubuntu says `curl: command not found`, run `sudo apt install -y curl` and try again.
 
-You can also change settings by editing the file: run `mc shell`, then `nano ~/.mission-control/config.yaml`. Save with **Ctrl+O** and Enter, quit with **Ctrl+X**, then type `exit`.
+You can also change settings by editing the file. Run `mc shell`, which opens a window inside the box (its prompt looks different from before). Then type `nano ~/.mission-control/config.yaml`. Save with **Ctrl+O** and Enter, quit with **Ctrl+X**, then type `exit` to leave the box.
 
 ## Step 7: Keep the PC awake while a run works
 
@@ -222,7 +255,7 @@ Mission Control only works while the PC is on and awake.
 
 1. Open **Settings > System > Power** (on a laptop: **Power & battery**). Under **Screen, sleep, & hibernate timeouts** (or **Screen and sleep**), set sleep **when plugged in** to **Never**. Turning the screen off is fine.
 2. On a laptop, keep it plugged in. In **Control Panel > Hardware and Sound > Power Options > Choose what closing the lid does**, set **When plugged in** to **Do nothing**.
-3. Stop Windows Update from restarting during a run: **Settings > Windows Update > Advanced options > Active hours**, choose **Manually**, and set it to cover the hours when your runs happen (for example 10:00 PM to 8:00 AM, if that is when you run).
+3. Stop Windows Update from restarting during a run: **Settings > Windows Update > Advanced options > Active hours**, choose **Manually**, and set it to cover the hours when your runs happen.
 4. While a run works, lock the screen (**Windows key + L**) if you like, but don't sign out or shut down. Docker Desktop must be running.
 
 ## Step 8: Queue work
@@ -233,11 +266,13 @@ Describe the app in plain words. The more detail you give, the better the result
 mc new "A habit tracker where I can add daily habits, tick them off each day, and see a weekly streak chart" --name "Habit tracker"
 ```
 
-**You should see** the new mission's name, like `2026-10-09-habit-tracker`. To see everything that's queued:
+**You should see** `Queued your new app “Habit tracker”.` and the new mission's name, like `2026-10-09-habit-tracker`. Queuing only writes the work down. Nothing is built, and none of your Claude or ChatGPT allowance is used, until you start a run in Step 9. To see everything that's queued:
 
 ```
 mc status
 ```
+
+**You should see** a table with one line for each mission: its name, its status (`queued` for now) and how many features are done.
 
 To change an app that already exists, its folder must be inside `~/mc-apps` (Mission Control's container sees no other folder; move or copy the app there first). Then:
 
@@ -245,17 +280,35 @@ To change an app that already exists, its folder must be inside `~/mc-apps` (Mis
 mc feature ~/mc-apps/<app-folder> "Add a dark mode"
 ```
 
+A project that lives on GitHub comes into `~/mc-apps` with `mc get`: see [Optional: work on a repository on GitHub](#optional-work-on-a-repository-on-github). You can also describe the job to the leader and let it queue the work: see [Optional: start the leader](#optional-start-the-leader).
+
+**Read this before you queue writing, a page or a table.** Those jobs need an app that has code and its own checks: an app Mission Control built, or a project you downloaded with `mc get`. A folder that holds only documents can fail at the start, or finish with a hollow report. See [Documents, pages and data](#documents-pages-and-data).
+
 ## Step 9: Start a run
 
 When you are ready to let the team work, in the Ubuntu window:
 
 ```
+mc run
+```
+
+**You should see** a first line `Working until the queue is done (no stop time given).` and then progress lines. The run keeps going until all the queued work is done, or until you stop it. It also ends early if no work can go on (for example a full disk, or both AI logins expired), and it says why. If both AIs reach their usage limit, it waits for the limit to end and then carries on, which can take hours.
+
+To make a run stop at a time you choose, add a stop time. It uses the 24-hour clock and your local time (07:00 is 7:00 AM, 18:00 is 6:00 PM):
+
+```
 mc run --until 07:00
 ```
 
-Mission Control works until 7:00 (your local time), then writes a report and notifies you. **You should see** it start on the first mission. Minimize the window, but leave it open until the run ends: closing it cuts the run short. To stop early, run `mc stop` in another Ubuntu window: the run stops within a few minutes, keeps its progress, writes the report and notifies you. Missions that were paused (by `mc stop`, by the 7:00 stop time, or while the AIs were at their usage limits) continue automatically the next time you run this. Features that got stuck don't: once a mission is finished, its report's **Needs your decision** gives the command that queues them again, if you still want them. If you start a run after its stop time has passed (say at 7:20 with `--until 07:00`), it refuses instead of working through your day: give a later time, such as `--until 12:00`. A mission that stopped because it needs your help (the report and `mc status` say so) waits for you: do what its report asks under **Needs your decision**, then continue it with `mc run --mission <mission>` (the mission's name as `mc status` shows it). If it only needed a new login, the next run continues it by itself.
+Mission Control then works until that time, writes a report and notifies you. Minimize the window, but leave it open until the run ends: closing it cuts the run short. To see how it is going, run `mc status` in another Ubuntu window (open one the same way as the first), or open the dashboard (see [the dashboard](#optional-watch-the-team-on-a-web-page-the-dashboard)). To stop early, run `mc stop` in that other window: the run stops within a few minutes, keeps its progress, writes the report and notifies you.
 
-### Optional: start it automatically every day at 23:00
+Missions that were paused (by `mc stop`, by the stop time, or while the AIs were at their usage limits) continue automatically the next time you run this. Features that got stuck don't: once a mission is finished, its report's **Needs your decision** gives the command that queues them again, if you still want them. If the stop time you give has only just passed (say it is 7:20 and you give `--until 07:00`), the run would last almost a day, so Mission Control refuses to start: give a later time, such as `--until 12:00`. A mission that stopped because it needs your help (the report and `mc status` say so) waits for you: do what its report asks under **Needs your decision**, then continue it with `mc run --mission <mission>` (the mission's name as `mc status` shows it). If it only needed a new login, the next run continues it by itself.
+
+A mission that you asked to stop for your look (see [Checking things yourself](#checking-things-yourself-optional)) stops at the place you asked for. So does every mission from a plan the leader wrote: it stops at the plan, before anything is built. Other missions carry on. When nothing else is left, the run ends with a line like `... is waiting for your check`. That is expected, not a failure.
+
+### Optional: start a run automatically at a set time
+
+Windows can start a run for you at a time you choose. This example starts one every day at 23:00 and stops it at 07:00. Change both times to what suits you. This part has not been tried on a real PC yet.
 
 1. Click **Start**, type `Task Scheduler`, and open it. On the right, click **Create Task...** (not "Create Basic Task").
 2. **General** tab: Name `Mission Control scheduled run`. Choose **Run only when user is logged on**.
@@ -268,11 +321,11 @@ Mission Control works until 7:00 (your local time), then writes a report and not
      -d Ubuntu -- bash -lc "~/Mission-control/scripts/mc-docker.sh run --until 07:00 >> ~/mc-run.log 2>&1"
      ```
 
-   Click **OK**.
+   Click **OK**. If your Ubuntu has another name (check with `wsl -l -v` in PowerShell), write that name in place of `Ubuntu`.
 5. **Conditions** tab: check **Wake the computer to run this task**. Click **OK**.
-6. To test it, right-click the task and choose **Run**. A black window opens and stays open while it works. Leave it open: closing it cuts the run short. In the Ubuntu window, `docker ps` **should show** `mission-control-run`. End the test with `mc stop`.
+6. To test it, right-click the task and choose **Run**. This starts a real run, so it uses your allowance if work is queued. A black window opens and stays open while it works. Leave it open: closing it cuts the run short. In the Ubuntu window, `docker ps` **should show** `mission-control-run`. End the test with `mc stop`.
 
-Only one run can happen at a time. If you start one by hand while the scheduled one is working, you'll see "a Mission Control run is already active". If Docker Desktop is still starting at 23:00 (say, after Windows restarted for an update), the scheduled run waits up to 5 minutes for it. If the scheduled run can't start at all (Docker Desktop isn't running, for example), your iPad gets a notification "Mission Control: the run didn't start" that says why. This works once a run has started at least once since you set up notifications in Step 6: each run that starts keeps a copy of the notification address in Ubuntu for this. The scheduled run's messages go to `~/mc-run.log`; read the end with `tail -n 50 ~/mc-run.log`.
+Only one run can happen at a time. If you start one by hand while the scheduled one is working, you'll see "a Mission Control run is already active". If Docker Desktop is still starting at the set time (say, after Windows restarted for an update), the scheduled run waits up to 5 minutes for it. If the scheduled run can't start at all (Docker Desktop isn't running, for example), your iPad gets a notification "Mission Control: the run didn't start" that says why. This works once a run has started at least once since you set up notifications in Step 6: each run that starts keeps a copy of the notification address in Ubuntu for this. The scheduled run's messages go to `~/mc-run.log`; read the end with `tail -n 50 ~/mc-run.log`.
 
 ## Checking things yourself (optional)
 
@@ -286,7 +339,7 @@ Some work is only right when you look at it yourself: how a page looks, whether 
 
    - `plan`: before anything is built. Nothing is spent on building until you have seen the plan.
    - `feature`: before each feature is added to the app (one stop for every feature).
-   - `final`: before the finished app is finished.
+   - `final`: when everything is built and checked, before the work is marked finished.
 
    **You should see** a line like `It will stop for your check: the plan, the finished app.` The same flag works with `mc feature`. Work queued without `--checkpoint` runs straight through, as before.
 
@@ -294,10 +347,15 @@ Some work is only right when you look at it yourself: how a page looks, whether 
 
 3. Look at it. `mc report <mission>` starts with **Waiting for your check**: what the team made and what to look at. For a feature or the finished app it ends with the steps to open the work, the same steps as **How to try it** in a finished report (including putting the app's folder back afterwards). Nothing moves while it waits: the work is kept, and nothing is added to your app until you approve.
 
-4. Answer it, in the Ubuntu window or by telling the leader:
+4. Answer it, in the Ubuntu window or by telling the leader. The two commands below are two different answers. Use one of them, not both. To say yes, carry on:
 
    ```
    mc approve <mission>
+   ```
+
+   To send it back with what to change:
+
+   ```
    mc send-back <mission> --note "make the buttons bigger"
    ```
 
@@ -318,23 +376,35 @@ For a small, clear job the leader can write the plan itself instead of leaving i
   mc plan show <mission>
   ```
 
-  `mc report <mission>` shows only the first 40 lines, which can cut a long plan. In Windows, `mc copy-reports` copies the reports to `~/mc-reports` (it prints the folder's Windows address), and the mission's `report.md` there holds the whole text.
-- Asking for the same plan twice does not queue it twice. Mission Control says `This plan is already queued as “<name>” (<id>). See it with: mc status`, and the leader tells you in plain words that it is waiting already.
+  `mc report <mission>` shows only the first 40 lines, which can cut a long plan. In Windows, `mc copy-reports` copies the reports to `~/mc-reports` (it prints the folder's Windows address). The whole text is the file `missions\<mission>\report.md` inside that folder.
+- Asking for the same plan twice does not queue it twice while the first one has not finished. Mission Control says `This plan is already queued as “<name>” (<id>). See it with: mc status`, and the leader tells you in plain words that it is waiting already.
 - The plan code is the same in the leader's message, in `mc plan show` and in the report. It always names the plan as the leader wrote it: if it differs from the one the leader quoted when it asked you, what was queued is not the plan you were shown. `mc plan show` also says whether the team's plan reviewer or your note changed the plan since.
 
 What this protects, and what it doesn't. A check is a place where you look, not a lock. The AI team runs as the same Ubuntu user as Mission Control, so a determined one could write an approval itself. That could only skip your look: every test and review still runs, and nothing that fails is added. Mission Control keeps a record of each answer, distrusts a waiting check that shows an answer with no record, and sends a notice to your iPad each time an answer is recorded, so one you didn't give shows up there.
 
 ### Documents, pages and data
 
-For work that is not code (a guide, a page, a table), the leader can write a plan that says how each feature is checked. Nothing here has been tried on a real PC, and no real AI has done such a job yet. [docs/work-modes.md](work-modes.md) is the full guide.
+For work that is not code (a guide, a page, a table), the leader can write a plan that says how each feature is checked. Nothing here has been tried on a real PC. A real Claude has done small test jobs of this kind in a cloud test machine (a guide, a web page and a table). They found small faults, which were fixed afterwards, and only the web page job was run again after its fixes. The other company's AI, Codex, has never done one. [docs/work-modes.md](work-modes.md) is the full guide.
 
+- **Read this first: use an app that has code and checks.** A job of writing, a page or a table needs an app folder that already holds code and has its own checks: an app Mission Control built, or a project you took with `mc get`. Do not point it at a folder that holds only documents. That can fail at the start, or finish with a report that looks fine although nothing checked the project. The bullet about folders that hold only documents, further down, says more.
 - For each feature the leader tells you one of three lines: "Checked by tests.", "Checked by a second AI against this list.", or "Checked by a second AI against this list, and then by you." In the last case the team stops before it adds the feature, so that you can look at it. The plan file cannot turn that stop off. The leader asks "Skip your look at these features? The team will add them without stopping for you. Yes or no?" before it does, and only the command `mc plan queue - --no-owner-checkpoint` can.
 - If the second AI cannot judge one of the checks, the team stops for your look at that feature too.
 - At the stop, `mc plan show <mission>` lists what the second AI found, check by check. For a web page the team takes pictures at phone width and at desktop width. In Windows, run `mc copy-reports` in the Ubuntu window. It prints the address of the `mc-reports` folder, and the pictures are in `missions\<mission>\screenshots` inside it. The report lists them too. The dashboard shows no picture.
-- The report starts with a line `Checked:` that says how many features were checked in each way, and the draft pull request on GitHub copies it. Mission Control says "approved by you" for your answer, because that is what it records. It cannot know that you opened a file.
+- When a finished feature was checked another way than by tests, the top of the report has a line `Checked:` that says how many features were checked in each way, and the draft pull request on GitHub copies it. Mission Control says "approved by you" for your answer, because that is what it records. It cannot know that you opened a file.
 - Before a job that reads a file you named, the leader asks "Does this file hold personal data, customer details or private papers? Yes or no?". If you open a data file that a script wrote, open it in a text editor first, and if Excel asks, do not press "Enable Editing" or "Enable Content" until you have read the cells (this was not tried on a PC).
-- A plan for such work needs an app folder, or a new app to put the files in. Pages that need a running server get no pictures. A job that needs facts from the internet, with sources, is not covered.
-- A folder that holds only documents can fail at the start, or finish with a hollow report. This was tried only with a stand-in for the team's AI that works out how to check a project, so what the real one answers is not known. The folder must be a git repository: if it is not, `mc plan queue` queues nothing and says so. Inside that folder, run `git init`, then commit your files. If the team's AI finds no way to check the project, the mission stops at the start with “Could not work out how to check this project”, and asks you to add a short note on how to run the checks to the README or AGENTS.md and then run `mc run --mission <mission>`. If the team's AI answers with a command that checks nothing, the mission can finish, but the report's “How to try it” then names that command as the project's own checks, and the dashboard says that the final checks of the whole app passed, although the command checked nothing. The second AI and Mission Control's own checks still ran on each feature. [docs/work-modes.md](work-modes.md) has the same limit.
+- Pages that need a running server get no pictures. A job that needs facts from the internet, with sources, is not covered.
+- A folder that holds only documents can fail at the start, or finish with a hollow report. This was tried only with a stand-in for the team's AI that works out how to check a project, so what the real one answers is not known. Three things can happen:
+  - The folder must be a git repository (a folder that keeps the history of its files). If it is not, `mc plan queue` queues nothing and says so. To make it one, when no run is working, give git your name once (use your own), then, inside that folder, start the history and save your files into it:
+
+    ```
+    git config --global user.name "Your Name"
+    git config --global user.email "you@example.com"
+    cd ~/mc-apps/<folder> && git init -b main && git add . && git commit -m "My files"
+    ```
+  - If the team's AI finds no way to check the project, the mission stops at the start with “Could not work out how to check this project”. It asks you to add a short note on how to run the checks to the README or AGENTS.md, and then to run `mc run --mission <mission>`.
+  - If the team's AI answers with a command that checks nothing, the mission can finish. The report's “How to try it” then names that command as the project's own checks, and the dashboard says that the final checks of the whole app passed, although the command checked nothing. The second AI and Mission Control's own checks still ran on each feature.
+
+  [docs/work-modes.md](work-modes.md) has the same limit.
 - Features that run side by side are deferred, and not built. Mission Control is made for one feature at a time: one loop over the features, one copy of the mission in memory that is written whole at every save, one run lock, one line of merges into a single branch, pacing that assumes one AI call at a time, and a timeline and stops that assume one feature is in flight. Running features side by side would need separate working copies, a rule for merge conflicts (who settles them?), saves that cannot overwrite each other, a resume that copes with several half-finished features, and pacing across calls that overlap. Thousands of tests assume a fixed order, so doing it would also make them unreliable. The gain is clock time on big jobs with many features. The use of the allowance is the same, and most small jobs have one to three features. It waits until real use shows that it is needed.
 
 ## Step 10: When the run has finished
@@ -353,7 +423,7 @@ For work that is not code (a guide, a page, a table), the leader can write a pla
    mc copy-reports
    ```
 
-   It prints a folder address like `\\wsl.localhost\Ubuntu\home\adam\mc-reports`. Paste it into the address bar of **File Explorer**. Open `reports\latest.md` with Notepad (the run summaries are the `reports\run-<date>.md` files; summaries from earlier runs are named `night-<date>.md`). Notepad shows the report's pictures as lines of text: the screenshots themselves are picture files in `missions\<mission>\screenshots`.
+   It prints a folder address like `\\wsl.localhost\Ubuntu\home\adam\mc-reports`. Paste it into the address bar of **File Explorer**. Open `reports\latest.md` with Notepad (the run summaries are the `reports\run-<date>.md` files). Notepad shows the report's pictures as lines of text: the screenshots themselves are picture files in `missions\<mission>\screenshots`.
 4. Try the app:
 
    ```
@@ -363,6 +433,8 @@ For work that is not code (a guide, a page, a table), the leader can write a pla
    Then type the commands from the report's **How to try it** section, one at a time. When the app says it's ready, open <http://localhost:3000> in your Windows browser. When you're done, press **Ctrl+C** to stop the app, run the `git checkout ...` command the report gives to put the app's folder back on your own version (if it gave one), and type `exit`. For a change to an app you already had, the report also says how to keep the change. For a guide or a web page there is no app to start: the section ends with the name of the file to open (for example `docs/USAGE.md`), and gives its Windows path.
 
 Your apps' files are in File Explorer at `\\wsl.localhost\Ubuntu\home\<your-ubuntu-name>\mc-apps`.
+
+**Next: try it yourself.** [docs/owner-trial-checklist.md](owner-trial-checklist.md) is a short list of small jobs to try on your own PC. Each step says what you should see, what it proves and what nobody has tried yet, and the last step says what to send back if something fails. [docs/real-runs.md](real-runs.md) is the record of the real test runs that came before it.
 
 ## Optional: watch the team on a web page (the dashboard)
 
@@ -407,7 +479,19 @@ If the page doesn't open on the iPad, the leader (next section) can tell you how
 
 The leader is a Claude Code session that you talk to in plain words: "How is it going?", "Add a dark mode to the habit tracker", "Please stop the current run." It acts only through the same `mc` commands you use (status, logs, report, stop, new, feature, plan, run, approve and send-back) and three that work with GitHub (get, publish-preview and publish; see [Optional: work on a repository on GitHub](#optional-work-on-a-repository-on-github)), and Claude Code asks you before the leader stops the run, starts the team working, queues a new app or a change, queues a plan it wrote, downloads from or uploads to GitHub, or answers a check (answer Yes once; never "Yes, and don't ask again": it saves a rule that nobody has reviewed, and for a plan the rule would be the text of that one plan, which is of no use). Before it answers a check, the leader also asks you in the chat; see [Checking things yourself](#checking-things-yourself-optional). It can't reopen a feature that got stuck or change a plan; for those it queues a follow-up request that starts on the next run. This part has not been tried on a real PC yet.
 
-1. Claude Code must be installed in Ubuntu itself, and logged in there. The copy inside Mission Control's container can't be used. Follow Anthropic's installation instructions for Claude Code on Linux. The leader's chat uses the same Claude plan as the team's runs.
+1. Install Claude Code in Ubuntu itself. The copy inside Mission Control's container can't be used. Anthropic's page for this is <https://code.claude.com/docs/en/setup>. For WSL it gives this command, which you paste in the Ubuntu window:
+
+   ```
+   curl -fsSL https://claude.ai/install.sh | bash
+   ```
+
+   It shows no progress while it downloads. When the prompt comes back, close the Ubuntu window, open a new one, and check:
+
+   ```
+   claude --version
+   ```
+
+   **You should see** a version number. If Ubuntu says `command not found`, the folder it was installed into is not on Ubuntu's list of places to look yet. Anthropic's page explains how to fix that, under "Fix your PATH". This was read from Anthropic's page and was not run on Windows. You log in the first time you start the leader (the next instruction). The leader's chat uses the same Claude plan as the team's runs.
 
 2. In the Ubuntu window, once, tell Mission Control to remember where it is (it needs no Docker):
 
@@ -421,9 +505,9 @@ The leader is a Claude Code session that you talk to in plain words: "How is it 
    mc leader
    ```
 
-   This starts Claude Code inside the `leader` folder of your copy of Mission Control, wherever you are, with Remote Control on (step 4 says what that is). To start it without Remote Control, run `mc leader --no-remote`. Starting it by hand also works, if you go into the folder first: `cd ~/Mission-control/leader && claude`. The leader has to start inside that folder, because its commands are written `../scripts/mc-docker.sh ...` and its permission rules match that exact text.
+   This starts Claude Code inside the `leader` folder of your copy of Mission Control, wherever you are, with Remote Control on (step 4 says what that is). To start it without Remote Control, run `mc leader --no-remote`. Do that too if Claude Code complains about Remote Control when you start it. Starting it by hand also works, if you go into the folder first: `cd ~/Mission-control/leader && claude`. The leader has to start inside that folder, because its commands are written `../scripts/mc-docker.sh ...` and its permission rules match that exact text.
 
-   Log in when it asks. Then type `How is it going?`. The folder's `CLAUDE.md` and `.claude/settings.json` give the leader its instructions and limits; [leader/README.md](../leader/README.md) explains them.
+   The first time, Claude Code asks you to pick a text style, to log in (a long link appears: hold **Ctrl** and click it, as in Step 4a), and whether you trust the folder (answer yes). If you started it with Remote Control it also asks "Enable Remote Control? (y/n)"; see instruction 4. Then you see a box where you can type. Type `How is it going?` and press Enter. Docker Desktop must be running, or the leader cannot see the work. The folder's `CLAUDE.md` and `.claude/settings.json` give the leader its instructions and limits; [leader/README.md](../leader/README.md) explains them.
 
 3. On the dashboard, the **Tell the leader about this** buttons (on cards and features) and **Tell the leader anything** (on the bar) give you a ready sentence. Copy it and paste it into the chat with the leader.
 
@@ -443,7 +527,7 @@ If you ask the leader to start the team working, it runs `mc run` as a backgroun
 
 ## Optional: start the leader and the dashboard with one click
 
-Two small files open Ubuntu for you and start the leader or the dashboard, so you do not have to type anything. They are in the `scripts/windows` folder of Mission Control. **This part has not been tried here: there was no Windows PC and no WSL to try the shortcut files on.**
+Two small files open Ubuntu for you and start the leader or the dashboard, so you do not have to type anything. They are in the `scripts/windows` folder of Mission Control. **This part has not been tried here: there was no Windows PC and no WSL to try the shortcut files on.** Before you use them, Docker Desktop must be running, and for the leader you must have done instruction 1 of [Optional: start the leader](#optional-start-the-leader) (Claude Code installed in Ubuntu).
 
 1. In the Ubuntu window, once (it needs no Docker):
 
@@ -458,14 +542,14 @@ Two small files open Ubuntu for you and start the leader or the dashboard, so yo
    \\wsl.localhost\Ubuntu\home\<your-ubuntu-name>\Mission-control\scripts\windows
    ```
 
-   **You should see** two files: `start-leader` and `start-dashboard` (Windows may hide the `.cmd` ending).
-3. Copy both files and paste them on your Windows Desktop. (Or right-click one, choose **Show more options**, then **Send to**, then **Desktop (create shortcut)**. Rename the shortcut as you like.)
-4. Double-click **start-leader**. A black window opens, Ubuntu starts, and then Claude Code starts the leader. The first time it asks you to log in and to trust the folder: answer as in [Optional: start the leader](#optional-start-the-leader).
+   **You should see** three files. Use the two whose names start with `start-`: `start-leader` and `start-dashboard` (Windows may hide the `.cmd` ending). The third, `mc-launch.sh`, is used by the other two; leave it where it is.
+3. Copy both `start-` files and paste them on your Windows Desktop. (Or right-click one, choose **Show more options**, then **Send to**, then **Desktop (create shortcut)**. Rename the shortcut as you like.)
+4. Double-click **start-leader**. Windows may ask whether you are sure you want to run it, because it is a script. It is a few lines of text that you can read first with Notepad (right-click, **Show more options**, **Edit**). What Windows shows was not tried. A black window opens, Ubuntu starts, and then Claude Code starts the leader. The first time it asks you to log in and to trust the folder: answer as in [Optional: start the leader](#optional-start-the-leader).
 5. Double-click **start-dashboard**. The window prints `the dashboard is at http://localhost:8787`: open that address in your browser. Close the window, or press **Ctrl+C**, to stop it.
 
-If your Ubuntu has another name (check with `wsl -l -v` in PowerShell), open the `.cmd` file with Notepad (right-click, **Show more options**, **Edit**) and change the word after `DISTRO=`.
+If your Ubuntu has another name (check with `wsl -l -v` in PowerShell), open the `.cmd` file with Notepad and change the word after `DISTRO=`. Use the same name in place of `Ubuntu` in the folder address in instruction 2.
 
-If you moved Mission Control, or downloaded it again, run `mc install-leader` once more from the new folder. If you do not, the shortcut says `I can't find Mission Control in ...` and what to run. Files copied to the Desktop keep working after you update Mission Control: they only call the launcher.
+If you moved Mission Control, or downloaded it again, open the Ubuntu window, go into the new folder (`cd` followed by its path), and run `scripts/mc-docker.sh install-leader` once more. Use that, not `mc`: the `mc` shortcut still points to the old folder. If the new folder is not `~/Mission-control`, also fix the shortcut: type `nano ~/.bashrc`, change the path in the line that starts with `alias mc=`, save with **Ctrl+O** and Enter, quit with **Ctrl+X**, and open a new Ubuntu window. If you do not run `install-leader` again, the shortcut says `I can't find Mission Control in ...` and what to run. Files copied to the Desktop keep working after you update Mission Control: they only call the launcher.
 
 The leader's commands keep working because the shortcut always starts the leader inside the `leader` folder of the copy that `mc install-leader` saved. Nothing about the leader's permissions changes.
 
@@ -473,28 +557,34 @@ The leader's commands keep working because the shortcut always starts the leader
 
 Mission Control can bring a project from GitHub to your PC, let the team work on it, and send the result back as a **draft pull request** (GitHub's way of asking "please add this work", not merged until you merge it yourself). This uses **your own** GitHub login, on the PC. With these commands the box where the team works never gets a password or a token. **This part has not been tried against a real GitHub**: it was tested with a stand-in for GitHub and a stand-in for the `gh` program. The longer guide, with every message you may see, is [docs/github-setup.md](github-setup.md).
 
-1. Install git if Ubuntu has none (`git --version` tells you), with `sudo apt install git`. Install the GitHub tool `gh` from <https://cli.github.com> (the Linux steps for Debian and Ubuntu). Without `gh`, `mc publish` still uploads the branch, and you open the pull request yourself.
+1. You need git (you checked it in Step 3). Install the GitHub tool `gh` from <https://cli.github.com>: on that page, find the Linux steps for Debian and Ubuntu, copy the whole block, paste it in the Ubuntu window and press Enter. It asks for your Ubuntu password. Then check:
+
+   ```
+   gh --version
+   ```
+
+   **You should see** a version number. These steps come from GitHub's page and were not run here. Without `gh`, `mc publish` still uploads the branch, and you open the pull request yourself.
 2. Log in to GitHub, once, in your own Ubuntu window (not through the leader):
 
    ```
    gh auth login
    ```
 
-   Choose **GitHub.com**, **HTTPS**, and **Login with a web browser**, and say yes when it asks about git. Then:
+   Choose **GitHub.com**, **HTTPS**, and **Login with a web browser**, and say yes when it asks about git. It shows a one-time code and a web address. Open the address in your Windows browser and type the code. If Ubuntu tries to open a browser by itself and nothing happens, that is fine. Then:
 
    ```
    gh auth setup-git
    ```
 
-   and check with `gh auth status`.
+   and check with `gh auth status`: **you should see** that you are logged in to github.com.
 3. Download a repository into `~/mc-apps`:
 
    ```
    mc get acme/widgets
    ```
 
-   **You should see** `mc-docker: downloaded acme/widgets into ~/mc-apps/widgets.` and the next step. Only github.com is accepted. A folder that exists is never overwritten. Then queue work on it as usual: `mc feature ~/mc-apps/widgets "Add a dark mode"`, or ask the leader.
-4. When a mission that changes an existing project has finished, first look at where it would go. This uploads nothing:
+   **You should see** `mc-docker: downloaded acme/widgets into ~/mc-apps/widgets.` and the next step. Only github.com is accepted. A folder that exists is never overwritten. Then queue work on it as usual: `mc feature ~/mc-apps/widgets "Add a dark mode"`, or ask the leader. If the repository holds only documents and no code, see the limit in [Documents, pages and data](#documents-pages-and-data).
+4. When a mission that changes an existing project has finished (its name is in `mc status`, like `2026-10-12-dark-mode`), first look at where it would go. This uploads nothing, but Docker Desktop must be running, because the mission's record is read inside a small box:
 
    ```
    mc publish-preview <mission>
@@ -562,7 +652,7 @@ To bring a mission's work into `main`, open the repository on github.com, click 
 cd ~/Mission-control && git pull && mc build && mc install-leader
 ```
 
-Your logins, missions and apps are kept. If the project is private, `git pull` asks for your GitHub username and token again, as in Step 3 (tokens expire: make a new one when it is refused).
+Docker Desktop must be running. Your logins, missions and apps are kept. If the project is private, `git pull` asks for your GitHub username and token again, as in Step 3 (tokens expire: make a new one when it is refused).
 
 ## Troubleshooting
 
@@ -570,7 +660,9 @@ Your logins, missions and apps are kept. If the project is private, `git pull` a
 |---|---|
 | `Docker isn't running` | Start Docker Desktop and wait until it shows **Engine running** (bottom left). Then try again. |
 | `Docker isn't available in Ubuntu`, or `docker: command not found` | Usually Docker Desktop isn't running: start it and wait until it shows **Engine running** (bottom left), then try again. If it was already running: in Docker Desktop, **Settings > Resources > WSL integration**, turn on **Ubuntu**, then **Apply & restart**. Open a new Ubuntu window. |
-| `mc: command not found` | Run `source ~/.bashrc`. If that doesn't help, repeat Step 3, instruction 2. |
+| `WslRegisterDistribution failed`, or a message that virtualization is turned off, when you run `wsl --install` in Step 1 | WSL2 needs "virtualization" to be switched on in your PC's startup settings (the UEFI or BIOS screen). On many PCs it is called Intel VT-x, AMD-V or SVM Mode. How to open that screen depends on the PC maker: search the web for your PC's make and model and "turn on virtualization". Then run `wsl --install -d Ubuntu` again. This was taken from Microsoft's documentation and was not tried. |
+| `git: command not found`, or `curl: command not found` | Install it. Ubuntu asks for your password: `sudo apt update && sudo apt install -y git curl`. |
+| `mc: command not found` | Run `source ~/.bashrc`. If that doesn't help, repeat Step 3, instruction 3. |
 | `the Mission Control image isn't built yet` | Run `mc build`. |
 | `not logged in to Claude yet` or `not logged in to Codex yet`, or `mc doctor --live` says `Not logged in` (plain `mc doctor` only checks that a login is stored, not that it still works) | Log in again: `mc login-claude` or `mc login-codex`. Logins sometimes expire; that's normal. Missions that stopped because of it continue by themselves on the next `mc run`. |
 | A mission is "Stopped, needs your help", or `mc status` shows it `failed` | Read what it needs: `mc report <mission>`, under **Needs your decision**. Do that, then continue it: `mc run --mission <mission>`. `mc status` shows the mission names. |
@@ -585,7 +677,7 @@ Your logins, missions and apps are kept. If the project is private, `git pull` a
 | You want to stop a run | In another Ubuntu window: `mc stop`. It stops after the current step and keeps its progress; the next `mc run` continues. If it hasn't stopped after a few minutes: `docker stop mission-control-run`. |
 | `a Mission Control run is already active` | One is already working, maybe the scheduled one. Check with `mc status`, or stop it with `mc stop`. If `docker ps` doesn't list `mission-control-run`, the last run was cut off: wait 5 minutes and try again. |
 | `mc status` shows a mission `interrupted` | The last run ended without finishing (it was stopped with `docker stop`, or the PC or Docker Desktop restarted). Nothing is lost: the next `mc run` continues it. |
-| `this run would work until 07:00 tomorrow` | The stop time had already passed when the run started. Give a later time, such as `mc run --until 12:00`. |
+| `this run would work until 07:00 tomorrow` | The stop time you gave had only just passed, so the run would have lasted almost a day. Nothing was started. Give a later time, such as `mc run --until 12:00`, or start without a stop time: `mc run`. |
 | `Mission Control can only change apps inside ~/mc-apps`, or `There is no folder at ...` | Move or copy the app's folder into `~/mc-apps`, then use its path there: `mc feature ~/mc-apps/<app-folder> "..."`. |
 | `has no branch checked out` when running `mc feature` | The app's folder is still on a version you were trying from a report. Run the `git -C ... checkout ...` command it prints, then try again. |
 | `mc doctor` says `Not checked: a run is working right now` | It leaves the AIs alone while a run uses the same logins. Run it again after the run ends. |

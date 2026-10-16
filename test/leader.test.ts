@@ -1118,12 +1118,14 @@ describe("the work modes documents (docs/modes-spec.md, 12.5 and the owner's gui
     expect(LEADER_DOC).toContain("Mission Control records the flag as \"it was queued without a stop for your look\", and never as a choice not to look.");
   });
 
-  it("the owner's guide says the three ways, the efforts, what each claims, and that nothing real has been tried", () => {
+  it("the owner's guide says the three ways, the efforts, what each claims, and plainly what was and was not tried", () => {
     expect(modes).toContain("## The three ways a feature is checked");
     for (const way of ["`mode: review`", "`mode: owner`", "“Checked by a second AI against your list.”", "“Checked by tests.”"]) expect(modes, way).toContain(way);
     for (const effort of ["`light`", "`standard`", "`deep`"]) expect(modes, effort).toContain(effort);
-    expect(modes).toMatch(/built and tried only with stand-in AIs/);
-    expect(modes).toMatch(/No real AI has done a job in these ways yet/);
+    // Said plainly: built and tested with stand-ins, then a few small real jobs (a guide, a page, a table) by a real Claude only.
+    expect(modes).toMatch(/built and tested with stand-in AIs/);
+    expect(modes).toMatch(/a real Claude did a few small test jobs in these ways/);
+    expect(modes).toMatch(/Nothing has been tried on a Windows PC, nothing has been tried against a real GitHub, and the other company's AI \(Codex\) has never done a job/);
     expect(modes).toContain("## What was not tried");
     expect(modes).toContain("Whether Codex can look at a picture was never tried.");
   });

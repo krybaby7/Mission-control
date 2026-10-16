@@ -1,6 +1,6 @@
 # The leader
 
-The leader is a Claude Code session that the CEO talks to in plain words. It is the CEO's hands: it checks on the work, reads logs and reports, stops the run, queues a new app or a change, and starts the team working through the queued work. It does this only through Mission Control's own commands (status, logs, report, stop, new, feature, plan preview, plan queue, plan show, run, approve, send-back) and two more that work with GitHub (get, publish; see "Working with GitHub"). For a small, clear job it can also write the plan itself (see "Plans the leader writes"). It never writes code and never touches an app by hand. Approve and send-back answer a check: when the CEO asked the team to stop and wait for a look, the leader can approve it or send it back, but only after the CEO says yes in the chat.
+The leader is a Claude Code session that the CEO talks to in plain words. It is the CEO's hands: it checks on the work, reads logs and reports, stops the run, queues a new app or a change, and starts the team working through the queued work. It does this only through Mission Control's own commands (status, logs, report, stop, new, feature, plan preview, plan queue, plan show, run, approve, send-back) and three more that work with GitHub (get, publish-preview, publish; see "Working with GitHub"). For a small, clear job it can also write the plan itself (see "Plans the leader writes"). It never writes code and never touches an app by hand. Approve and send-back answer a check: when the CEO asked the team to stop and wait for a look, the leader can approve it or send it back, but only after the CEO says yes in the chat.
 
 The dashboard (`mc dashboard`) is the CEO's eyes. It only shows things. The leader is how the CEO acts on what they see.
 
@@ -18,7 +18,7 @@ The longer explanation is in [docs/leader.md](../docs/leader.md).
 
 ## Start the leader
 
-You need Claude Code installed in Ubuntu itself, and logged in there. Mission Control keeps its own copy inside its container, which the leader cannot use. Follow Anthropic's installation instructions for Claude Code on Linux. Then, in the Ubuntu window, from the folder you downloaded Mission Control to:
+You need Claude Code installed in Ubuntu itself, and logged in there. Mission Control keeps its own copy inside its container, which the leader cannot use. Anthropic's page is https://code.claude.com/docs/en/setup. For WSL it gives the command `curl -fsSL https://claude.ai/install.sh | bash`, then you open a new Ubuntu window and check it with `claude --version`. That came from Anthropic's page and was not run on Windows. Docker Desktop must also be running, or the leader cannot see the work. Then, in the Ubuntu window, from the folder you downloaded Mission Control to:
 
 ```
 scripts/mc-docker.sh install-leader
@@ -91,7 +91,7 @@ For work that has no tests (a guide, a page, a table) a plan can say how each fe
 - The leader adds `--no-owner-checkpoint` to `plan queue` only after it asked "Skip your look at these features? The team will add them without stopping for you. Yes or no?" and you said a clear yes. That is a rule for the model, which is a weak guard. An owner who never wants the leader to waive the stop can add a deny rule (see [docs/leader.md](../docs/leader.md)).
 - The leader never calls such work "tested". Mission Control says "approved by you" for what its log holds. It cannot know that you opened a file.
 
-Not tried here: a real AI doing such a job, the second AI's judgement (it is an AI's and can be wrong), pictures of a real page, and whether the leader follows these rules. The words of its questions are tested, its behaviour is not. The same limits are listed in [docs/work-modes.md](../docs/work-modes.md).
+Not tried here: more than a few small real jobs (a real Claude did a guide, a web page and a table in a cloud test machine; see [docs/work-modes.md](../docs/work-modes.md)), the second AI's judgement beyond those (it is an AI's and can be wrong), pictures of a bigger page, Codex as the second AI, and whether the leader follows these rules. The words of its questions are tested, its behaviour is not. The same limits are listed in [docs/work-modes.md](../docs/work-modes.md).
 
 ## Working with GitHub
 

@@ -2,7 +2,9 @@
 
 This is the owner's guide to a part of Mission Control that is new: work that is not code. Before this, a feature was done when its tests passed. A guide, a page or a table has no tests, so a plan can now say how each feature is checked, and how hard the team thinks about it. The design is in [docs/modes-spec.md](modes-spec.md). This page says what it means for you, in plain words.
 
-**Status, said plainly.** This was built and tried only with stand-in AIs. No real AI has done a job in these ways yet, nothing has been tried on a Windows PC, and nothing has been tried against a real GitHub. The words below say what the code does. They do not say that the second AI is a good judge, because nobody has measured that.
+**Status, said plainly.** This was built and tested with stand-in AIs. Then a real Claude did a few small test jobs in these ways in a cloud test machine: a guide with your look, a web page with pictures, and a table with one send-back. Each job used between 7 and 16 AI calls and less than about one point (one percent) of the week's allowance. The jobs found small faults in the wording and in how checks were judged. The faults were fixed and tested here, and only the web page job was run again afterwards. Nothing has been tried on a Windows PC, nothing has been tried against a real GitHub, and the other company's AI (Codex) has never done a job. The words below say what the code does. They do not say that the second AI is a good judge, because nobody has measured that.
+
+**One limit to know before you start.** A job of writing, a page or a table needs an app that has code and its own checks: an app Mission Control built, or a project you took with `mc get`. A folder that holds only documents can fail at the start or finish with a hollow report. The details are under “The limits” at the end.
 
 ## The three ways a feature is checked
 
@@ -83,7 +85,7 @@ For a web page that is a plain file inside the app (an .html file), Mission Cont
 
 ## What it costs
 
-Nothing here was measured. The figures are guesses built from the real numbers in [docs/plans-spec.md](plans-spec.md), at list prices, and they are a rough guide only.
+The figures are guesses built from the real numbers in [docs/plans-spec.md](plans-spec.md), at list prices. The few small real jobs named under “Status” used between 7 and 16 AI calls each and less than about one point of the week, which fits the table. No bigger job was measured, so this is a rough guide only.
 
 | Job | AI calls | Expected share of a week's allowance |
 |---|---|---|
@@ -119,9 +121,9 @@ The leader asks one question before it queues a job that reads a file you named:
 
 ## What was not tried
 
-- A real AI doing a job in these ways. The second AI's judgement is an AI's: it can pass what it should not and fail what is fine. Mission Control makes the cheap ways of being wrong visible (a check not answered, a pass without a reason, a quote that is not in the files, a file it says it opened but did not, a picture it did not open), and turns those answers into “not judged”. It cannot prove that a quote proves the check.
+- Many real jobs. Only a few small ones were done by a real Claude (see “Status”), so how often the second AI is wrong is not known. The second AI's judgement is an AI's: it can pass what it should not and fail what is fine. Mission Control makes the cheap ways of being wrong visible (a check not answered, a pass without a reason, a quote that is not in the files, a file it says it opened but did not, a picture it did not open), and turns those answers into “not judged”. It cannot prove that a quote proves the check.
 - Codex as the second AI, looking at a picture.
-- Looking at a real page: one small drawing was shown to one small model, three times. A page was never shown to a model.
+- Looking at more than a small page. In the web page trials a real Claude opened real pictures, at phone width and at desktop width, of one small page. A bigger page, a page with scripts that change the layout after it loads, and a page that needs a server were not tried.
 - The browser that is inside the Docker image. The picture step was tried here with the library at its pinned version (1.64.0) but with another browser build than the image has, and not under the limits the container sets. The block on web connections was tried the same way (see “Privacy”).
 - Windows, WSL, and your own fonts and browser.
 - The leader following its new rules (the words of the questions are tested, the model's behaviour is not).
