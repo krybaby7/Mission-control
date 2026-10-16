@@ -628,6 +628,53 @@ describe("changedFiles", () => {
   });
 });
 
+describe("changedFilesByKind", () => {
+  it("tells the files that the ref does not have from the files it has and that were changed or removed", async () => {
+    const repo = await newRepo();
+    commitFile(repo, ".gitignore", "ignored/\n");
+    commitFile(repo, "data/columns.csv", "a\n1\n");
+    commitFile(repo, "docs/old.md", "old");
+    commitFile(repo, "docs/gone.md", "gone");
+    commitFile(repo, "docs/moved.md", "moved");
+    const base = rev(repo, "HEAD");
+    // a file the ref has and the work changed, in a commit; the same for a file the work removed
+    commitFile(repo, "data/columns.csv", "a\n2\n");
+    rmSync(join(repo, "docs/gone.md"));
+    // a file the work made: committed, staged, untracked, and a name with a space
+    commitFile(repo, "docs/new-committed.md", "x");
+    write(repo, "docs/new-staged.md", "x");
+    sh(repo, "add", "docs/new-staged.md");
+    write(repo, "docs/ü new untracked.md", "x");
+    write(repo, "ignored/skip.txt", "ignored");
+    // a rename is the old name removed and the new name made
+    sh(repo, "mv", "docs/moved.md", "docs/renamed.md");
+    const found = await git.changedFilesByKind(repo, base);
+    expect(found).toEqual({
+      added: ["docs/new-committed.md", "docs/new-staged.md", "docs/renamed.md", "docs/ü new untracked.md"],
+      existing: ["data/columns.csv", "docs/gone.md", "docs/moved.md"],
+    });
+    // both lists together are the files `changedFiles` lists
+    expect([...found.added, ...found.existing].sort()).toEqual(await git.changedFiles(repo, base));
+    // from a folder inside the repository the names are still relative to the repository
+    mkdirSync(join(repo, "sub"));
+    expect(await git.changedFilesByKind(join(repo, "sub"), base)).toEqual(found);
+  });
+
+  it("returns two empty lists when nothing changed, and does not quote unusual file names", async () => {
+    const repo = await newRepo();
+    expect(await git.changedFilesByKind(repo, "HEAD")).toEqual({ added: [], existing: [] });
+    write(repo, 'quote"tab\there.txt', "x");
+    expect(await git.changedFilesByKind(repo, "HEAD")).toEqual({ added: ['quote"tab\there.txt'], existing: [] });
+  });
+
+  it("fails rather than return a partial list when the output exceeds maxOutputBytes", async () => {
+    const repo = await newRepo();
+    for (let i = 0; i < 100; i++) write(repo, `${String(i).padStart(3, "0")}-${"x".repeat(60)}.ts`, "x");
+    await expect(new Git({ maxOutputBytes: 4096 }).changedFilesByKind(repo, "HEAD")).rejects.toThrow(/more than 4096 bytes/);
+    expect((await new Git({ maxOutputBytes: 64 * 1024 }).changedFilesByKind(repo, "HEAD")).added).toHaveLength(100);
+  });
+});
+
 describe("diff", () => {
   it("diffs two refs and a ref against the working tree", async () => {
     const repo = await newRepo();

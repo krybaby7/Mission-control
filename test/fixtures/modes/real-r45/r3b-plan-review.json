@@ -1,0 +1,11 @@
+{
+ "source": "real run R3b (word-tools, real Claude), mission 2026-10-16-landing-page; the plan reviewer answer",
+ "title": "Landing page",
+ "request": "Add a one-page landing page for word-tools at site/index.html. It needs a headline, three benefits and a Get started button. On a phone the benefits should be in one column, and on a desktop they should sit in three columns.",
+ "review": {
+  "outcome": "revised",
+  "issues": [
+   "The spec never says where the page goes. The user asked for site/index.html, but neither the assumptions nor the UI contract name that path, so the builder could put the file somewhere else and the second AI would not know which file to open. Add a UI contract entry saying the page is the single file site/index.html, and change the assumption 'The page is one plain file with its styles inside it' to name site/index.html."
+  ]
+ }
+}

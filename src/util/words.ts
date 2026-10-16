@@ -9,3 +9,13 @@ export function plural(n: number, noun: string): string {
 export function featuresDone(done: number, total: number): string {
   return `${done} of ${plural(total, "feature")} done`;
 }
+
+/** "exactly 3 rows" when both ends of a range are the same number, else "4 to 12 rows" (real run R4: "The table has 3 to 3 rows"). */
+export function rangeOf(first: number, last: number, noun: string): string {
+  return first === last ? `exactly ${plural(first, noun)}` : `${first} to ${last} ${noun}s`;
+}
+
+/** "exactly 5" when both ends of a range are the same number, else "5 to 9": for a sentence that names the unit before it ("it should have ..."). */
+export function rangeNumbers(first: number, last: number): string {
+  return first === last ? `exactly ${first}` : `${first} to ${last}`;
+}

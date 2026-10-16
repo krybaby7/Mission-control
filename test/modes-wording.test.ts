@@ -152,7 +152,7 @@ describe("a mission whose features all have a mode (examples A and B)", () => {
     w = await openWorld();
     const c = await collect(EXAMPLE_A, "habit-tracker", "Setup guide");
     const body = lineOf(c, "pull request text").join("\n");
-    expect(body).toContain("- Tests: the team wrote tests before the code for 0 of 1 finished features. The rest were not checked by tests. The Checked line below says how each was checked.");
+    expect(body).toContain("- Tests: the team wrote tests before the code for 0 of 1 finished feature. The rest were not checked by tests. The Checked line below says how each was checked.");
     expect(body).toContain("- Checked: 1 feature by a second AI against your list.");
     expect(body).not.toContain("A feature counts as finished only when its tests");
     // Every other line of the text is free of test words: the one sentence above is the only place that names tests, and it denies them.

@@ -170,15 +170,18 @@ describe("a mission queued with a plan written outside the team", () => {
     const lines = parked.checkpoint?.look.lines ?? [];
     const first = lines.findIndex((l) => l.startsWith("The team's plan reviewer asked for changes"));
     const asked = lines.findIndex((l) => l.startsWith("You asked:"));
+    // The revised plan has other checks than the leader's, so a line about that follows the answer (it is a line of its own, not a piece of the answer).
+    const counted = lines.findIndex((l) => l.startsWith("Compared with the plan the leader wrote"));
+    expect(counted).toBeGreaterThan(first);
     expect(first).toBe(1);
-    expect(asked).toBeGreaterThan(first + 2); // the answer needs more than one line
-    for (const line of lines.slice(first + 1, asked)) expect(line).toMatch(/^ {2}\S/u);
+    expect(counted).toBeGreaterThan(first + 2); // the answer needs more than one line
+    for (const line of lines.slice(first + 1, counted)) expect(line).toMatch(/^ {2}\S/u);
     expect(lines.slice(0, first + 1).some((l) => l.startsWith(" "))).toBe(false);
     expect(lines.slice(asked).some((l) => l.startsWith(" "))).toBe(false); // the lines of a fact keep their lead and are not indented
     const report = readFileSync(hh.store.reportPath(id), "utf8").split("\n");
     const at = report.findIndex((l) => l.startsWith("- The team's plan reviewer asked for changes"));
     expect(at).toBeGreaterThan(-1);
-    for (const piece of lines.slice(first + 1, asked)) {
+    for (const piece of lines.slice(first + 1, counted)) {
       expect(report).toContain(`  ${piece.trim()}`);
       expect(report).not.toContain(`- ${piece.trim()}`);
     }

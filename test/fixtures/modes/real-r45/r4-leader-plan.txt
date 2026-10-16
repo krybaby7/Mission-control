@@ -1,0 +1,35 @@
+mc-plan 1
+name: Sales totals
+request: In word-tools there is a sales file, data/sales.csv, with the columns Region, Units and Revenue. Add a script that writes reports/totals.csv with one row for each region, giving the total units and the total revenue. Also add a file data/columns.csv that describes each column of the sales file in plain words.
+folder: word-tools
+base: main
+app-name: word-tools
+summary: Adds a script that totals the units and the revenue for each region of the sales file into reports/totals.csv, and a short description of each column of the sales file in data/columns.csv.
+assumption: The totals file has one row for each region, in alphabetical order.
+assumption: A revenue is written with two decimal places.
+contract: The sales file is data/sales.csv and its columns are Region, Units and Revenue.
+contract: The totals file is reports/totals.csv and its columns are Region, Units and Revenue.
+contract: The description file is data/columns.csv and its columns are Column, Meaning and Example.
+
+feature: region-totals
+title: Totals for each region
+story: As the owner I can run one script and get the total units and the total revenue for each region of the sales file.
+check: Running the script on the sales file writes the totals file with the header line Region,Units,Revenue and one row for each of the three regions.
+check: The rows are in alphabetical order: East, then North, then South.
+check: The East row has 145 units and a revenue of 2900.25.
+check: The North row has 195 units and a revenue of 3900.50.
+check: The South row has 110 units and a revenue of 2210.75.
+check: The units and the revenue of every row equal the sums of that region's rows in the sales file.
+check: Running the script a second time leaves the totals file exactly as it was.
+
+feature: column-notes
+title: Description of each column
+story: As the owner I can read in plain words what each column of the sales file means.
+needs: region-totals
+mode: owner
+effort: light
+check: Every column of the sales file has a row in the description, with a meaning in plain words and an example value.
+check: Each example value is one that appears in that column of the sales file.
+check: The description says nothing about a column that the sales file does not have.
+columns: Column, Meaning, Example
+rows: 3-3

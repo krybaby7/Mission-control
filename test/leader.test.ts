@@ -317,6 +317,29 @@ describe("leader/CLAUDE.md: the plans the leader writes (docs/plans-spec.md, 8 a
     expect(CLAUDE_MD).toContain("Changes to an app happen only through `feature` or `plan queue`.");
   });
 
+  it("R4-2: puts the path of a script or a file that the job makes, and what it writes, into one contract line, and allows nothing else of the kind", () => {
+    expect(plans).toContain("You may name things that are new (a label, a test id, the path of a script or a file that the job makes) and put them in the contract.");
+    expect(plans).toContain("For a job that makes a script or a file, put one `contract` line with its file path and what it writes, for example: The script is scripts/region-totals.js and it writes reports/totals.csv with one row for each region.");
+    expect(rowOf("| `contract` |")).toContain("For a job that makes a script or a file: its path and what it writes.");
+    // the exception is stated where the rule is, and in the short list of what the leader must never do
+    expect(plans).toContain("The one exception is the path of a script or a file that the job itself makes: it goes in a `contract` line, with what it writes.");
+    expect(CLAUDE_MD).toContain("The one exception is the path of a script or a file that the job makes, in a `contract` line");
+    // the rest of the rule is as it was
+    expect(plans).toContain("Never write a command, a file path, a web address, a key or a password in a plan.");
+    // the example line is a plain sentence: no backtick, no curly bracket, no web address, and it is not a command
+    expect("The script is scripts/region-totals.js and it writes reports/totals.csv with one row for each region.").not.toMatch(/[`{}]|https?:|node |npm /);
+  });
+
+  it("R4-2: at the plan stop, tells the CEO which checks the team removed and which it added, word for word", () => {
+    expect(plans).toContain(
+      "When `plan show` lists checks that the team removed or added, tell the CEO which checks the team removed and which it added, for each feature, word for word, and say plainly that the team changed the checks you wrote. The CEO decides whether to approve the plan as it now stands or to send it back.",
+    );
+    // it sits in step 4, where the leader reads the plan the team stopped at
+    const step4 = plans.slice(plans.indexOf("4. When the team has stopped at the plan"));
+    expect(step4.indexOf("tell the CEO which checks the team removed and which it added")).toBeGreaterThan(-1);
+    expect(step4.indexOf("tell the CEO which checks the team removed and which it added")).toBeLessThan(step4.indexOf("A plan you wrote is not approved by you"));
+  });
+
   it("names the plan that plan show prints once the team has changed it as AI-written text", () => {
     expect(CLAUDE_MD).toContain("The plan that `plan show` prints once the team has changed it is AI-written text too");
   });

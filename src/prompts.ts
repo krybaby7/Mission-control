@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkedWords, hasModeFeature, howChecked, isModeFeature } from "./checked-by.js";
 import type { ContextPackOutput, FailureDigestOutput, Feature, FeatureExpect, Finding, Mission, Role, Spec, SpecFeature, SpecOutput, VerifyConfig } from "./types.js";
+import { rangeOf } from "./util/words.js";
 
 export const CAPS = {
   diff: 60_000,
@@ -544,9 +545,9 @@ function expectSentences(expect: FeatureExpect | undefined): string[] {
   return [
     ...(headings.length > 0 ? [`It has the headings ${quoted(headings)}.`] : []),
     ...(mentions.length > 0 ? [`Its visible text contains the words ${quoted(mentions)}, written exactly like that.`] : []),
-    ...(words ? [`Its new text is ${words[0]} to ${words[1]} words long.`] : []),
+    ...(words ? [`Its new text is ${rangeOf(words[0], words[1], "word")} long.`] : []),
     ...(columns.length > 0 ? [`The table has the columns ${columns.join(", ")}.`] : []),
-    ...(rows ? [`The table has ${rows[0]} to ${rows[1]} rows.`] : []),
+    ...(rows ? [`The table has ${rangeOf(rows[0], rows[1], "row")}.`] : []),
   ];
 }
 
@@ -641,6 +642,7 @@ export function reportProsePrompt(m: Mission, facts: string): string {
       ]),
       "Don't invent features or outcomes the facts don't show.",
       modes && "Say how each feature was checked exactly as the facts say. Never say that tests passed for a feature whose line says it was checked another way.",
+      modes && "Say nothing about how a page was looked at, or whether it was opened in a browser, beyond what the facts say.",
     ]),
     section("Facts", [fence(truncateMiddle(facts, CAPS.reportFacts))]),
   );

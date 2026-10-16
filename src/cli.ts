@@ -17,7 +17,7 @@ import { ConfigProblemsError, configPath, configTemplateYaml, defaultConfig, inC
 import { type DoctorCheck, runDoctor, unkeptFolderProblems } from "./doctor.js";
 import { Git } from "./git.js";
 import { createNotifier, type Notifier } from "./notify.js";
-import { describePlan, PLAN_MAX_CHARS, PLAN_PROBLEMS_SHOWN, parsePlan, reviewLines } from "./plan.js";
+import { checkChangeLines, checkChanges, describePlan, PLAN_MAX_CHARS, PLAN_PROBLEMS_SHOWN, parsePlan, reviewLines } from "./plan.js";
 import { packageRoot } from "./prompts.js";
 import { renderReport } from "./report.js";
 import { findMission, missionOutcome, runNight } from "./run.js";
@@ -950,7 +950,9 @@ function planShowCommand(io: CliIO, id: string): number {
     lines = [
       `Plan for “${shown(m.title)}” (mission ${m.id}): ${where}.`,
       plan ? `Written by the leader. Plan code ${plan.sha256.slice(0, 8)} (of the plan as the leader wrote it).` : "Written by the team's planner.",
-      ...reviewLines(plan?.review, sendBacks(m, "plan")),
+      // A long answer of the plan reviewer stays one line here (the terminal wraps it), and the checks the team changed are listed (real runs R3b and R4).
+      ...reviewLines(plan?.review, sendBacks(m, "plan"), false),
+      ...checkChangeLines(plan ? checkChanges(plan.spec, spec) : [], "text"),
       "",
       ...describePlan(spec, { request: m.request, style: "text", newApp: m.kind === "greenfield" && m.repoPath === "", ...(noOwnerLookIn(m) && { ownerStops: false as const }) }),
       ...howEachWasChecked(m, planned, store),

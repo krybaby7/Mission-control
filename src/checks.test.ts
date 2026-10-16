@@ -464,7 +464,7 @@ describe("M25, problems the file already had are facts", () => {
     const r = await run([file("a.md", now, { isNew: false, before, added: addedLines(now, before) })], { words: [5, 5] });
     expect(r.problems).toEqual([]);
     const whole = await run([file("a.md", now)], { words: [5, 5] });
-    expect(whole.problems).toEqual(["The new text has 9 words; it should have 5 to 5."]);
+    expect(whole.problems).toEqual(["The new text has 9 words; it should have exactly 5."]);
   });
 });
 
@@ -841,6 +841,16 @@ describe("table rules", () => {
     expect((await run([file("t.csv", "a\n")], { rows: [0, 0] })).problems).toEqual([]);
   });
 
+  it("R4-4: a range with the same number at both ends says exactly that number, never \"3 to 3\"", async () => {
+    const text = "a\n1\n2\n3\n";
+    expect((await run([file("t.csv", text)], { rows: [4, 4] })).problems).toEqual(["“t.csv” has 3 rows; it should have exactly 4."]);
+    expect((await run([file("t.csv", text)], { rows: [2, 2] })).problems).toEqual(["“t.csv” has 3 rows; it should have exactly 2."]);
+    const now = "# Title\n\nOne two three.\n";
+    expect((await run([file("a.md", now)], { words: [7, 7] })).problems).toEqual(["The new text has 4 words; it should have exactly 7."]);
+    // a range with two different ends keeps its words
+    expect((await run([file("t.csv", text)], { rows: [4, 9] })).problems).toEqual(["“t.csv” has 3 rows; it should have 4 to 9."]);
+  });
+
   it("S18: columns or rows in the plan and no table file changed", async () => {
     expect((await run([file("a.md", "# A\n\nText\n")], { columns: ["a"] })).problems).toEqual(["The plan asks for a table with columns or rows, but no table file changed."]);
     expect((await run([file("a.md", "# A\n\nText\n")], { rows: [1, 2] })).problems).toEqual(["The plan asks for a table with columns or rows, but no table file changed."]);
@@ -1175,7 +1185,7 @@ const SHAPES: RegExp[] = [
   /^The link to the heading “#[\s\S]*” in “[\s\S]*” \(from “[\s\S]*”\) does not lead to a heading\.$/,
   /^The text has no heading called “[\s\S]*”\.$/,
   /^The visible text does not contain “[\s\S]*”\.$/,
-  /^The new text has \d+ words?; it should have \d+ to \d+\.$/,
+  /^The new text has \d+ words?; it should have (?:\d+ to \d+|exactly \d+)\.$/,
   /^“[\s\S]*” is not a valid table: a quote mark is opened and never closed\.$/,
   /^“[\s\S]*” has no header row\.$/,
   /^“[\s\S]*” has a column with no name in its first row\.$/,
@@ -1183,7 +1193,7 @@ const SHAPES: RegExp[] = [
   /^Row \d+ of “[\s\S]*” has \d+ values?, but the first row has \d+\.$/,
   /^\d+ more rows? of “[\s\S]*” (?:has|have) the wrong number of values\.$/,
   /^“[\s\S]*” has the columns [\s\S]*, but the plan asks for [\s\S]*\.$/,
-  /^“[\s\S]*” has \d+ rows?; it should have \d+ to \d+\.$/,
+  /^“[\s\S]*” has \d+ rows?; it should have (?:\d+ to \d+|exactly \d+)\.$/,
   /^The plan asks for a table with columns or rows, but no table file changed\.$/,
   /^“[\s\S]*” has no title\.$/,
   /^“[\s\S]*” has no setting for phone screens \(a viewport line\)\.$/,

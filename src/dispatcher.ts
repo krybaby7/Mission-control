@@ -51,7 +51,7 @@ import { resolveFamily } from "./config.js";
 import { AuthUnavailableError, DeadlineError, type ExecResult, ProvidersFailingError, type RoleExecutor, StopRequestedError } from "./executor.js";
 import type { Git } from "./git.js";
 import type { Notifier } from "./notify.js";
-import { describePlan, reviewLines } from "./plan.js";
+import { checkChangeLines, checkChanges, checkChangeSummary, describePlan, reviewLines } from "./plan.js";
 import {
   buildPrompt,
   CAPS,
@@ -2974,18 +2974,23 @@ class MissionRun {
         const plan = planOf(m);
         if (plan) {
           // The leader wrote this plan: the owner gets every fact of it, the reviewer's answer and who changed it.
+          const adopted = m.spec ?? plan.spec;
+          const changes = checkChanges(plan.spec, adopted);
           return {
             headline: `Check the plan for “${title}”`,
             lines: [
               ...(failed ? ["Your change could not be made, so this is the earlier plan."] : []),
               "This plan was written by the leader, not by the team's planner.",
               ...indentWrapped(reviewLines(plan.review, sendBacks(m, "plan")), sendBacks(m, "plan") > 0),
-              ...describePlan(m.spec ?? plan.spec, {
+              // Which checks the team took out of the leader's plan and which it put in: said near the top, listed after the plan (real run R4).
+              ...(changes.length > 0 ? [`${checkChangeSummary(changes)} Every one is listed below the plan.`] : []),
+              ...describePlan(adopted, {
                 request: m.request,
                 style: "look",
                 newApp: m.kind === "greenfield" && m.repoPath === "",
                 ...(m.ownerStops === false && m.checkpoints?.includes("feature") !== true && { ownerStops: false as const }),
               }),
+              ...checkChangeLines(changes, "look"),
               ...warning,
             ],
           };
@@ -3006,7 +3011,7 @@ class MissionRun {
       }
       case "feature": {
         const feature = need(f, "the feature");
-        if (isModeFeature(feature)) return this.modeLook(feature, failed, warning);
+        if (isModeFeature(feature)) return this.modeLook(feature, failed, warning, sentBackNote(m, scope));
         const built = feature.attempts.filter((a) => a.outcome === "pass" && a.action !== "diagnose").at(-1)?.summary;
         const unreviewed = this.scratch.unit(feature.id).reviewSkipped === true;
         const notes = feature.openFindings;
@@ -3069,15 +3074,17 @@ class MissionRun {
    * What the owner is shown at a feature that was checked by reading (docs/modes-spec.md 10.2), the facts that matter first: the
    * card shows only the first twelve lines. The words come from checked-by.ts, and no sentence says a test checked the work.
    */
-  private async modeLook(feature: Feature, failed: boolean, warning: string[]): Promise<CheckpointLook> {
+  private async modeLook(feature: Feature, failed: boolean, warning: string[], note?: string): Promise<CheckpointLook> {
     const { m } = this;
     const title = shown(feature.title);
-    const files = await this.changedFilesOf(feature.worktree, m.integrationBranch);
+    const { files, existing } = await this.changedFilesSplit(feature.worktree, m.integrationBranch);
     const c = feature.checked;
     const unfinished = c === undefined || c.unfinished === true;
     const lines: string[] = [];
     if (failed) lines.push("Your change could not be made, so this is the earlier version.");
     lines.push(`“${title}” is built. No tests were written for it. ${unfinished ? "The second AI's check did not finish." : "A second AI checked it against your list."}`);
+    // The second showing after a send-back: the owner's note again, and what was and was not done about it (real run R4: the note was only in a table far below).
+    if (note !== undefined && !failed) lines.push(...afterSendBackLines(note));
     if (c !== undefined && !unfinished) {
       const results = Array.isArray(c.results) ? c.results : [];
       const passed = results.filter((r) => r.result === "pass").length;
@@ -3128,8 +3135,22 @@ class MissionRun {
       ...(feature.branch !== undefined && { branch: feature.branch }),
       ...(feature.passingCommit !== undefined && { commit: feature.passingCommit.slice(0, 10) }),
       ...(files.length > 0 && { files: files.map((p) => shown(p)) }),
+      // The files this feature did not create, told apart from the new ones (real run R4: a feature changed a file an earlier feature had made).
+      ...(existing.length > 0 && { existingFiles: existing.map((p) => shown(p)) }),
       ...(pictures.length > 0 && { screenshots: pictures }),
     };
+  }
+
+  /** `changedFilesOf`, with the files that `from` already has told apart from the new ones: `existing` is a part of `files`. */
+  private async changedFilesSplit(cwd: string | undefined, from: string | undefined): Promise<{ files: string[]; existing: string[] }> {
+    if (!cwd || !from || !existsSync(cwd)) return { files: [], existing: [] };
+    try {
+      const { added, existing } = await this.deps.git.changedFilesByKind(cwd, from);
+      const files = [...new Set([...added, ...existing])].sort().slice(0, MAX_LISTED_FILES);
+      return { files, existing: files.filter((f) => existing.includes(f)) };
+    } catch {
+      return { files: [], existing: [] };
+    }
   }
 
   private async changedFilesOf(cwd: string | undefined, from: string | undefined): Promise<string[]> {
@@ -3682,6 +3703,25 @@ function lastLines(text: string, n: number): string[] {
 function listFiles(paths: string[]): string {
   const shown = paths.slice(0, MAX_LISTED_FILES).join(", ");
   return paths.length > MAX_LISTED_FILES ? `${shown} and ${paths.length - MAX_LISTED_FILES} more` : shown;
+}
+
+/** How long the owner's note is when the second showing repeats it. */
+const NOTE_SHOWN_CHARS = 200;
+
+/** The owner's last note for `scope`, when the owner has sent it back: the second showing repeats it. Undefined when it was never sent back. */
+function sentBackNote(m: Pick<Mission, "checkpointLog">, scope: string): string | undefined {
+  const sent = (m.checkpointLog ?? []).filter((r) => r.scope === scope && r.decision === "send_back");
+  return sent.length === 0 ? undefined : (sent.at(-1)?.note ?? "");
+}
+
+/**
+ * The lines of the second showing of a feature checked by reading, after the owner sent it back with a note: the note (cleaned, at most 200
+ * characters, in curly quotes) and a plain sentence that says it was changed, that a second AI checked it again, and that nothing checks that the
+ * note was followed: the second AI judges the original checks, so the owner is the only one who can tell.
+ */
+export function afterSendBackLines(note: string): string[] {
+  const text = cleanAiText(note, NOTE_SHOWN_CHARS).replace(/[“”]/gu, '"');
+  return [...(text === "" ? [] : [`Your note: “${text}”`]), "It was changed after your note and checked again by a second AI. Nothing checks that your note was followed, so please look."];
 }
 
 /**

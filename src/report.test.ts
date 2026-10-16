@@ -1020,13 +1020,41 @@ describe("a report for a mission that has a feature no test checks", () => {
 
     it("sends the owner to a browser for a page, and to the app's folder for several files", () => {
       expect(tryIt(guideMission(["site/index.html"]))).toContain(`Then open \`site/index.html\` in your browser (in Windows File Explorer: \`${WINDOWS}\\site\\index.html\`).`);
-      expect(tryIt(guideMission(["site/index.html", "site/about.htm"]))).toContain(`Then open \`site/index.html\` and \`site/about.htm\` in your browser (in Windows File Explorer, the app's folder is \`${WINDOWS}\`).`);
-      expect(tryIt(guideMission(["docs/USAGE.md", "site/index.html"]))).toContain("Then open `docs/USAGE.md` and `site/index.html` in your app folder (");
-      expect(tryIt(guideMission(["a.md", "b.md", "c.md", "d.md", "e.md", "f.md", "g.md"]))).toContain("Then open `a.md`, `b.md`, `c.md`, `d.md`, `e.md` and 2 more in your app folder (");
+      // The Windows path of the app's folder is in the first sentence of "How to try it", and is not written a second time (real run R3b).
+      const several = tryIt(guideMission(["site/index.html", "site/about.htm"]));
+      expect(several).toContain("Then open `site/index.html` and `site/about.htm` in your browser.");
+      expect(several.split("wsl.localhost")).toHaveLength(2);
+      expect(tryIt(guideMission(["docs/USAGE.md", "site/index.html"]))).toContain("Then open `docs/USAGE.md` and `site/index.html` in your app folder.");
+      expect(tryIt(guideMission(["a.md", "b.md", "c.md", "d.md", "e.md", "f.md", "g.md"]))).toContain("Then open `a.md`, `b.md`, `c.md`, `d.md`, `e.md` and 2 more in your app folder.");
       // a file that is listed twice, in two features, once
       const two = guideMission(["docs/USAGE.md"]);
       two.features.push(feature({ id: "again", title: "Again", status: "done", acceptance: ["a"], mode: "review", checked: checked(["pass"], { files: ["docs/USAGE.md"] }) }));
       expect(tryIt(two)).toContain("Then open `docs/USAGE.md` in your app folder (in Windows File Explorer: ");
+    });
+
+    it("R3b-3: says that the page is opened in a browser when a page is changed with another file, and writes the Windows path of the folder once", () => {
+      const text = tryIt(guideMission(["README.md", "site/index.html"]));
+      expect(text).toContain("Then open `README.md` and `site/index.html` in your app folder. Open `site/index.html` in your browser.");
+      expect(text.split("wsl.localhost")).toHaveLength(2);
+      // several pages and a guide: every page is named
+      expect(tryIt(guideMission(["docs/USAGE.md", "site/a.html", "site/b.htm"]))).toContain("in your app folder. Open `site/a.html` and `site/b.htm` in your browser.");
+      // a guide and nothing else, or pages and nothing else, keep their sentences
+      expect(tryIt(guideMission(["docs/USAGE.md", "docs/FAQ.md"]))).toMatch(/Then open `docs\/USAGE.md` and `docs\/FAQ.md` in your app folder\.\n/);
+      expect(tryIt(guideMission(["docs/USAGE.md", "docs/FAQ.md"]))).not.toContain("in your browser");
+      // the fact sheet says the same
+      expect(buildReportFacts(guideMission(["README.md", "site/index.html"]), [])).toContain("Then open README.md, site/index.html in your app folder. Open site/index.html in your browser. Nothing needs to be run.");
+    });
+
+    it("R4-5: names a data file to open, as it names a guide, and runs nothing", () => {
+      const text = tryIt(guideMission(["data/columns.csv"]));
+      expect(text).toContain(`Then open \`data/columns.csv\` in your app folder (in Windows File Explorer: \`${WINDOWS}\\data\\columns.csv\`).`);
+      expect(text).not.toMatch(/npm|install|start your app|project's own checks/);
+      expect(howToRun(guideMission(["data/columns.csv"]), { inContainer: true })).toEqual(["cd ~/mc-apps/word-tools", expect.stringMatching(/^git checkout mc\//)]);
+      // a table and a guide together; a picture and a PDF are opened as they are too
+      expect(tryIt(guideMission(["docs/USAGE.md", "data/columns.csv", "images/logo.png", "docs/guide.pdf"]))).toContain("Then open `docs/USAGE.md`, `data/columns.csv`, `images/logo.png` and `docs/guide.pdf` in your app folder");
+      // a file of code is still not something to open
+      const code = tryIt(guideMission(["data/columns.csv", "scripts/make.js"]));
+      expect(code).not.toContain("Then open");
     });
 
     it("outside the container there is no Windows path", () => {
@@ -1119,6 +1147,53 @@ describe("a report for a mission that has a feature no test checks", () => {
         expect(lookText(lookOf(["site/index.html"]))).toContain("Then open `site/index.html` in your browser (in Windows File Explorer: ");
       });
 
+      it("R4-5: names the data file to open and offers no project check, as for a guide", () => {
+        const text = lookText(lookOf(["data/columns.csv"]));
+        expect(text).toContain(`Then open \`data/columns.csv\` in your app folder (in Windows File Explorer: \`${WINDOWS}\\data\\columns.csv\`).`);
+        expect(text).not.toMatch(/npm|start your app|project's own checks/);
+      });
+
+      it("R3b-3: says the page is opened in a browser when it comes with another file", () => {
+        expect(lookText(lookOf(["README.md", "site/index.html"]))).toContain("Then open `README.md` and `site/index.html` in your app folder (in Windows File Explorer, the app's folder is ");
+        expect(lookText(lookOf(["README.md", "site/index.html"]))).toContain(". Open `site/index.html` in your browser.");
+      });
+
+      it("R4-5: with a feature checked by tests in the same mission, keeps the project's own checks and names the file after them, in other words", () => {
+        const withTests = lookOf(["data/columns.csv"]);
+        withTests.features.push(feature({ id: "code", title: "Code", status: "pending", acceptance: ["a"] }));
+        const text = lookText(withTests);
+        expect(text).toContain("4. `npm run verify`: run the project's own checks");
+        expect(text).toContain("The project's own checks do not cover this feature. To look at it, open `data/columns.csv` in your app folder (in Windows File Explorer: ");
+        expect(text).not.toContain("Then open");
+        expect(text.indexOf("npm run verify")).toBeLessThan(text.indexOf("To look at it, open"));
+        // a feature that tests check, looked at in the same mission, gets no such sentence
+        const tested = lookOf(["src/index.js"]);
+        tested.features[0] = { ...tested.features[0]!, mode: undefined, frozenTests: [{ path: "a.test.ts", sha256: "x" }] };
+        expect(lookText(tested)).not.toContain("To look at it, open");
+      });
+
+      it("R4-1: lists the files that were already there apart from the new ones, and keeps one sentence when all are new", () => {
+        const withLook = (look: Record<string, unknown>): Mission => {
+          const m = lookOf(["docs/USAGE.md"]);
+          m.checkpoint = { ...m.checkpoint!, look: { ...m.checkpoint!.look, ...look } } as Mission["checkpoint"];
+          return m;
+        };
+        const report = (m: Mission): string => render(m, { inContainer: true });
+        const both = report(withLook({ files: ["data/columns.csv", "docs/USAGE.md", "scripts/a.js"], existingFiles: ["data/columns.csv"] }));
+        expect(both).toContain("New in this feature: `docs/USAGE.md` and `scripts/a.js`.");
+        expect(both).toContain("Changed, but already there before this feature: `data/columns.csv`.");
+        expect(both).not.toContain("Files that changed:");
+        const onlyOld = report(withLook({ files: ["data/columns.csv"], existingFiles: ["data/columns.csv"] }));
+        expect(onlyOld).toContain("Changed, but already there before this feature: `data/columns.csv`.");
+        expect(onlyOld).not.toContain("New in this feature");
+        // all new, or the field is missing (an older mission file): the one sentence it always had
+        expect(report(withLook({ files: ["a.md", "b.md"] }))).toContain("Files that changed: `a.md` and `b.md`.");
+        expect(report(withLook({ files: ["a.md", "b.md"], existingFiles: [] }))).toContain("Files that changed: `a.md` and `b.md`.");
+        // a name that is not among the files, or a damaged field, changes nothing
+        expect(report(withLook({ files: ["a.md"], existingFiles: ["zzz.md"] }))).toContain("Files that changed: `a.md`.");
+        expect(report(withLook({ files: ["a.md"], existingFiles: "no" }))).toContain("Files that changed: `a.md`.");
+      });
+
       it("keeps the project's own checks away from a mission that no test checks, but not from one a test checks", () => {
         const code = lookText(lookOf(["docs/USAGE.md", "src/index.js"]));
         expect(code).toContain("3. `npm install`: download what the app needs (slow the first time)");
@@ -1171,6 +1246,23 @@ describe("a report for a mission that has a feature no test checks", () => {
     expect(report).toContain("| ✅ | Landing page | Built; a second AI checked it against your list (3 of 3 passed); approved by you (1 review note below) |");
   });
 
+  it("R3b-4: joins the count of review notes into the bracket the words already end with, never two brackets in a row", () => {
+    const m = mixed();
+    const note = { severity: "minor" as const, file: null, description: "A small thing to tidy.", suggestedTest: null };
+    // the real row of run R3b: a feature checked by a second AI, all six checks passed, one review note
+    m.features = [{ ...m.features[1]!, id: "landing-page", title: "One-page landing page", acceptance: ["a", "b", "c", "d", "e", "f"], mode: "review", checked: checked(["pass", "pass", "pass", "pass", "pass", "pass"]), openFindings: [note] }];
+    m.checkpointLog = [];
+    const report = render(m, { prose: null });
+    expect(report).toContain("| ✅ | One-page landing page | Built; a second AI checked it against your list (6 of 6 passed, 1 review note below) |");
+    expect(report).not.toMatch(/\)\s*\(/);
+    // two notes, and a bracket that is not the last thing of the words (the approval comes after it)
+    m.features[0] = { ...m.features[0]!, openFindings: [note, note] };
+    expect(render(m, { prose: null })).toContain("(6 of 6 passed, 2 review notes below) |");
+    const approved = mixed();
+    approved.features[2] = { ...approved.features[2]!, openFindings: [note] };
+    expect(render(approved, { prose: null })).toContain("Built; a second AI checked it against your list (3 of 3 passed); approved by you (1 review note below) |");
+  });
+
   it("does not say built and checked in the plain narrative, and sends the reader to the Checked line and the table", () => {
     const m = mixed();
     const report = render(m, { prose: null });
@@ -1194,6 +1286,39 @@ describe("a report for a mission that has a feature no test checks", () => {
     expect(facts).toContain('- guide "Setup guide" [done]: You can setup guide. Checked by: a second AI against your list. No tests were written for it.\n');
     expect(facts).toContain('- landing "Landing page" [done]: You can landing page. Checked by: a second AI against your list and approved by you. No tests were written for it.\n');
     expect(buildReportFacts(realisticMission(), [])).not.toContain("Checked by:");
+  });
+
+  it("R3b-2: tells the summary writer that pictures of the page were taken and the second AI looked at them, only for a feature that has them", () => {
+    const m = mixed();
+    const withPictures = (pictures: { taken: number; why?: "reviewer" | "no_tool" }): Mission => {
+      const copy = mixed();
+      copy.features[1] = { ...copy.features[1]!, checked: { ...checked(["pass", "pass", "pass"])!, pictures } };
+      return copy;
+    };
+    const line = "Pictures of the page were taken at phone width and desktop width, and the second AI looked at them.";
+    const facts = buildReportFacts(withPictures({ taken: 2 }), []);
+    expect(facts).toContain(`- guide "Setup guide" [done]: You can setup guide. Checked by: a second AI against your list. No tests were written for it. ${line}\n`);
+    // the other two features have none, and say nothing about pictures
+    expect(facts.split("Pictures of the page")).toHaveLength(2);
+    // none taken, or none for a reason: no sentence at all
+    for (const none of [{ taken: 0 }, { taken: 0, why: "no_tool" as const }]) expect(buildReportFacts(withPictures(none), [])).not.toContain("Pictures of the page");
+    // the second AI could not open them (it runs on another tool): said as it is
+    expect(buildReportFacts(withPictures({ taken: 2, why: "reviewer" }), [])).toContain("Pictures of the page were taken at phone width and desktop width, but the second AI could not look at them.");
+    // a mission with no mode feature has no such line
+    expect(buildReportFacts(realisticMission(), [])).not.toContain("Pictures of the page");
+    expect(buildReportFacts(m, [])).not.toContain("Pictures of the page");
+  });
+
+  it("R3b-2: keeps a summary that says the second AI did not use tests but judged by reading, even if it adds that it was not a browser test", () => {
+    const prose: ReportProseOutput = {
+      narrative: "The page is built. A second AI reviewed it against your list.",
+      whatYouCanDo: ["Check the columns on a phone (checked by a second AI review, not by a browser test)."],
+    };
+    expect(holdsNeverSay(prose.whatYouCanDo[0]!)).toBe(false);
+    expect(holdsNeverSay("It was checked by a second AI, not by an automated test.")).toBe(false);
+    expect(render(mixed(), { prose })).toContain("Check the columns on a phone (checked by a second AI review, not by a browser test).");
+    // a claim of a test next to such a denial still counts
+    expect(holdsNeverSay("Checked by a second AI, not by a browser test, but it was tested twice.")).toBe(true);
   });
 
   it("leaves out the AI-written summary and list when they talk about tests, and says so in the technical details", () => {

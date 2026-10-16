@@ -548,6 +548,11 @@ export interface CheckpointLook {
   commit?: string;
   /** feature/final: changed files, at most 10. */
   files?: string[];
+  /**
+   * feature checked by reading: the files of `files` that were already in the work before this feature (an earlier feature or the app made them), so
+   * the owner can see that this feature changed a file it did not create. Left out when there are none, and for every other kind of look.
+   */
+  existingFiles?: string[];
   /** final: paths under the mission folder, for example "screenshots/home.png". */
   screenshots?: string[];
 }

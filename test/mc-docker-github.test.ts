@@ -817,7 +817,7 @@ describe("publish: the pull request", () => {
     fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), header(line));
     const body = run(["publish", ID, ...TO]).gh[0]!.body!;
     expect(body).toContain("\n- Checked: 1 feature by a second AI against your list and approved by you.\n");
-    expect(body).toContain("the team wrote tests before the code for 0 of 1 finished features");
+    expect(body).toContain("the team wrote tests before the code for 0 of 1 finished feature.");
     expect(body).not.toMatch(/looked at it|you looked|reviewed by you|signed off|different AI/i);
   });
 
@@ -836,7 +836,7 @@ describe("publish: the pull request", () => {
     setup({ features: [testedFeature] });
     fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), header("Checked: 1 feature by tests."));
     const block = checkedBlock(run(["publish", ID, ...TO]).gh[0]!.body!);
-    expect(block).toContain("- Tests: the team wrote tests before the code for 1 of 1 finished features. A feature counts as finished only when its tests and the app's own checks pass.");
+    expect(block).toContain("- Tests: the team wrote tests before the code for 1 of 1 finished feature. A feature counts as finished only when its tests and the app's own checks pass.");
     expect(block).not.toContain("- Checked:");
     expect(block).not.toContain("Checked line");
   });
@@ -947,6 +947,101 @@ describe("publish: the pull request", () => {
     expect(r.status).toBe(0);
     expect(r.gh[0]!.body!).toContain("**This mission is only partly done.** 1 of 1 feature is finished.");
     expect(r.gh[0]!.body!).not.toContain("1 of 1 features");
+  });
+
+  // ─────────── the real run R5: the pull request body ───────────
+
+  /** The report of the real run R5, word for word: its one paragraph of summary has 899 characters and holds the last sentences about the reviewers' notes. */
+  const REAL_R5_REPORT = fs.readFileSync(path.join(REPO_DIR, "test", "fixtures", "publish", "real-r5-report.md"), "utf8");
+  const reportLinesOf = (body: string): string[] => body.split("## From the report\n\n")[1]!.split("\n").slice(1, -2);
+
+  it("R5-1: cuts a line of the report that is too long at the end of a sentence, and says so with three dots, never in the middle of a word", () => {
+    setup();
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), REAL_R5_REPORT);
+    const body = run(["publish", ID, ...TO]).gh[0]!.body!;
+    const summary = REAL_R5_REPORT.split("\n").find((l) => l.startsWith("The word-tools library now has"))!;
+    expect(summary.length).toBeGreaterThan(800);
+    const copied = reportLinesOf(body).find((l) => l.startsWith("The word-tools library now has"))!;
+    expect(copied.length).toBeLessThanOrEqual(300);
+    expect(copied.endsWith(" ...")).toBe(true);
+    const kept = copied.slice(0, -4);
+    // what is kept is the start of the paragraph and ends where a sentence ends
+    expect(summary.startsWith(kept)).toBe(true);
+    expect(kept).toMatch(/[.!?]$/);
+    expect(summary.charAt(kept.length)).toBe(" ");
+    expect(kept.length).toBeGreaterThan(200);
+    expect(body).not.toContain("Empty text, o\n");
+    expect(body).not.toMatch(/Empty text, o$/m);
+    // a line that fits is copied as it is
+    expect(reportLinesOf(body)).toContain("Plan: written by the leader (plan code 657f9ae6); the team's plan reviewer asked for no changes.");
+  });
+
+  it("R5-1: a line with no sentence end to cut at is cut at a space; a line of exactly 300 characters is copied whole", () => {
+    setup();
+    const words = `${"alphabet ".repeat(60)}omega`;
+    const exact = "x".repeat(300);
+    const over = "y".repeat(299) + "z ";
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), ["# Dark mode", "", words, "", exact, "", `${over}tail`, ""].join("\n"));
+    const lines = reportLinesOf(run(["publish", ID, ...TO]).gh[0]!.body!);
+    const cut = lines.find((l) => l.startsWith("alphabet "))!;
+    expect(cut.length).toBeLessThanOrEqual(300);
+    expect(cut.endsWith("alphabet...")).toBe(true);
+    expect(words.startsWith(`${cut.slice(0, -3)} `)).toBe(true);
+    expect(lines).toContain(exact);
+    // one long word cannot be cut at a space: it is cut at the limit, and still ends with the dots
+    const hard = lines.find((l) => l.startsWith("yyyy"))!;
+    expect(hard.length).toBe(300);
+    expect(hard.endsWith("...")).toBe(true);
+  });
+
+  it("R5-1: counts the review notes that were left open in a line of its own, because the copy of the report does not reach them", () => {
+    const world = setup({
+      features: [
+        { id: "a", title: "A", status: "done", frozenTests: [{ path: "t", sha256: "0" }], openFindings: [{ severity: "minor", description: "x" }, { severity: "minor", description: "y" }] },
+        { id: "b", title: "B", status: "done", frozenTests: [], openFindings: [{ severity: "major", description: "z" }] },
+        { id: "c", title: "C", status: "blocked", openFindings: [] },
+      ],
+      status: "partial",
+    });
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), REAL_R5_REPORT);
+    const body = run(["publish", ID, ...TO]).gh[0]!.body!;
+    expect(body).toContain(`- Open review notes: the reviewers left 3 notes open. The full report lists them: \`mc report ${ID}\` in Mission Control on the owner's PC.\n`);
+    // one note, none, and a record that has no list of notes
+    writeMission(world, { features: [{ id: "a", title: "A", status: "done", frozenTests: [{ path: "t", sha256: "0" }], openFindings: [{ severity: "minor", description: "x" }] }] });
+    expect(run(["publish", ID, ...TO]).gh[0]!.body!).toContain("- Open review notes: the reviewers left 1 note open. The full report lists it: ");
+    writeMission(world);
+    expect(run(["publish", ID, ...TO]).gh[0]!.body!).toContain("- Open review notes: the reviewers left none open.\n");
+    writeMission(world, { features: [{ id: "a", title: "A", status: "done", frozenTests: [{ path: "t", sha256: "0" }], openFindings: "no" }] });
+    expect(run(["publish", ID, ...TO]).gh[0]!.body!).toContain("- Open review notes: the reviewers left none open.\n");
+  });
+
+  it("R5-2: says the whole report is in Mission Control on the owner's PC, with the command, and no longer points to a file a reader on GitHub cannot open", () => {
+    const world = setup();
+    const body = run(["publish", ID, ...TO]).gh[0]!.body!;
+    expect(body).toContain(`The whole report, with what the reviewers left open, is in Mission Control on the owner's PC: \`mc report ${ID}\`.`);
+    expect(body).not.toContain("report.md");
+    // when a review did not finish, that line does not name the report, and the line about the open notes does
+    writeMission(world, {
+      notes: ['The review of "Dark mode switch" did not finish, so it was merged after passing its checks.'],
+      features: [{ id: "a", title: "A", status: "done", frozenTests: [{ path: "t", sha256: "0" }], openFindings: [{ severity: "minor", description: "x" }] }],
+    });
+    const unfinished = run(["publish", ID, ...TO]).gh[0]!.body!;
+    expect(unfinished).toContain("1 review(s) did not finish.");
+    expect(unfinished).toContain(`\`mc report ${ID}\` in Mission Control on the owner's PC.`);
+    expect(unfinished).not.toContain("report.md");
+  });
+
+  it("R5-4: writes the singular for one finished feature, when it is tested and when the rest were not, and the plural otherwise", () => {
+    const world = setup({ features: [{ id: "a", title: "A", status: "done", frozenTests: [{ path: "t", sha256: "0" }] }] });
+    expect(run(["publish", ID, ...TO]).gh[0]!.body!).toContain("for 1 of 1 finished feature. A feature counts as finished only when its tests and the app's own checks pass.");
+    writeMission(world, { features: [{ id: "a", title: "A", status: "done", frozenTests: [] }] });
+    expect(run(["publish", ID, ...TO]).gh[0]!.body!).toContain("for 0 of 1 finished feature. A feature counts");
+    writeMission(world, { features: [{ id: "a", title: "A", status: "done", frozenTests: [{ path: "t", sha256: "0" }] }, { id: "b", title: "B", status: "done", frozenTests: [] }] });
+    expect(run(["publish", ID, ...TO]).gh[0]!.body!).toContain("for 1 of 2 finished features. A feature counts");
+    writeMission(world, { features: [{ id: "a", title: "A", status: "done", mode: "review", frozenTests: [] }] });
+    expect(run(["publish", ID, ...TO]).gh[0]!.body!).toContain("for 0 of 1 finished feature. The rest were not checked by tests.");
+    writeMission(world, { status: "partial", features: [{ id: "a", title: "A", status: "done", frozenTests: [{ path: "t", sha256: "0" }] }, { id: "b", title: "B", status: "blocked" }] });
+    expect(run(["publish", ID, ...TO]).gh[0]!.body!).toContain("for 1 of 1 finished feature.");
   });
 
   it("puts the first lines of the report in the body, without the steps for this PC and without pictures, in a fence the text can't close", () => {
@@ -1105,11 +1200,37 @@ describe("publish: what it refuses, with a plain sentence for each, and what sta
     ["queued", /is not finished \(its state is "queued"\), so I did not publish it/],
     ["running", /is not finished \(its state is "running"\)/],
     ["waiting", /is not finished \(its state is "waiting"\)/],
-    ["stopped", /is not finished \(its state is "stopped"\)/],
+    ["stopped", /is paused and not finished, so I did not publish it\. It carries on with the next run\. Only a finished or partly finished mission can be published\. See where it is with: mc status/],
     ["failed", /stopped and needs your help, so I did not publish it\. Read what it needs with: mc report test-dark-mode/],
   ])("a %s mission", (status, message) => {
     const world = setup({ status });
     expectRefused(run(["publish", ID]), message, world);
+  });
+
+  it("R5-3: a mission that waits for the owner's check says so, in plain words, and gives the raw state no place", () => {
+    const waiting = { status: "stopped", stage: "features", checkpoint: { id: "plan#1", scope: "plan", kind: "plan", round: 1, state: "pending", parkedAt: "2000-01-01T00:00:00.000Z", look: { headline: "x", lines: [] } } };
+    const world = setup(waiting);
+    const r = run(["publish", ID]);
+    expectRefused(r, /“Dark mode” is waiting for your check, so I did not publish it\. Only a finished or partly finished mission can be published\. See what it waits for with: mc status/, world);
+    expect(r.stderr).not.toContain("stopped");
+    expect(r.stderr).not.toContain("its state is");
+    // publish-preview refuses in the same words
+    const preview = run(["publish-preview", ID]);
+    expect(preview.status).toBe(1);
+    expect(preview.stderr).toContain("“Dark mode” is waiting for your check, so I did not publish it.");
+    expect(preview.stderr).not.toContain("stopped");
+    // a check that was answered but not yet carried on is still a mission that is not finished: it is paused until the next run
+    writeMission(world, { ...waiting, checkpoint: { ...waiting.checkpoint, state: "answered" } });
+    expectRefused(run(["publish", ID]), /“Dark mode” is paused and not finished, so I did not publish it\. It carries on with the next run\./, world);
+  });
+
+  it("R5-3: a mission that is only paused says so, and the finished one that still holds an old check is not refused for it", () => {
+    const world = setup({ status: "stopped" });
+    const r = run(["publish", ID]);
+    expectRefused(r, /“Dark mode” is paused and not finished, so I did not publish it\. It carries on with the next run\. Only a finished or partly finished mission can be published\. See where it is with: mc status/, world);
+    expect(r.stderr).not.toContain("its state is");
+    writeMission(world, { status: "done", stage: "complete", checkpoint: { id: "plan#1", scope: "plan", kind: "plan", round: 1, state: "pending", parkedAt: "2000-01-01T00:00:00.000Z", look: { headline: "x", lines: [] } } });
+    expect(run(["publish-preview", ID]).status).toBe(0);
   });
 
   it("a state it does not know", () => {

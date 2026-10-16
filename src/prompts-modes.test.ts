@@ -71,6 +71,16 @@ describe("prompts/maker.md and prompts/checker.md", () => {
     expect(files.checker).toContain("Quote files, never pictures.");
   });
 
+  it("R3b-3: the checker is told to say in a note when the work changed a file that none of the checks mention", () => {
+    expect(files.checker).toContain("- If the work changed a file that none of the checks mention, say so in `notes`, and name the file.");
+    // it sits in the list of how to judge, next to the rule about problems outside the list, and is the same text as the design document's
+    expect(files.checker.indexOf("Do not add checks of your own.")).toBeLessThan(files.checker.indexOf("If the work changed a file that none of the checks mention"));
+    expect(files.checker.indexOf("If the work changed a file that none of the checks mention")).toBeLessThan(files.checker.indexOf("## Pictures"));
+    expect(readFileSync(join(packageRoot(), "docs", "modes-spec.md"), "utf8")).toContain("- If the work changed a file that none of the checks mention, say so in `notes`, and name the file.");
+    // the maker's prompt is not changed by it
+    expect(files.maker).not.toContain("none of the checks mention");
+  });
+
   it("are not the prompts of the five roles", () => {
     for (const role of ["architect", "engineer", "test_author", "reviewer", "scout"] as const) {
       expect(loadRolePrompt(role)).not.toBe(files.maker);
@@ -293,6 +303,18 @@ describe("the briefs of a mission that has a mode feature", () => {
     expect(reportProsePrompt(withMode, "facts")).toContain("Say how each feature was checked exactly as the facts say. Never say that tests passed for a feature whose line says it was checked another way.");
     expect(reportProsePrompt(mission({ features: [feature({ status: "done" })] }), "facts")).not.toContain("Say how each feature was checked");
     expect(reportProsePrompt(withMode, "facts")).toBe(reportProsePrompt(withMode, "facts"));
+  });
+
+  it("R3b-2: the report writer of a mission with a mode feature is told to say nothing about how a page was looked at beyond the facts, and the plain one is not told", () => {
+    const withMode = mission({ features: [feature({ ...modeSpec.features[0]!, status: "done", frozenTests: [] })] });
+    const rule = "Say nothing about how a page was looked at, or whether it was opened in a browser, beyond what the facts say.";
+    expect(reportProsePrompt(withMode, "facts")).toContain(rule);
+    // a feature that is not done does not count, as for the rule before it
+    expect(reportProsePrompt(mission({ features: [feature({ ...modeSpec.features[0]!, status: "blocked", frozenTests: [] })] }), "facts")).not.toContain(rule);
+    // a mission with no mode feature: the brief is the one it always had, byte for byte (the golden file is the one made at the end of wave 1)
+    const plain = mission({ features: [feature({ status: "done" })] });
+    expect(reportProsePrompt(plain, "facts")).not.toContain("a page was looked at");
+    expect(reportProsePrompt(plain, "facts")).not.toContain("Say how each feature was checked");
   });
 
   it("no new brief speaks of a night or a morning", () => {

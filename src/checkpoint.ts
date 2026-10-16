@@ -342,13 +342,38 @@ export function planReviewShort(review: PlanReview): string {
   }
 }
 
-/** " It asked: a; b; c and 2 more." (sentences that end in a full stop follow each other without the semicolon). The points are AI-written text, so each goes through `shown`. */
+/** The longest answer of the plan reviewer that is shown whole. A longer one is cut at the end of a sentence (see `issueShown`). */
+export const ISSUE_MAX_CHARS = 400;
+/** A sentence end earlier than this is not worth cutting at: a single short sentence would be left (the cut is then made at a word). */
+const ISSUE_SENTENCE_MIN = 60;
+
+/**
+ * A point the plan reviewer made, made safe to show on one line and kept whole up to `max` characters. A longer one is cut at the end of the
+ * last sentence that fits and ends with an ellipsis (the result is never longer than `max`). When no sentence ends in time, it is cut at a
+ * space. It is not cut in the middle of a word (real runs R3b and R4 showed "... the single fi…." and "... is checked by tests w….").
+ */
+export function issueShown(text: string, max = ISSUE_MAX_CHARS): string {
+  const flat = oneLine(text);
+  if (flat.length <= max) return flat;
+  let end = -1;
+  for (let i = max - 3; i >= ISSUE_SENTENCE_MIN; i--) {
+    if (/[.!?]/u.test(flat.charAt(i)) && flat.charAt(i + 1) === " ") {
+      end = i + 1;
+      break;
+    }
+  }
+  if (end > 0) return `${flat.slice(0, end)} …`;
+  const space = flat.lastIndexOf(" ", max - 1);
+  return `${flat.slice(0, space > 0 ? space : max - 1).trimEnd()}…`;
+}
+
+/** " It asked: a; b; c and 2 more." (sentences that end in a full stop follow each other without the semicolon). The points are AI-written text, so each goes through `issueShown`. */
 function asked(issues: string[]): string {
   if (issues.length === 0) return "";
-  const points = issues.slice(0, 3).map((i) => shown(i));
-  const text = points.reduce((all, point) => (all === "" ? point : `${all}${/[.!?]$/.test(all) ? " " : "; "}${point}`), "");
+  const points = issues.slice(0, 3).map((i) => issueShown(i));
+  const text = points.reduce((all, point) => (all === "" ? point : `${all}${/[.!?…]$/.test(all) ? " " : "; "}${point}`), "");
   const more = issues.length > 3 ? ` and ${issues.length - 3} more` : "";
-  return ` It asked: ${text}${more}${/[.!?]$/.test(`${text}${more}`) ? "" : "."}`;
+  return ` It asked: ${text}${more}${/[.!?…]$/.test(`${text}${more}`) ? "" : "."}`;
 }
 
 /** What the owner did, in the words of the confirmations: "you approved the plan for “Shout”". */

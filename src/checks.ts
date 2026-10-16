@@ -19,6 +19,7 @@ import { join, posix, sep } from "node:path";
 import type { RenderedPage } from "./render.js";
 import type { CheckedResult, Family, FeatureExpect, Finding, RubricOutput } from "./types.js";
 import { cleanAiText, hasWords, isHiddenChar, writtenLength } from "./util/ai-text.js";
+import { rangeNumbers } from "./util/words.js";
 
 // ───────────────────────────── Limits ─────────────────────────────
 
@@ -1456,7 +1457,7 @@ const MSG = {
   deadAnchorElsewhere: (anchor: string, target: string, f: string) => `The link to the heading “#${anchor}” in “${target}” (from “${f}”) does not lead to a heading.`,
   noHeading: (h: string) => `The text has no heading called “${h}”.`,
   noMention: (t: string) => `The visible text does not contain “${t}”.`,
-  words: (n: number, a: number, b: number) => `The new text has ${n} ${sameWords(n, "word", "words")}; it should have ${a} to ${b}.`,
+  words: (n: number, a: number, b: number) => `The new text has ${n} ${sameWords(n, "word", "words")}; it should have ${rangeNumbers(a, b)}.`,
   csvQuote: (f: string) => `“${f}” is not a valid table: a quote mark is opened and never closed.`,
   csvNoHeader: (f: string) => `“${f}” has no header row.`,
   csvEmptyName: (f: string) => `“${f}” has a column with no name in its first row.`,
@@ -1464,7 +1465,7 @@ const MSG = {
   csvRagged: (row: number, f: string, a: number, b: number) => `Row ${row} of “${f}” has ${a} ${sameWords(a, "value", "values")}, but the first row has ${b}.`,
   csvRaggedMore: (k: number, f: string) => `${k} more ${sameWords(k, "row", "rows")} of “${f}” ${sameWords(k, "has", "have")} the wrong number of values.`,
   csvColumns: (f: string, a: string, b: string) => `“${f}” has the columns ${a}, but the plan asks for ${b}.`,
-  csvRows: (f: string, n: number, a: number, b: number) => `“${f}” has ${n} ${sameWords(n, "row", "rows")}; it should have ${a} to ${b}.`,
+  csvRows: (f: string, n: number, a: number, b: number) => `“${f}” has ${n} ${sameWords(n, "row", "rows")}; it should have ${rangeNumbers(a, b)}.`,
   noTable: "The plan asks for a table with columns or rows, but no table file changed.",
   noTitle: (f: string) => `“${f}” has no title.`,
   noViewport: (f: string) => `“${f}” has no setting for phone screens (a viewport line).`,

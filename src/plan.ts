@@ -18,6 +18,7 @@ import { validateSpec } from "./dispatcher.js";
 import { slugify } from "./state.js";
 import type { FeatureExpect, PlanReview, SpecFeature, SpecOutput } from "./types.js";
 import { sha256 } from "./util/fs.js";
+import { rangeOf } from "./util/words.js";
 
 export const PLAN_FIRST_LINE = "mc-plan 1";
 export const PLAN_MAX_CHARS = 30_000;
@@ -684,9 +685,9 @@ function expectLines(expect: unknown): string[] {
   return [
     ...(headings.length > 0 ? [`It has the headings ${quoted(headings)}.`] : []),
     ...(mentions.length > 0 ? [`Its visible text contains the words ${quoted(mentions)}, written exactly like that.`] : []),
-    ...(words ? [`Its new text is ${words[0]} to ${words[1]} words long.`] : []),
+    ...(words ? [`Its new text is ${rangeOf(words[0], words[1], "word")} long.`] : []),
     ...(columns.length > 0 ? [`The table has the columns ${columns.join(", ")}.`] : []),
-    ...(rows ? [`The table has ${rows[0]} to ${rows[1]} rows.`] : []),
+    ...(rows ? [`The table has ${rangeOf(rows[0], rows[1], "row")}.`] : []),
   ];
 }
 
@@ -702,14 +703,94 @@ export function wrapFact(lead: string, body: string, max = WRAP_AT): string[] {
   return wrapLine(body, room).map((part) => `${lead} ${part}`);
 }
 
-/** The plan reviewer's answer and the owner's send-backs, as lines: what changed the plan, and who changed it. */
-export function reviewLines(review: PlanReview | undefined, sendBacks: number): string[] {
-  const lines = review ? wrapLine(planReviewSentence(review)) : [];
+/**
+ * The plan reviewer's answer and the owner's send-backs, as lines: what changed the plan, and who changed it. `wrap` (the default) breaks a long
+ * answer into lines of at most 280 characters, for the owner's look, which is read one line at a time; `mc plan show` passes `false`, and a long
+ * answer stays one line (real run R3b: it was broken in the middle of a sentence, and the second line was not indented).
+ */
+export function reviewLines(review: PlanReview | undefined, sendBacks: number, wrap = true): string[] {
+  const lines = review ? (wrap ? wrapLine(planReviewSentence(review)) : [planReviewSentence(review)]) : [];
   if (sendBacks > 0) {
     const times = sendBacks === 1 ? "once" : sendBacks === 2 ? "twice" : `${sendBacks} times`;
     lines.push(`You sent the plan back ${times}. This is the plan as it stands now.`);
   }
   return lines;
+}
+
+// ───────────────────────────── The checks the team changed ─────────────────────────────
+
+/** The checks of one feature that are not in the plan the leader wrote any more, and the checks that were put in. */
+export interface CheckChange {
+  id: string;
+  title: string;
+  removed: string[];
+  added: string[];
+}
+
+/**
+ * What changed in the checks between the plan the leader wrote (`Mission.plan.spec`) and the plan the team works from (`Mission.spec`), feature by
+ * feature, matched by id. A check counts as the same only when its words are the same; a check that was reworded is one removed and one added
+ * (real run R4: the plan reviewer dropped one check and reworded six, and nothing said so). A feature that only one of the plans has has all of
+ * its checks listed as removed or as added. Reads a damaged plan as far as it can be, and never throws.
+ */
+export function checkChanges(leader: { features?: unknown } | undefined, adopted: { features?: unknown } | undefined): CheckChange[] {
+  const read = (spec: { features?: unknown } | undefined): { id: string; title: string; checks: string[] }[] =>
+    (Array.isArray(spec?.features) ? (spec.features as unknown[]) : [])
+      .filter((f): f is Record<string, unknown> => typeof f === "object" && f !== null)
+      .map((f) => ({
+        id: typeof f.id === "string" ? oneLine(f.id) : "",
+        title: typeof f.title === "string" ? oneLine(f.title) : "",
+        checks: (Array.isArray(f.acceptance) ? (f.acceptance as unknown[]) : []).map((c) => (typeof c === "string" ? oneLine(c) : "")).filter((c) => c !== ""),
+      }));
+  const before = read(leader);
+  const now = read(adopted);
+  const changes: CheckChange[] = [];
+  for (const f of now) {
+    const was = before.find((x) => x.id === f.id);
+    const removed = (was?.checks ?? []).filter((c) => !f.checks.includes(c));
+    const added = f.checks.filter((c) => !(was?.checks ?? []).includes(c));
+    if (removed.length > 0 || added.length > 0) changes.push({ id: f.id, title: f.title || was?.title || f.id, removed, added });
+  }
+  for (const f of before) {
+    if (!now.some((x) => x.id === f.id) && f.checks.length > 0) changes.push({ id: f.id, title: f.title || f.id, removed: f.checks, added: [] });
+  }
+  return changes;
+}
+
+/** "7 checks were removed and 9 checks were added", "1 check was removed", ...; empty when nothing changed. */
+export function checkChangeSummary(changes: readonly CheckChange[]): string {
+  const removed = changes.reduce((n, c) => n + c.removed.length, 0);
+  const added = changes.reduce((n, c) => n + c.added.length, 0);
+  const count = (n: number, verb: string): string => `${n} ${n === 1 ? "check was" : "checks were"} ${verb}`;
+  const parts = [...(removed > 0 ? [count(removed, "removed")] : []), ...(added > 0 ? [count(added, "added")] : [])];
+  return parts.length === 0 ? "" : `Compared with the plan the leader wrote, ${parts.join(" and ")}.`;
+}
+
+/**
+ * The changed checks, one by one, for each feature: the ones removed and the ones added. "text" is for `mc plan show` (the summary first, then a
+ * list for each feature); "look" is one self-contained line per check, for the owner's check, and has no summary line (`checkChangeSummary` is
+ * shown near the top of the look). Nothing is cut: a long check is wrapped like every other fact.
+ */
+export function checkChangeLines(changes: readonly CheckChange[], style: "text" | "look"): string[] {
+  const out: string[] = [];
+  if (style === "look") {
+    for (const c of changes) {
+      for (const check of c.removed) out.push(...wrapFact(`Check the team removed from “${c.title}”:`, check));
+      for (const check of c.added) out.push(...wrapFact(`Check the team added to “${c.title}”:`, check));
+    }
+    return out;
+  }
+  if (changes.length === 0) return out;
+  out.push(checkChangeSummary(changes));
+  const item = (word: string, check: string): void => {
+    wrapLine(check, WRAP_AT - word.length - 6).forEach((part, i) => out.push(i === 0 ? `  - ${word}: ${part}` : `    ${" ".repeat(word.length + 2)}${part}`));
+  };
+  for (const c of changes) {
+    out.push(`- “${c.title}”${c.id === "" ? "" : ` (id: ${c.id})`}`);
+    for (const check of c.removed) item("Removed", check);
+    for (const check of c.added) item("Added", check);
+  }
+  return out;
 }
 
 /** `text` as lines of at most `max` characters, broken at spaces (a longer word is split). Always at least one line. */

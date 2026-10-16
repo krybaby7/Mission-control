@@ -1,0 +1,129 @@
+{
+ "source": "real run R4 (word-tools, real Claude), mission 2026-10-16-sales-totals; plan = the plan the leader wrote with the plan reviewer answer, spec = the plan the team worked from after the revision",
+ "title": "Sales totals",
+ "request": "In word-tools there is a sales file, data/sales.csv, with the columns Region, Units and Revenue. Add a script that writes reports/totals.csv with one row for each region, giving the total units and the total revenue. Also add a file data/columns.csv that describes each column of the sales file in plain words.",
+ "plan": {
+  "spec": {
+   "appName": "word-tools",
+   "summary": "Adds a script that totals the units and the revenue for each region of the sales file into reports/totals.csv, and a short description of each column of the sales file in data/columns.csv.",
+   "features": [
+    {
+     "id": "region-totals",
+     "title": "Totals for each region",
+     "story": "As the owner I can run one script and get the total units and the total revenue for each region of the sales file.",
+     "acceptance": [
+      "Running the script on the sales file writes the totals file with the header line Region,Units,Revenue and one row for each of the three regions.",
+      "The rows are in alphabetical order: East, then North, then South.",
+      "The East row has 145 units and a revenue of 2900.25.",
+      "The North row has 195 units and a revenue of 3900.50.",
+      "The South row has 110 units and a revenue of 2210.75.",
+      "The units and the revenue of every row equal the sums of that region's rows in the sales file.",
+      "Running the script a second time leaves the totals file exactly as it was."
+     ],
+     "kind": "standard",
+     "deps": []
+    },
+    {
+     "id": "column-notes",
+     "title": "Description of each column",
+     "story": "As the owner I can read in plain words what each column of the sales file means.",
+     "acceptance": [
+      "Every column of the sales file has a row in the description, with a meaning in plain words and an example value.",
+      "Each example value is one that appears in that column of the sales file.",
+      "The description says nothing about a column that the sales file does not have."
+     ],
+     "kind": "standard",
+     "deps": [
+      "region-totals"
+     ],
+     "mode": "owner",
+     "effort": "light",
+     "expect": {
+      "columns": [
+       "Column",
+       "Meaning",
+       "Example"
+      ],
+      "rows": [
+       3,
+       3
+      ]
+     }
+    }
+   ],
+   "assumptions": [
+    "The totals file has one row for each region, in alphabetical order.",
+    "A revenue is written with two decimal places."
+   ],
+   "uiContract": "- The sales file is data/sales.csv and its columns are Region, Units and Revenue.\n- The totals file is reports/totals.csv and its columns are Region, Units and Revenue.\n- The description file is data/columns.csv and its columns are Column, Meaning and Example."
+  },
+  "sha256": "2c29e31b8797640112fa09c90563ce54b24009f816b06a3939d66f0a825bc097",
+  "at": "2026-10-16T03:06:11.488Z",
+  "review": {
+   "outcome": "revised",
+   "issues": [
+    "UI contract: name the script's path and the exact command that runs it (for example `scripts/region_totals.py`, run as `python scripts/region_totals.py` from the repository root, with no arguments, reading data/sales.csv and writing reports/totals.csv). Feature `region-totals` is checked by tests written first, and every criterion starts with \"Running the script\". If the contract doesn't name the script, the tests and the code will be written separately and may not agree on where it lives or how to call it."
+   ]
+  }
+ },
+ "spec": {
+  "appName": "word-tools",
+  "summary": "Adds a script that adds up the units and the revenue for each region in the sales file and saves the results to reports/totals.csv. It also adds data/columns.csv, which explains in plain words what each column of the sales file means.",
+  "features": [
+   {
+    "id": "region-totals",
+    "title": "Totals for each region",
+    "story": "As the owner I can run one script and get the total units and the total revenue for each region of the sales file.",
+    "acceptance": [
+     "Running the script (`node scripts/region-totals.js` from the repository root, no arguments) exits with code 0 and creates reports/totals.csv, creating the reports folder if it does not exist.",
+     "Running the script writes reports/totals.csv whose first line is exactly `Region,Units,Revenue`, followed by exactly three data rows, one for each region.",
+     "Running the script writes the rows in alphabetical order of region: East, then North, then South.",
+     "Running the script writes the East row as exactly `East,145,2900.25`.",
+     "Running the script writes the North row as exactly `North,195,3900.50`.",
+     "Running the script writes the South row as exactly `South,110,2210.75`.",
+     "Running the script produces a file whose full content is exactly `Region,Units,Revenue\\nEast,145,2900.25\\nNorth,195,3900.50\\nSouth,110,2210.75\\n` (lines separated by \\n, ending with one trailing newline).",
+     "Running the script leaves data/sales.csv byte-for-byte unchanged.",
+     "Running the script a second time leaves reports/totals.csv byte-for-byte identical to the result of the first run."
+    ],
+    "kind": "standard",
+    "deps": []
+   },
+   {
+    "id": "column-notes",
+    "title": "Description of each column",
+    "story": "As the owner I can read in plain words what each column of the sales file means.",
+    "acceptance": [
+     "Every column of the sales file has a row in the description, with a meaning in plain words and an example value.",
+     "Each example value is one that appears in that column of the sales file.",
+     "The description says nothing about a column that the sales file does not have."
+    ],
+    "kind": "standard",
+    "deps": [
+     "region-totals"
+    ],
+    "mode": "owner",
+    "effort": "light",
+    "expect": {
+     "columns": [
+      "Column",
+      "Meaning",
+      "Example"
+     ],
+     "rows": [
+      3,
+      3
+     ]
+    }
+   }
+  ],
+  "assumptions": [
+   "The repository is a Node.js project that has no dependencies, so I wrote the script in plain JavaScript (Node's built-in modules only) rather than Python. You run it with `node scripts/region-totals.js` from the repository root.",
+   "The script always reads data/sales.csv and writes reports/totals.csv. It takes no arguments and creates the reports folder if it is missing.",
+   "The totals file has one row for each region, sorted alphabetically (East, North, South).",
+   "Units are written as whole numbers. Revenue is always written with two decimal places (for example 3900.50).",
+   "Running the script again overwrites reports/totals.csv with the same content. It never changes data/sales.csv.",
+   "The README is not updated, because the request didn't ask for it."
+  ],
+  "uiContract": "There is no web UI. This change is a command-line script plus two CSV files.\n\nScript\n- Path: scripts/region-totals.js (an ES module, since package.json has \"type\": \"module\"). It uses only Node built-ins such as node:fs and node:path. No npm dependencies.\n- Command: `node scripts/region-totals.js`, run from the repository root with no arguments. It exits with code 0 on success.\n- Input: data/sales.csv, resolved relative to the repository root (the script may resolve it from its own location, e.g. path.join(dirname(fileURLToPath(import.meta.url)), '..')). The script must never modify this file.\n- Output: reports/totals.csv, under the repository root. The script creates the reports/ directory if it is missing and overwrites any existing file.\n- The script must run when it is executed directly. It does not need to export anything.\n\nSales file (existing, unchanged): data/sales.csv\n- Header: Region,Units,Revenue\n- Regions present: North, South, East. Units are integers. Revenue has two decimals.\n\nTotals file: reports/totals.csv\n- Header line: Region,Units,Revenue\n- One row per distinct region, sorted alphabetically by Region.\n- Units: the integer sum, with no decimals. Revenue: the sum, formatted with exactly two decimals (toFixed(2), computed so that float error doesn't change the result, e.g. sum in cents).\n- Lines are separated by \\\n, with a single trailing \\\n, no quoting and no spaces.\n- The exact expected content for the current data/sales.csv:\nRegion,Units,Revenue\nEast,145,2900.25\nNorth,195,3900.50\nSouth,110,2210.75\n\nTests\n- Tests for the script go in scripts/region-totals.test.js and use node:test with node:assert/strict, like src/capitalize.test.js. They run the script with child_process (execFileSync(process.execPath, ['scripts/region-totals.js'], { cwd: repoRoot })) and then read reports/totals.csv.\n\nColumn description file: data/columns.csv\n- Header: Column,Meaning,Example\n- Exactly three data rows, one for each sales column, in the order Region, Units, Revenue.\n- Meaning: a short plain-language sentence. Quote it with double quotes if it contains a comma.\n- Example: a value that actually appears in that column of data/sales.csv (e.g. North, 120, 2400.50)."
+ }
+}

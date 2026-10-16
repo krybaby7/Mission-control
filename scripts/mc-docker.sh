@@ -104,6 +104,23 @@ function plain(value, max) {
   }
   return Array.from(text.replace(/\s+/g, " ").trim()).slice(0, max).join("");
 }
+// A line longer than `max` characters is cut at the end of the last sentence that fits, or else at the last space, and ends with "..." (the
+// result is at most `max` characters, and a word is not cut in the middle).
+function cutLine(text, max) {
+  const chars = Array.from(text);
+  if (chars.length <= max) return text;
+  const window = chars.slice(0, max - 3);
+  let end = -1;
+  for (let i = window.length - 2; i >= 80; i--) {
+    if (/[.!?]/.test(window[i]) && window[i + 1] === " ") {
+      end = i + 1;
+      break;
+    }
+  }
+  if (end > 0) return window.slice(0, end).join("") + " ...";
+  const space = window.lastIndexOf(" ");
+  return (space > 0 ? window.slice(0, space) : window.slice(0, max - 3)).join("").replace(/\s+$/, "") + "...";
+}
 // One line of a report: like plain, but the spaces inside stay as they are (tables and lists keep their shape).
 function reportLine(value) {
   let text = "";
@@ -113,7 +130,7 @@ function reportLine(value) {
     else if (isControl(cp)) text += " ";
     else if (!isInvisible(cp)) text += ch;
   }
-  return Array.from(text.replace(/\s+$/, "")).slice(0, 300).join("");
+  return cutLine(text.replace(/\s+$/, ""), 300);
 }
 
 const home = process.env.MC_HOME || path.join(os.homedir(), ".mission-control");
@@ -152,6 +169,10 @@ for (const f of features.filter((x) => x.status !== "done").slice(0, 20)) put("o
 if (m.baselineBroken === true) put("baseline_broken", "1");
 const notes = Array.isArray(m.notes) ? m.notes : [];
 put("unfinished_reviews", notes.filter((n) => typeof n === "string" && /^The review of .* did not finish/.test(n)).length);
+// The review notes that were left open: the ones the report lists under "Review notes" (the copy of the report below does not reach that far).
+put("open_notes", features.reduce((n, f) => n + (Array.isArray(f.openFindings) ? f.openFindings.length : 0), 0));
+// A mission that stopped to wait for the owner's check (the plan, a feature or the finished app) says so; one that is only paused does not.
+if (m.checkpoint && typeof m.checkpoint === "object" && m.checkpoint.state === "pending" && m.stage !== "complete") put("waiting", "1");
 
 const KINDS = ["plan", "feature", "final"];
 for (const kind of (Array.isArray(m.checkpoints) ? m.checkpoints : []).filter((k) => KINDS.includes(k)).slice(0, 3)) put("asked", kind);
@@ -890,7 +911,7 @@ read_mission_facts() {
 # Sets the F_* variables from FACTS_SCRIPT's lines. A value is data: it is only compared, counted and checked later.
 parse_mission_facts() {
   F_ID="" F_KIND="" F_STATUS="" F_TITLE="" F_REPO="" F_BASE="" F_BRANCH="" F_BASESHA="" F_PLAN=""
-  F_TOTAL=0 F_DONE=0 F_TESTED=0 F_MODES=0 F_UNFINISHED_REVIEWS=0 F_BASELINE_BROKEN="" F_CHECKED=""
+  F_TOTAL=0 F_DONE=0 F_TESTED=0 F_MODES=0 F_UNFINISHED_REVIEWS=0 F_OPEN_NOTES=0 F_WAITING="" F_BASELINE_BROKEN="" F_CHECKED=""
   F_OPEN=() F_ASKED=() F_ANSWERS=() F_REPORT=()
   local line key rest
   while IFS= read -r line; do
@@ -915,6 +936,8 @@ parse_mission_facts() {
       features_modes) F_MODES="$rest" ;;
       checked) F_CHECKED="$rest" ;;
       unfinished_reviews) F_UNFINISHED_REVIEWS="$rest" ;;
+      open_notes) F_OPEN_NOTES="$rest" ;;
+      waiting) F_WAITING="$rest" ;;
       baseline_broken) F_BASELINE_BROKEN="$rest" ;;
       open) F_OPEN+=("$rest") ;;
       asked) F_ASKED+=("$rest") ;;
@@ -927,7 +950,7 @@ parse_mission_facts() {
     greenfield | feature) ;;
     *) F_KIND="" ;;
   esac
-  for key in F_TOTAL F_DONE F_TESTED F_MODES F_UNFINISHED_REVIEWS; do
+  for key in F_TOTAL F_DONE F_TESTED F_MODES F_UNFINISHED_REVIEWS F_OPEN_NOTES; do
     [[ "${!key}" =~ ^[0-9]{1,6}$ ]] || printf -v "$key" '%s' 0
   done
 }
@@ -964,9 +987,13 @@ write_pull_request_body() {
     printf '\n'
     printf '%s\n' "## What was checked"
     printf '\n'
-    local by_reading=""
+    local by_reading="" finished_word="finished features"
     if [ "$F_DONE" -gt 0 ] && [ "$F_MODES" -gt 0 ]; then
       by_reading=1
+    fi
+    # "1 of 1 finished feature", "1 of 3 finished features": the noun follows the number of finished features.
+    if [ "$F_DONE" -eq 1 ]; then
+      finished_word="finished feature"
     fi
     if [ "$F_DONE" -eq 0 ]; then
       printf '%s\n' "- Tests: no feature was finished, so there is no test result to show."
@@ -974,14 +1001,14 @@ write_pull_request_body() {
       # Some finished features were checked by a second AI and not by tests: no sentence may claim a test for them (spec 10.3).
       local checked_text
       checked_text="$(body_safe "${F_CHECKED#Checked: }")"
-      printf '%s\n' "- Tests: the team wrote tests before the code for $F_TESTED of $F_DONE finished features. The rest were not checked by tests. The Checked line below says how each was checked."
+      printf '%s\n' "- Tests: the team wrote tests before the code for $F_TESTED of $F_DONE $finished_word. The rest were not checked by tests. The Checked line below says how each was checked."
       if [ "${F_CHECKED:0:9}" = "Checked: " ] && [ -n "$checked_text" ]; then
         printf '%s\n' "- Checked: $checked_text"
       else
         printf '%s\n' "- Checked: the report says how each feature was checked."
       fi
     else
-      printf '%s\n' "- Tests: the team wrote tests before the code for $F_TESTED of $F_DONE finished features. A feature counts as finished only when its tests and the app's own checks pass."
+      printf '%s\n' "- Tests: the team wrote tests before the code for $F_TESTED of $F_DONE $finished_word. A feature counts as finished only when its tests and the app's own checks pass."
     fi
     if [ -n "$F_BASELINE_BROKEN" ]; then
       if [ -z "$by_reading" ]; then
@@ -999,7 +1026,15 @@ write_pull_request_body() {
       fi
       printf '%s\n' "- Review: a separate AI reviewer reads each feature before it is added. $F_UNFINISHED_REVIEWS review(s) did not finish. Those features were added after $added_after."
     else
-      printf '%s\n' "- Review: a separate AI reviewer reads each feature before it is added. The first lines of the report are below. The whole report, with what the reviewers left open, is in the mission's report.md."
+      printf '%s\n' "- Review: a separate AI reviewer reads each feature before it is added. The first lines of the report are below. The whole report, with what the reviewers left open, is in Mission Control on the owner's PC: \`mc report $F_ID\`."
+    fi
+    # The copy of the report below is cut short, so the notes the reviewers left open are counted here, in a line of their own.
+    if [ "$F_OPEN_NOTES" -eq 0 ]; then
+      printf '%s\n' "- Open review notes: the reviewers left none open."
+    elif [ "$F_OPEN_NOTES" -eq 1 ]; then
+      printf '%s\n' "- Open review notes: the reviewers left 1 note open. The full report lists it: \`mc report $F_ID\` in Mission Control on the owner's PC."
+    else
+      printf '%s\n' "- Open review notes: the reviewers left $F_OPEN_NOTES notes open. The full report lists them: \`mc report $F_ID\` in Mission Control on the owner's PC."
     fi
     local -a stops=() unanswered=()
     local kind_name answered
@@ -1226,6 +1261,16 @@ publish_mission() {
   case "$F_STATUS" in
     done | partial) ;;
     failed) die_lines "“$title” stopped and needs your help, so I did not publish it." "Read what it needs with: mc report $id" ;;
+    # "stopped" is the engine's own word: say what it means. Waiting for the owner's check, or paused until the next run (real run R5).
+    stopped)
+      if [ -n "$F_WAITING" ]; then
+        die_lines "“$title” is waiting for your check, so I did not publish it." \
+          "Only a finished or partly finished mission can be published. See what it waits for with: mc status"
+      else
+        die_lines "“$title” is paused and not finished, so I did not publish it." \
+          "It carries on with the next run. Only a finished or partly finished mission can be published. See where it is with: mc status"
+      fi
+      ;;
     *) die_lines "“$title” is not finished (its state is \"$(shown "$F_STATUS")\"), so I did not publish it." \
       "Only a finished or partly finished mission can be published. See where it is with: mc status" ;;
   esac

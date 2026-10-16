@@ -775,3 +775,68 @@ describe("describeEvent: the three new events", () => {
     }
   });
 });
+
+// ───────────────────────────── The real run R4 again: a table of three rows, and a plan the plan reviewer changed ─────────────────────────────
+
+describe("mc plan with the plan of the real run R4", () => {
+  const R4 = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "modes", "real-r45");
+  const LEADER = readFileSync(join(R4, "r4-leader-plan.txt"), "utf8");
+  const REAL = JSON.parse(readFileSync(join(R4, "r4-plan-and-spec.json"), "utf8")) as { plan: { review: NonNullable<Mission["plan"]>["review"] }; spec: Mission["spec"] };
+
+  /** The folder name the real plan names: the apps folder of the test home has to hold it. */
+  async function realApp(): Promise<void> {
+    await appFolder("word-tools");
+  }
+
+  it("R4-4: says exactly 3 rows in the preview, in the queue output and in plan show, never 3 to 3", async () => {
+    await realApp();
+    expect(await mc(["plan", "preview", "-"], LEADER)).toBe(0);
+    expect(out).toContain("   - The table has exactly 3 rows.");
+    expect(out).not.toContain("3 to 3");
+    expect(await mc(["plan", "queue", "-"], LEADER)).toBe(0);
+    expect(out).toContain("   - The table has exactly 3 rows.");
+    const m = store().list()[0] as Mission;
+    expect(await mc(["plan", "show", m.id])).toBe(0);
+    expect(out).toContain("   - The table has exactly 3 rows.");
+    expect(out).not.toContain("3 to 3");
+  });
+
+  it("R4-2 and R3b-1: plan show lists the checks the team removed and added, and prints the plan reviewer's answer on one line", async () => {
+    await realApp();
+    await mc(["plan", "queue", "-"], LEADER);
+    const m = store().list()[0] as Mission;
+    // the way gate A leaves a mission whose plan it revised: the team's plan is the revision, the leader's plan is kept as it was
+    m.spec = REAL.spec as NonNullable<Mission["spec"]>;
+    m.plan = { ...(m.plan as NonNullable<Mission["plan"]>), review: REAL.plan.review };
+    store().save(m);
+    expect(await mc(["plan", "show", m.id])).toBe(0);
+    const lines = out.split("\n");
+    const at = lines.findIndex((l) => l.startsWith("The team's plan reviewer asked for changes"));
+    // the answer is one line, however long, so the terminal wraps it and nothing is broken in the middle of a sentence
+    expect(at).toBe(2);
+    expect(lines[at]).toContain("UI contract: name the script's path and the exact command that runs it");
+    expect(lines[at]!.length).toBeGreaterThan(280);
+    expect(lines[at]).toMatch(/starts with "Running the script"\. …$/);
+    expect(lines[at + 1]).toBe("Compared with the plan the leader wrote, 7 checks were removed and 9 checks were added.");
+    expect(lines[at + 2]).toBe("- “Totals for each region” (id: region-totals)");
+    expect(lines).toContain("  - Removed: The units and the revenue of every row equal the sums of that region's rows in the sales file.");
+    expect(lines).toContain("  - Added: Running the script leaves data/sales.csv byte-for-byte unchanged.");
+    expect(lines.filter((l) => l.startsWith("  - Removed: "))).toHaveLength(7);
+    expect(lines.filter((l) => l.startsWith("  - Added: "))).toHaveLength(9);
+    // the feature the plan reviewer left alone has no line, and the plan itself follows after a blank line
+    expect(lines.slice(at, lines.indexOf("")).join("\n")).not.toContain("Description of each column");
+    expect(lines[lines.indexOf("") + 1]).toMatch(/^You asked: /);
+  });
+
+  it("says nothing of changed checks for a plan the team kept as it was", async () => {
+    await realApp();
+    await mc(["plan", "queue", "-"], LEADER);
+    const m = store().list()[0] as Mission;
+    m.spec = m.plan?.spec as NonNullable<Mission["spec"]>;
+    m.plan = { ...(m.plan as NonNullable<Mission["plan"]>), review: { outcome: "approved", issues: [] } };
+    store().save(m);
+    expect(await mc(["plan", "show", m.id])).toBe(0);
+    expect(out).toContain("The team's plan reviewer read it and asked for no changes.\n\nYou asked: ");
+    expect(out).not.toMatch(/Compared with the plan|Removed:|Added:/);
+  });
+});

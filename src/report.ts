@@ -99,25 +99,30 @@ function noneCheckedByTests(m: Pick<Mission, "features">): boolean {
 const DOCUMENT_FILE = /\.(?:md|markdown|txt|rst|adoc)$/iu;
 /** A file that is looked at in a browser: a page. */
 const PAGE_FILE = /\.html?$/iu;
+/** A file that is opened as it is: a data file (a table, a list of values), a picture or a PDF. Not a page, and not a file of code (real run R4: a table). */
+const DATA_FILE = /\.(?:csv|tsv|json|jsonl|ndjson|ya?ml|xml|pdf|png|jpe?g|gif|webp|svg)$/iu;
 /** A list of changed files this long may have been cut (the engine lists at most ten): it is not known to be all of them. */
 const FILE_LIST_CAP = 10;
 
-/** What the owner opens when the work is documents and pages only (see `openFilesOf`). */
+/** What the owner opens when the work is documents, pages and data files only (see `openFilesOf`). */
 interface OpenFiles {
   files: string[];
   /** Every file is a page: it is opened in a browser. */
   pages: boolean;
+  /** The files that are pages, when there are pages among other files: those are opened in a browser, the others in the app's folder (real run R3b). */
+  pageFiles: string[];
 }
 
-/** The files to open, when `files` is the whole list of changed files and every one of them is a document or a page. Otherwise undefined. */
+/** The files to open, when `files` is the whole list of changed files and every one of them is a document, a page or a data file. Otherwise undefined. */
 function openFilesOf(files: readonly unknown[]): OpenFiles | undefined {
   const names = [...new Set(files.filter((f): f is string => typeof f === "string" && f !== ""))];
   if (names.length === 0 || files.length >= FILE_LIST_CAP) return undefined;
-  if (!names.every((f) => DOCUMENT_FILE.test(f) || PAGE_FILE.test(f))) return undefined;
-  return { files: names, pages: names.every((f) => PAGE_FILE.test(f)) };
+  if (!names.every((f) => DOCUMENT_FILE.test(f) || PAGE_FILE.test(f) || DATA_FILE.test(f))) return undefined;
+  const pageFiles = names.filter((f) => PAGE_FILE.test(f));
+  return { files: names, pages: pageFiles.length === names.length, pageFiles };
 }
 
-/** The files of the finished mission, when it is documents and pages only and no test checks any feature: what the owner opens. */
+/** The files of the finished mission, when it is documents, pages and data files only and no test checks any feature: what the owner opens. */
 function filesToOpen(m: Mission): OpenFiles | undefined {
   if (!noneCheckedByTests(m)) return undefined;
   const done = m.features.filter((f) => f.status === "done" && isModeFeature(f));
@@ -151,18 +156,22 @@ export function howToRun(m: Mission, opts: HowToRunOptions = {}): string[] {
  * The sentence that names the files to open, with the Windows path of the app's folder that "How to try it" already uses:
  * Then open docs/USAGE.md in your app folder (in Windows File Explorer: \\wsl.localhost\Ubuntu\home\<your Ubuntu name>\mc-apps\word-tools\docs\USAGE.md).
  * `folder` is the app's folder under ~/mc-apps as seen from Ubuntu, when the container runs and it is there (`appsSubfolder`).
+ * `folderSaid`: the sentence before this one already gave the Windows path of the folder. `lead` starts the sentence.
  */
-function openText(open: OpenFiles, folder: string | undefined): string {
+function openText(open: OpenFiles, folder: string | undefined, folderSaid = false, lead = "Then open"): string {
   const named = open.files.slice(0, 5);
   const more = open.files.length - named.length;
   const list = listWords([...named.map((f) => code(f)), ...(more > 0 ? [`${more} more`] : [])]);
   const where = open.pages ? "in your browser" : "in your app folder";
-  if (folder === undefined) return `Then open ${list} ${where}.`;
+  // A page among other files is opened in a browser, and the sentence says so, for the others are opened in the app's folder (real run R3b).
+  const browser = !open.pages && open.pageFiles.length > 0 ? ` Open ${listWords(open.pageFiles.slice(0, 3).map((f) => code(f)))} in your browser.` : "";
+  // Several files: the Windows path of the app's folder is not written twice when the sentence before this one already gave it (real run R3b).
+  if (folder === undefined || (folderSaid && open.files.length > 1)) return `${lead} ${list} ${where}.${browser}`;
   const windows = `\\\\wsl.localhost\\Ubuntu\\home\\<your Ubuntu name>\\mc-apps\\${folder.replaceAll("/", "\\")}`;
   const first = open.files[0] ?? "";
   return open.files.length === 1
-    ? `Then open ${list} ${where} (in Windows File Explorer: ${code(`${windows}\\${first.replaceAll("/", "\\")}`)}).`
-    : `Then open ${list} ${where} (in Windows File Explorer, the app's folder is ${code(windows)}).`;
+    ? `${lead} ${list} ${where} (in Windows File Explorer: ${code(`${windows}\\${first.replaceAll("/", "\\")}`)}).`
+    : `${lead} ${list} ${where} (in Windows File Explorer, the app's folder is ${code(windows)}).${browser}`;
 }
 
 /** "npm run dev" or "npm start" when the app's package.json has that script; best effort, never throws. */
@@ -263,7 +272,9 @@ export function buildReportFacts(m: Mission, usage: UsageRecord[]): string {
 /** For a mission that is documents and pages only: what is opened after the steps (the fact sheet has no Markdown, so the files are named plainly). */
 function openFact(m: Mission): string[] {
   const open = filesToOpen(m);
-  return open ? [`Then open ${open.files.slice(0, 5).join(", ")} ${open.pages ? "in your browser" : "in your app folder"}. Nothing needs to be run.`] : [];
+  if (!open) return [];
+  const browser = !open.pages && open.pageFiles.length > 0 ? ` Open ${open.pageFiles.slice(0, 3).join(", ")} in your browser.` : "";
+  return [`Then open ${open.files.slice(0, 5).join(", ")} ${open.pages ? "in your browser" : "in your app folder"}.${browser} Nothing needs to be run.`];
 }
 
 function factSection(title: string, items: string[]): string[] {
@@ -275,7 +286,7 @@ function featureFact(m: Mission, f: Feature): string {
   switch (f.status) {
     case "done":
       // A feature no test checked says how it was checked, so the writer of the summary cannot call it tested (docs/modes-spec.md 8.5).
-      return !isModeFeature(f) ? `${head}: ${f.story}` : `${head}: ${sentence(f.story)} ${checkedByFact(m, f)}`;
+      return !isModeFeature(f) ? `${head}: ${f.story}` : `${head}: ${sentence(f.story)} ${checkedByFact(m, f)}${picturesFact(f)}`;
     case "blocked": {
       const tries = f.attempts.length > 0 ? ` (after ${plural(f.attempts.length, "attempt")})` : "";
       return `${head}: ${f.blockedReason ?? "no reason recorded"}${tries}`;
@@ -290,6 +301,19 @@ function featureFact(m: Mission, f: Feature): string {
 /** `Checked by: a second AI against your list and approved by you. No tests were written for it.` (the words of the `Checked:` line, without the leading "by "). */
 function checkedByFact(m: Mission, f: Feature): string {
   return `Checked by: ${checkedWords(howChecked(m, f)).replace(/^by /, "")}. No tests were written for it.`;
+}
+
+/**
+ * For a feature that has pictures of its page: that they were taken, and whether the second AI looked at them. Without it the writer of the
+ * summary guesses how a page was looked at, and says that nothing was run in a browser (real run R3b), which the guard then has to throw away.
+ * A feature with no pictures gets no sentence, and so says nothing about pictures.
+ */
+function picturesFact(f: Feature): string {
+  const pictures = f.checked?.pictures;
+  if (typeof pictures?.taken !== "number" || pictures.taken < 1) return "";
+  return pictures.why === "reviewer"
+    ? " Pictures of the page were taken at phone width and desktop width, but the second AI could not look at them."
+    : " Pictures of the page were taken at phone width and desktop width, and the second AI looked at them.";
 }
 
 function findingFact(f: Feature, finding: Finding): string {
@@ -423,7 +447,7 @@ const DENIALS: readonly RegExp[] = [
   /\bnothing(?:\s+\w+){0,2}\s+(?:has\s+been|have\s+been|was|is|got)\s+tested\b/giu,
   /\bnone\s+of\s+(?:it|them|this|these|those|the\s+\w+)\s+(?:has\s+been|have\s+been|was|were|is|are)\s+tested\b/giu,
   new RegExp(String.raw`\b(?:not|never)\s+(?:been\s+)?checked\s+by\s+(?:any\s+)?${DENIAL_QUALIFIER}tests?\b`, "giu"),
-  new RegExp(String.raw`\bnot\s+by\s+(?:any\s+|the\s+)?${DENIAL_QUALIFIER}tests?\b`, "giu"),
+  new RegExp(String.raw`\bnot\s+by\s+(?:any\s+|the\s+|an?\s+)?${DENIAL_QUALIFIER}tests?\b`, "giu"),
   new RegExp(String.raw`\b(?:rather\s+than|instead\s+of)\s+(?:on\s+|by\s+)?(?:the\s+|any\s+)?(?:test\s+results?|${DENIAL_QUALIFIER}tests?)\b`, "giu"),
   /\bno\s+test\s+results?\b/giu,
 ];
@@ -507,7 +531,7 @@ function waitingSection(m: Mission, cp: PendingCheckpoint, container: boolean, r
     `**${oneLine(shown(look.headline))}**`,
     lookBullets(look.lines),
   ].filter((p) => p !== "");
-  if (look.files && look.files.length > 0) parts.push(`Files that changed: ${listWords(look.files.map((p) => code(shown(p))))}.`);
+  parts.push(...changedFilesParts(look));
   const howTo = lookHowTo(m, cp, container);
   if (howTo) parts.push(howTo);
   if (look.screenshots && look.screenshots.length > 0) {
@@ -517,14 +541,41 @@ function waitingSection(m: Mission, cp: PendingCheckpoint, container: boolean, r
 }
 
 /**
+ * The facts of a plan the owner reads as one paragraph each: what was asked, the app's name and the summary. Each appears once in the look of a
+ * plan, so a second line that starts with the same lead is the rest of a long one that was wrapped (`wrapFact` starts every wrapped line with its lead, for
+ * the card, which shows one line at a time).
+ */
+const PARAGRAPH_LEADS: readonly string[] = ["You asked:", "App name:", "Summary:"];
+
+/**
+ * The files of a look. A feature checked by reading lists the files it did not create apart from the new ones (`existingFiles`), so the owner
+ * can see that it changed a file an earlier feature made (real run R4). Every other look is one sentence, as it always was.
+ */
+function changedFilesParts(look: PendingCheckpoint["look"]): string[] {
+  const files = Array.isArray(look.files) ? look.files : [];
+  if (files.length === 0) return [];
+  const list = (xs: string[]): string => listWords(xs.map((p) => code(shown(p))));
+  const older = Array.isArray(look.existingFiles) ? files.filter((f) => look.existingFiles?.includes(f)) : [];
+  if (older.length === 0) return [`Files that changed: ${list(files)}.`];
+  const fresh = files.filter((f) => !older.includes(f));
+  return [...(fresh.length > 0 ? [`New in this feature: ${list(fresh)}.`] : []), `Changed, but already there before this feature: ${list(older)}.`];
+}
+
+/**
  * The lines of the owner's look as a list, one bullet to a line. A line that starts with a space goes on with the line before it (a long
  * sentence that was wrapped without a lead of its own): it stays under that bullet, indented as `mc plan show` indents a wrapped line, and
- * is not a bullet of its own (real run R3).
+ * is not a bullet of its own (real run R3). A long paragraph fact that was wrapped with its lead on every line is put back under one bullet, without
+ * the lead again (real run R4: "You asked: ..." was followed by a second bullet "You asked: ...").
  */
 function lookBullets(lines: readonly unknown[]): string {
+  let before: string | undefined; // the paragraph lead of the line before this one
   return lines
     .map((line, i) => {
       const text = String(line);
+      const lead = PARAGRAPH_LEADS.find((l) => text.startsWith(`${l} `));
+      const again = lead !== undefined && lead === before;
+      before = lead;
+      if (again) return `  ${shown(text.slice(lead.length + 1))}`;
       return i > 0 && /^\s/u.test(text) ? `  ${shown(text)}` : `- ${shown(text)}`;
     })
     .join("\n");
@@ -545,8 +596,12 @@ function lookHowTo(m: Mission, cp: PendingCheckpoint, container: boolean): strin
   const branch = cp.look.branch;
   if (cp.kind === "plan" || !branch || !m.repoPath) return "";
   const steps = [`cd ${shownPath(m.repoPath, container)}`, `git checkout --detach ${shellQuote(branch)}`];
-  // Documents and pages only, and no feature checked by tests: the owner opens the file(s) (real runs R2 and R3); nothing is installed, started or run.
+  // Documents, pages and data files only, and no feature checked by tests: the owner opens the file(s) (real runs R2, R3 and R4); nothing is installed, started or run.
   const open = noneCheckedByTests(m) ? openFilesOf(cp.look.files ?? []) : undefined;
+  // A mission that has a feature checked by tests keeps its steps, which run the project's own checks. When the feature looked at is checked by reading,
+  // those checks do not cover it, so the file to open is named after them, in words of its own (real run R4: a table, and nothing said which file to open).
+  const focus = cp.kind === "feature" ? m.features.find((f) => f.id === cp.featureId) : undefined;
+  const alongside = open === undefined && focus !== undefined && isModeFeature(focus) ? openFilesOf(cp.look.files ?? []) : undefined;
   if (open === undefined) {
     if (m.kind === "greenfield") steps.push("npm install", "npm run dev", "open http://localhost:3000");
     else {
@@ -568,6 +623,7 @@ function lookHowTo(m: Mission, cp: PendingCheckpoint, container: boolean): strin
       : "Open a terminal and run these one at a time:",
     steps.map((cmd, i) => `${i + 1}. ${describeStep(m, cmd)}`).join("\n"),
     ...(open ? [openText(open, appsSubfolder(m, container))] : []),
+    ...(alongside ? [openText(alongside, appsSubfolder(m, container), false, "The project's own checks do not cover this feature. To look at it, open")] : []),
     `When you're done, ${listWords(leave)}.`,
   ].join("\n\n");
 }
@@ -696,7 +752,7 @@ function howToTrySection(m: Mission, container: boolean): string {
   );
   const starts = steps.some((cmd) => cmd === "npm run dev" || cmd === "npm start");
   const open = filesToOpen(m);
-  if (open) parts.push(openText(open, folder));
+  if (open) parts.push(openText(open, folder, true));
   else if (m.kind === "feature") {
     parts.push(starts ? "Then open the address it prints (often http://localhost:3000) in your browser." : "Then start your app the way you usually do.");
   }
@@ -772,7 +828,11 @@ function screenshotCaption(path: string): string {
 }
 
 function decisionsSection(m: Mission, container: boolean): string {
-  return section("Needs your decision", bulletList(decisionItems(m, container), "Nothing. You don't need to do anything."));
+  const items = decisionItems(m, container);
+  // While the team waits for the owner's check, "Nothing. You don't need to do anything." under it would contradict the block above (real run R4).
+  // A mission with no feature checked by reading keeps the section as it was.
+  if (items.length === 0 && isWaitingForCheck(m) && hasModeFeature(m.features)) return "";
+  return section("Needs your decision", bulletList(items, "Nothing. You don't need to do anything."));
 }
 
 /**
@@ -846,7 +906,10 @@ function featureOutcome(f: Feature, m?: Mission): string {
         const h = howChecked(m, f);
         const words = tableWords(h);
         // Unmet checks are the review notes, and the words already say so.
-        return notes > 0 && h.row !== 5 ? `${words} (${plural(notes, "review note")} below)` : words;
+        if (notes === 0 || h.row === 5) return words;
+        // Words that end in a bracket take the count into it: "(6 of 6 passed, 1 review note below)", not two brackets in a row (real run R3b).
+        const below = plural(notes, "review note");
+        return words.endsWith(")") ? `${words.slice(0, -1)}, ${below} below)` : `${words} (${below} below)`;
       }
       return notes > 0 ? `Built and checked (${plural(notes, "review note")} below)` : "Built and checked";
     }

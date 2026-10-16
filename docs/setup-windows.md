@@ -312,7 +312,7 @@ Some work is only right when you look at it yourself: how a page looks, whether 
 For a small, clear job the leader can write the plan itself instead of leaving it to the team's planner (see [Optional: start the leader](#optional-start-the-leader)). It shows you the plan in the chat, with every check word for word and a short plan code, and asks one question, "Queue this plan and start the team on it?", before anything is queued. The team still builds each feature, has it reviewed, and checks the finished app. A feature checked by tests has its tests written first. This part has not been tried on a real PC yet.
 
 - A mission queued this way stops at the plan for your look before anything is built, even though you did not ask for it with `--checkpoint`. You answer it as in the steps above. The leader skips this stop only if you tell it you do not want to look at its plans, it asks one more question ("Skip your look at this plan? ..."), and you say a clear yes.
-- The leader reads the whole plan to you again at the stop. You can also read it yourself, without the leader. In an Ubuntu window, this prints all of it, with the plan code, every check, the choices made for you, and whether the team's plan reviewer or you changed it:
+- The leader reads the whole plan to you again at the stop. You can also read it yourself, without the leader. In an Ubuntu window, this prints all of it, with the plan code, every check, the choices made for you, whether the team's plan reviewer or you changed it, and the checks that were removed or added:
 
   ```
   mc plan show <mission>

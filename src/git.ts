@@ -245,6 +245,22 @@ export class Git {
   }
 
   /**
+   * The same files as `changedFiles`, told apart: `added` are the files that `fromRef` does not have (git status A, and untracked files that
+   * are not ignored); `existing` are the files that it has and that were changed or removed. Repo-relative, sorted, unique.
+   */
+  async changedFilesByKind(cwd: string, fromRef: string): Promise<{ added: string[]; existing: string[] }> {
+    const parts = splitNul(await this.git(cwd, ["diff", "--name-status", "-z", "--no-renames", refArg(fromRef), "--"]));
+    const added = new Set<string>();
+    const existing = new Set<string>();
+    // `-z` prints the status and the path as two entries, one after the other.
+    for (let i = 0; i + 1 < parts.length; i += 2) (parts[i]!.startsWith("A") ? added : existing).add(parts[i + 1]!);
+    for (const path of splitNul(await this.git(cwd, ["ls-files", "--others", "--exclude-standard", "--full-name", "-z", "--", ":/"]))) {
+      if (!existing.has(path)) added.add(path);
+    }
+    return { added: [...added].sort(), existing: [...existing].sort() };
+  }
+
+  /**
    * The files that `commit` changed compared with its first parent: for a merge commit made with `--no-ff`, the files the merged work
    * brought in. Repo-relative, sorted, unique (both sides of a rename). Throws when `commit` has no parent.
    */
