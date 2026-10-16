@@ -2,7 +2,7 @@
 // Pure: it reads the mission views and the cleaned mission files. The words are in vocabulary.ts.
 import { CHECKPOINT_LINES_MAX, CHECKPOINT_SEND_BACK_CAP, MAX_DECISIONS_SHOWN } from "./constants.js";
 import type { MissionFacts } from "./missions.js";
-import { lookWhy, noTestsDone } from "./modes.js";
+import { hasModeFeature, lookWhy, noTestsDone } from "./modes.js";
 import type { CardKind, FeatureView, NeedsYouCard, Said } from "./types.js";
 import { CARD_KINDS } from "./types.js";
 import {
@@ -28,6 +28,16 @@ import {
 const WAITING_ON = /^waiting on ["“](.+)["”], which was (?:blocked|skipped)$/;
 /** `"Title": reason` or `“Title”: reason`: the engine now writes curly marks around a title; missions from before wrote straight ones. */
 const ARCHITECT_BLOCK = /^["\u201c](.+?)["\u201d]: (.*)$/su;
+
+/**
+ * What the card for a red baseline says happened. Three cases (docs/modes-spec.md, 10.3): no feature is checked by a second AI (the words the
+ * card always had); no finished feature is checked by tests, so the sentence must not name tests; and a mixed mission, where one feature was
+ * checked by tests and another by a second AI and no test.
+ */
+function checksHappened(mission: MissionFacts["data"]["mission"]): string {
+  if (mission === null || !hasModeFeature(mission)) return CARD_TEXT.checksHappened;
+  return noTestsDone(mission) ? CARD_TEXT.checksHappenedByReading : CARD_TEXT.checksHappenedMixed;
+}
 
 interface Draft {
   card: NeedsYouCard;
@@ -298,7 +308,7 @@ function cardsOf(x: MissionFacts, names: LeaderNames, rank: number): Draft[] {
         severity: "look",
         fromEarlier: false,
         title: CARD_TEXT.checksTitle(view.title),
-        happened: { text: x.data.mission !== null && noTestsDone(x.data.mission) ? CARD_TEXT.checksHappenedByReading : CARD_TEXT.checksHappened, author: "engine" },
+        happened: { text: checksHappened(x.data.mission), author: "engine" },
         ifNothing: CARD_TEXT.checksIfNothing,
         whatToDo: null,
         tellLeader: LEADER.checks(names, ref),

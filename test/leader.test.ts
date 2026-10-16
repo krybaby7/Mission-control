@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { main } from "../src/cli.js";
-import { LEADER, type LeaderCheck, leaderHelp, makeLeaderNames } from "../src/dashboard/vocabulary.js";
+import { CARD_TEXT, LEADER, type LeaderCheck, leaderHelp, makeLeaderNames } from "../src/dashboard/vocabulary.js";
 import { copyHome } from "./dashboard-helpers.js";
 
 const REPO_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -683,6 +683,22 @@ describe("leader/CLAUDE.md: the pasted sentences", () => {
       help.stopSentence,
     ];
     for (const sentence of sentences) expect(CLAUDE_MD, sentence).toContain(sentence);
+  });
+
+  it("tells the three wordings of the card for a project whose own checks were already failing, and claims the new tests only for the first", () => {
+    const rows = CLAUDE_MD.split("\n").filter((l) => l.startsWith(`| \`${LEADER.checks(names, mission)}\``));
+    expect(rows).toHaveLength(3);
+    const tail = (text: string): string => text.slice(text.indexOf(", so ") + ", so ".length);
+    const mixedSecond = CARD_TEXT.checksHappenedMixed.slice(CARD_TEXT.checksHappenedByReading.length + 1);
+    // The card says "checked by its own new tests only" only where no feature is checked by a second AI.
+    const withOld = rows.filter((r) => r.includes(tail(CARD_TEXT.checksHappened).replace(/^the new work was /, "")));
+    expect(withOld).toHaveLength(1);
+    expect(rows[0]).toBe(withOld[0]);
+    // The others say what the card says for them, word for word.
+    expect(rows[1]).toContain(tail(CARD_TEXT.checksHappenedByReading).replace(/^they /, ""));
+    expect(rows[2]).toContain(`${mixedSecond.charAt(0).toLowerCase()}${mixedSecond.slice(1)}`);
+    expect(rows[1]).not.toContain("new tests only");
+    expect(rows[2]).not.toContain("new tests only");
   });
 
   it("explains how a repeated title is told apart", () => {

@@ -2143,6 +2143,8 @@ export type RubricJudgement =
   | { ok: false; problem: string };
 
 const EVIDENCE_MAX = 300;
+/** The longest file name of a note of the second AI that is kept (after the cleaning that makes it plain). */
+const FILE_NAME_MAX = 200;
 const MIN_EVIDENCE = 12;
 const MIN_QUOTE = 8;
 const MAX_SEEN_READS = 20;
@@ -2150,6 +2152,15 @@ const MAX_SEEN_READS = 20;
 /** Evidence is AI-written, and may quote a hostile file: cleaned by `cleanAiText` (nothing hidden, no picture or link, no web address), one line, at most 300 characters. */
 function cleanEvidence(s: string): string {
   return cleanAiText(s, EVIDENCE_MAX);
+}
+
+/**
+ * The file a note of the second AI names. It is the AI's word, not a path Mission Control checked, so it is made safe like a file name
+ * (hidden characters shown as code points, cut at 80 characters) and then plain like the rest of the AI's words: a picture, a link or a web
+ * address in it becomes words. It is cut at 200 characters, because a web address is longer than the words that stand for it.
+ */
+function cleanFileName(name: string): string {
+  return cleanAiText(plainName(name), FILE_NAME_MAX);
 }
 
 /** `text` as a sentence: it gets a full stop unless it already ends with one (a check the leader wrote usually does), or with `!`, `?` or `…`. */
@@ -2364,7 +2375,7 @@ export function judgeRubric(input: RubricInput): RubricJudgement {
   }
   const minorFindings: Finding[] = [];
   for (const note of answer.notes) {
-    const finding: Finding = { severity: note.severity, file: note.file === null ? null : plainName(note.file), description: cleanEvidence(note.description), suggestedTest: null };
+    const finding: Finding = { severity: note.severity, file: note.file === null ? null : cleanFileName(note.file), description: cleanEvidence(note.description), suggestedTest: null };
     if (note.severity === "major") findings.push(finding);
     else minorFindings.push(finding);
   }

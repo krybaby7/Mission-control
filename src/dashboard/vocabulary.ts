@@ -503,6 +503,9 @@ export const CARD_TEXT = {
   checksHappened: "The project's own checks were already failing before this mission started, so the new work was checked by its own new tests only.",
   // The same card for a mission that has features checked by a second AI and none checked by tests (docs/modes-spec.md, 10.3).
   checksHappenedByReading: "The project's own checks were already failing before this mission started, so they could not be used to judge the new work.",
+  // The same card for a mission with features checked by tests and features checked by a second AI. The second sentence is the one the report and the run note say.
+  checksHappenedMixed:
+    "The project's own checks were already failing before this mission started, so they could not be used to judge the new work. The features checked by tests were judged by tests alone, and the others by Mission Control's own checks and a second AI.",
   checksIfNothing: "Nothing changes. Someone may want to look at the older failures.",
   loginTitle: "One AI needs a new login",
   loginIfNothing:

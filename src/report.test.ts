@@ -1074,6 +1074,101 @@ describe("a report for a mission that has a feature no test checks", () => {
   });
 });
 
+// ───────────────────────────── The file a review note names (finding W2d-R2) ─────────────────────────────
+
+describe("the file a review note names", () => {
+  const checkedAll: Feature["checked"] = {
+    round: 1,
+    reviewer: "claude",
+    results: [{ n: 1, result: "pass", evidence: "e", basis: "text" }],
+    unjudged: 0,
+    scripted: { problems: [], facts: [] },
+    pictures: { taken: 0 },
+  };
+  /** What a markdown reader still treats as markup once the code spans are taken out (a backtick string closes only at a backtick string of the same length). */
+  function outsideCodeSpans(line: string): string {
+    let out = "";
+    let i = 0;
+    while (i < line.length) {
+      if (line[i] !== "`") {
+        out += line[i++];
+        continue;
+      }
+      let j = i;
+      while (line[j] === "`") j++;
+      const run = j - i;
+      let k = j;
+      let close = -1;
+      while (k < line.length) {
+        if (line[k] !== "`") {
+          k++;
+          continue;
+        }
+        let end = k;
+        while (line[end] === "`") end++;
+        if (end - k === run) {
+          close = k;
+          break;
+        }
+        k = end;
+      }
+      if (close < 0) {
+        out += line.slice(i, j);
+        i = j;
+      } else {
+        out += " ";
+        i = close + run;
+      }
+    }
+    return out;
+  }
+  const MARKUP = /!\[|\]\(|https?:\/\/|evil\.example/u;
+  const note = (file: string, description = "A small thing to tidy."): Feature["openFindings"][number] => ({ severity: "minor", file, description, suggestedTest: null });
+  const notesOf = (m: Mission): string[] => sectionText(render(m, { prose: null }), "Review notes").split("\n");
+  const withNote = (file: string, mode: boolean): Mission => {
+    const m = realisticMission();
+    m.status = "done";
+    m.decisionsNeeded = [];
+    m.features = [mode ? feature({ id: "guide", title: "Setup guide", status: "done", acceptance: ["a"], mode: "review", checked: checkedAll, openFindings: [note(file)] }) : feature({ id: "app", title: "The app", status: "done", openFindings: [note(file)] })];
+    return m;
+  };
+
+  it("is put in a code span whose fence is longer than any run of backticks in it, so nothing after it is live markdown", () => {
+    const cases: [string, string][] = [
+      ["src/app/page.tsx", "`src/app/page.tsx`"],
+      ["a`b", "`` a`b ``"],
+      ["a``b", "``` a``b ```"],
+      ["a```b", "```` a```b ````"],
+      ["`edge`", "`` `edge` ``"],
+    ];
+    for (const [file, span] of cases) {
+      const line = notesOf(withNote(file, false)).find((l) => l.includes("A small thing"))!;
+      expect(line, file).toContain(`(in ${span})`);
+    }
+    // The picture and the link of the reported text sit inside the span, so they are not markup: the line with the span taken out holds none.
+    const hostile = "a`` ![p](https://evil.example/p.png) [c](https://evil.example/c) `` b";
+    const line = notesOf(withNote(hostile, false)).find((l) => l.includes("A small thing"))!;
+    expect(line).toContain(`(in \`\`\` ${hostile} \`\`\`)`);
+    expect(MARKUP.test(outsideCodeSpans(line))).toBe(false);
+    // The same text with the old fence (two backticks) is live: the rule above finds it.
+    expect(MARKUP.test(outsideCodeSpans(`(in \`\` ${hostile} \`\`)`))).toBe(true);
+  });
+
+  it("of a feature checked by a second AI is also made plain: no picture, link or web address, and a hidden character shown as a code point", () => {
+    const hostile = "a`` ![p](https://evil.example/p.png) [c](https://evil.example/c) `` b";
+    const m = withNote(hostile, true);
+    const line = notesOf(m).find((l) => l.includes("A small thing"))!;
+    expect(line).toContain("(in ``` a`` p (web address removed) c (web address removed) `` b ```)");
+    expect(MARKUP.test(outsideCodeSpans(line))).toBe(false);
+    expect(MARKUP.test(line)).toBe(false);
+    expect(buildReportFacts(m, [])).toContain("[minor] guide (a`` p (web address removed) c (web address removed) `` b): A small thing to tidy.");
+    const named = notesOf(withNote(`docs/setup.md${String.fromCodePoint(0x202e)}`, true)).find((l) => l.includes("A small thing"))!;
+    expect(named).toContain("(in `docs/setup.md<U+202E>`)");
+    // A feature checked by tests keeps the name it was given: only the span around it is safe.
+    expect(buildReportFacts(withNote(hostile, false), [])).toContain(`[minor] app (${hostile}): A small thing to tidy.`);
+  });
+});
+
 // ───────────────────────────── collectScreenshots ─────────────────────────────
 
 describe("collectScreenshots", () => {

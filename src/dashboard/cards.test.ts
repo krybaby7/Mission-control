@@ -3,6 +3,7 @@ import { copyHome, makeEvent, withLock } from "../../test/dashboard-helpers.js";
 import { buildHome, featureWith, FIN, HOUR, iso, MID, MINUTE, missionAt, runEvents, SECOND, snap } from "../../test/dashboard-kit.js";
 import { MAX_DECISIONS_SHOWN } from "./constants.js";
 import type { NeedsYouCard, Snapshot } from "./types.js";
+import { CARD_TEXT } from "./vocabulary.js";
 import { CARD_KINDS } from "./types.js";
 
 const TAIL = ". “Review notes” and “Technical details” list what the reviewers found.";
@@ -261,6 +262,31 @@ describe("T-CARD: the kinds of card (spec 9.1)", () => {
         tellLeader: 'About the login that expired during "Photo album": <your answer here>',
       }),
     ]);
+  });
+
+  // Finding R1: the sentence of the red-baseline card says what judged the work, so it has one wording for each kind of mission (docs/modes-spec.md, 10.3).
+  it("checks_failing says what judged the work in the words of the mission: tests, a second AI, or both", () => {
+    const sentence = (features: Parameters<typeof featureWith>[2][], statuses: ("done" | "blocked")[]): string | undefined =>
+      cardsOf({ baselineBroken: true, features: features.map((f, i) => featureWith(`f${i}`, statuses[i] ?? "done", f)) }).cards.find((c) => c.kind === "checks_failing")?.happened.text;
+    const OLD = "The project's own checks were already failing before this mission started, so the new work was checked by its own new tests only.";
+    const READING = "The project's own checks were already failing before this mission started, so they could not be used to judge the new work.";
+    const MIXED = `${READING} The features checked by tests were judged by tests alone, and the others by Mission Control's own checks and a second AI.`;
+    // no feature checked by a second AI: the words the card always had
+    expect(sentence([{}, {}], ["done", "done"])).toBe(OLD);
+    expect(sentence([], [])).toBe(OLD);
+    // every feature checked by a second AI, or no finished feature checked by tests: no word of tests
+    expect(sentence([{ mode: "review" }], ["done"])).toBe(READING);
+    expect(sentence([{ mode: "owner" }, { mode: "review" }], ["done", "done"])).toBe(READING);
+    expect(sentence([{}, { mode: "review" }], ["blocked", "done"])).toBe(READING);
+    // one feature checked by tests and finished, another checked by a second AI: the mixed words, which the report says too
+    expect(sentence([{}, { mode: "review" }], ["done", "done"])).toBe(MIXED);
+    expect(sentence([{ mode: "owner" }, {}], ["done", "done"])).toBe(MIXED);
+    expect(CARD_TEXT.checksHappened).toBe(OLD);
+    expect(CARD_TEXT.checksHappenedByReading).toBe(READING);
+    expect(CARD_TEXT.checksHappenedMixed).toBe(MIXED);
+    // only the old words say that the new tests judged the work
+    expect(READING).not.toMatch(/\btests?\b/u);
+    expect(MIXED).not.toContain("new tests");
   });
 
   it("login_needed names both AIs, or says 'One AI' when the wait names none it knows", () => {

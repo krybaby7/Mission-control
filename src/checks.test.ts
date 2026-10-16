@@ -1481,6 +1481,23 @@ describe("judgeRubric", () => {
     expect(JSON.stringify(j)).not.toMatch(/evil\.example|!\[|\]\(/u);
   });
 
+  it("W2d-R2: the file of a note loses pictures, links and web addresses too, and keeps hidden characters shown as code points", () => {
+    const hostileFile = "a`` ![p](https://evil.example/p.png) [c](https://evil.example/c) `` b";
+    const j = ok(judgeRubric(input(answer([], { notes: [{ severity: "major", file: hostileFile, description: "A link is broken." }, { severity: "minor", file: hostileFile, description: "A comma is missing." }, { severity: "minor", file: `docs/setup.md${String.fromCodePoint(0x202e)}`, description: "Another." }] }))));
+    const clean = "a`` p (web address removed) c (web address removed) `` b";
+    expect(j.findings.map((f) => f.file)).toEqual([clean]);
+    expect(j.minorFindings.map((f) => f.file)).toEqual([clean, "docs/setup.md<U+202E>"]);
+    expect(JSON.stringify(j)).not.toMatch(/evil\.example|!\[|\]\(/u);
+    // A bare address is a file name that is not a file: it is made plain too, and the cut at 200 characters holds after the change.
+    const bare = ok(judgeRubric(input(answer([], { notes: [{ severity: "minor", file: `https://evil.example/${"x".repeat(300)}`, description: "d" }] }))));
+    expect(bare.minorFindings[0]!.file).toBe("(web address removed)");
+    const long = ok(judgeRubric(input(answer([], { notes: [{ severity: "minor", file: `${"[a](https://evil.example/c)".repeat(5)}`, description: "d" }] }))));
+    expect(long.minorFindings[0]!.file!.length).toBeLessThanOrEqual(200);
+    // An ordinary file name is untouched.
+    const plain = ok(judgeRubric(input(answer([], { notes: [{ severity: "minor", file: "docs/my notes (2).md", description: "d" }] }))));
+    expect(plain.minorFindings[0]!.file).toBe("docs/my notes (2).md");
+  });
+
   it("V2-10: a quote is still looked for in the files as the second AI wrote it, so cleaning does not change what passes", () => {
     // The quote is real, and the evidence also holds an address: the pass stands.
     const real = ok(judgeRubric(input(answer([{ evidence: "It says “1. Run the installer.” and links to https://evil.example/x" }]))));

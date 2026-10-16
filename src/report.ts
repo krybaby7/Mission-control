@@ -6,6 +6,7 @@ import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
 import { checkedLine, checkedWords, hasModeFeature, howChecked, isModeFeature, tableWords } from "./checked-by.js";
+import { plainName } from "./checks.js";
 import { endState, isCheckpointShape, isWaitingForCheck, localClock, MAX_SEND_BACKS, planReviewShort, sendBacks, shown, subjectOf, waitingWhat, whyStopped } from "./checkpoint.js";
 import { inContainer } from "./config.js";
 import { planOf } from "./state.js";
@@ -224,7 +225,8 @@ function checkedByFact(m: Mission, f: Feature): string {
 }
 
 function findingFact(f: Feature, finding: Finding): string {
-  const where = finding.file ? ` (${finding.file})` : "";
+  const file = findingFile(f, finding);
+  const where = file ? ` (${file})` : "";
   return `[${finding.severity}] ${f.id}${where}: ${findingText(f, finding)}`;
 }
 
@@ -238,6 +240,19 @@ const FINDING_CHARS = 2000;
  */
 function findingText(feature: Feature, finding: Finding): string {
   return isModeFeature(feature) ? cleanAiText(finding.description, FINDING_CHARS) : oneLine(finding.description);
+}
+
+/** The longest file name of a finding the report prints, after it is cleaned. */
+const FILE_CHARS = 200;
+
+/**
+ * The file a finding is about. The note of a second AI names it, so, like the finding's words, it is cleaned once more here for a feature
+ * checked by a second AI: a hidden character is shown as a code point, and a picture, a link or a web address is made plain. Other
+ * findings keep the name they were given.
+ */
+function findingFile(feature: Feature, finding: Finding): string {
+  const file = finding.file ?? "";
+  return isModeFeature(feature) ? cleanAiText(plainName(file), FILE_CHARS) : file;
 }
 
 // ───────────────────────────── The report ─────────────────────────────
@@ -735,7 +750,8 @@ function choicesSection(m: Mission): string {
 
 function reviewNotesSection(m: Mission): string {
   const items = openFindings(m).map(({ feature, finding }) => {
-    const where = finding.file ? ` (in ${code(finding.file)})` : "";
+    const file = findingFile(feature, finding);
+    const where = file ? ` (in ${code(file)})` : "";
     const check = finding.suggestedTest ? ` Suggested check: ${oneLine(finding.suggestedTest)}` : "";
     return `**${oneLine(feature.title)}** · ${SEVERITY_WORD[finding.severity]}: ${findingText(feature, finding)}${where}${check}`;
   });
@@ -892,9 +908,16 @@ function cell(s: string): string {
   return oneLine(s).replace(/\|/g, "\\|");
 }
 
+/**
+ * Inline code. The fence is longer than any run of backticks inside the text, so the text can never close the span early and what follows it
+ * stays inside (a run of two backticks used to end the old two-backtick fence, and the rest of the line was live markdown). Text without a
+ * backtick, and text with single backticks, come out as they always did.
+ */
 function code(s: string): string {
   const text = oneLine(s);
-  return text.includes("`") ? `\`\` ${text} \`\`` : `\`${text}\``;
+  const longestRun = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(longestRun + 1);
+  return longestRun === 0 ? `${fence}${text}${fence}` : `${fence} ${text} ${fence}`;
 }
 
 /** A fenced block whose fence is longer than any backtick run inside the text. */

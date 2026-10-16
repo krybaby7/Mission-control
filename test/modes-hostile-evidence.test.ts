@@ -31,6 +31,9 @@ const ANY_HIDDEN = new RegExp(`[${HIDDEN_CHARS.map((c) => `\\u{${c.toString(16)}
 /** The hostile tail of every piece of evidence: a picture, a link, three kinds of web address, and hidden characters inside words. */
 const HOSTILE = ` re${u(0x202e)}versed${u(0x200b)}zero${u(0x2066)}iso${u(0xfeff)}bom ![chart](https://evil.example/x.png) [click here](http://evil.example/p?a=1) see //evil.example/a and www.evil.example/b or http://127.0.0.1:8080/admin ht${u(0x200b)}tps://hidden.example/h`;
 const QUOTE = "Add your first habit";
+/** A file name of a note that closes a two-backtick code span early and then draws a picture and a link (finding W2d-R2). 69 characters, so it is inside the cut for a file name. */
+const HOSTILE_FILE = "a`` ![p](https://evil.example/p.png) [c](https://evil.example/c) `` b";
+const CLEAN_FILE = "a`` p (web address removed) c (web address removed) `` b";
 
 /** The address and hidden-character marks that must not be found on any surface. */
 const BAD: [string, RegExp][] = [
@@ -65,7 +68,10 @@ function hostileChecker() {
       if (round === 1) results[0] = { ...results[0]!, result: "fail", evidence: `It never says what the reader should see.${HOSTILE}` };
       results[1] = { ...results[1]!, result: "cannot_judge", evidence: `Taste cannot be seen.${HOSTILE}` };
     });
-    (behavior.structured as { notes: unknown[] }).notes = [{ severity: "minor", file: `docs/setup-guide.md${u(0x202e)}`, description: `A small thing to tidy.${HOSTILE}` }];
+    (behavior.structured as { notes: unknown[] }).notes = [
+      { severity: "minor", file: `docs/setup-guide.md${u(0x202e)}`, description: `A small thing to tidy.${HOSTILE}` },
+      { severity: "minor", file: HOSTILE_FILE, description: "A second small thing to tidy." },
+    ];
     return behavior;
   };
 }
@@ -127,10 +133,15 @@ describe("hostile evidence from the second AI", () => {
 
     // The file name of a note keeps its hidden character shown as a code point, as for any file name.
     expect(text("report")).toContain("docs/setup-guide.md<U+202E>");
+    // A file name that closes the code span early and draws a picture and a link is plain words in a code span that it cannot close (W2d-R2).
+    const noteLine = text("report").split("\n").find((l) => l.includes("A second small thing to tidy."));
+    expect(noteLine).toBeDefined();
+    expect(noteLine).toContain(`(in \`\`\` ${CLEAN_FILE} \`\`\`)`);
 
     // The mission file holds the cleaned words, which is what every reader reads.
     const m = w.h.load(run.id);
     const feature = m.features[0] as Feature;
+    expect(feature.openFindings.map((f) => f.file)).toContain(CLEAN_FILE);
     for (const r of feature.checked?.results ?? []) expect(r.evidence).not.toMatch(/evil\.example/u);
     expect(feature.checked?.results[2]?.evidence).toBe(`The file says “${QUOTE}” in docs/setup-guide.md. reversedzeroisobom chart (web address removed) click here (web address removed) see (web address removed) and (web address removed) or (web address removed) (web address removed)`);
   }, 120_000);
@@ -140,7 +151,7 @@ describe("hostile evidence from the second AI", () => {
     const m = w.h.load(run.id) as Mission;
     const feature = m.features[0] as Feature;
     const hostile = `Raw words.${HOSTILE}`;
-    const finding: Finding = { severity: "major", file: null, description: `Check 2 is not met: A check. The second AI found: ${hostile}`, suggestedTest: null };
+    const finding: Finding = { severity: "major", file: HOSTILE_FILE, description: `Check 2 is not met: A check. The second AI found: ${hostile}`, suggestedTest: null };
     feature.openFindings = [finding];
     feature.checked = { ...feature.checked!, results: feature.checked!.results.map((r) => ({ ...r, evidence: hostile })) };
     // A feature checked by tests keeps its finding byte for byte: a reviewer's note may legitimately hold an address.
@@ -151,6 +162,7 @@ describe("hostile evidence from the second AI", () => {
     const report = renderReport(m, { usage: [], screenshots: [], generatedAt: "2026-10-12T09:00:00.000Z" });
     expect(problemsIn("report", report.slice(0, report.indexOf("## Technical details")).replace("See https://docs.example/guide for the API.", ""))).toEqual([]);
     expect(report).toContain("Raw words. reversedzeroisobom chart (web address removed)");
+    expect(report).toContain(`(in \`\`\` ${CLEAN_FILE} \`\`\`)`);
     expect(report).toContain("See https://docs.example/guide for the API.");
     w.h.store.save(m);
     const shown = (await w.mc(["plan", "show", run.id])).out;

@@ -186,6 +186,9 @@ describe("a mixed mission (example C: one feature checked by tests, one by a sec
 describe("a mission whose project's own checks were already failing (a red baseline)", () => {
   /** The words that say the new tests were what judged the work: false for a feature that no test checked. */
   const NEW_TESTS = /only used the new tests|judged by their new tests\.|checked by its own new tests only/;
+  /** The card of the dashboard for a mission with a feature checked by tests and a feature checked by a second AI (the report says the second sentence too). */
+  const MIXED_CARD =
+    "The project's own checks were already failing before this mission started, so they could not be used to judge the new work. The features checked by tests were judged by tests alone, and the others by Mission Control's own checks and a second AI.";
 
   it("example A: the report, the run notes and every other surface say the work was not judged by tests", async () => {
     w = await openWorld({ broken: true });
@@ -211,6 +214,10 @@ describe("a mission whose project's own checks were already failing (a red basel
     expect(c.surfaces.flatMap((s) => commonProblems(s, c.titles))).toEqual([]);
     const names = (line: string): boolean => line.includes(TITLE.notes) || line.includes("column-notes") || /second AI/i.test(line);
     expect(c.surfaces.flatMap((s) => s.lines.filter((l) => names(l) && claimsATest(l, true)).map((l) => `${s.name}: ${l.slice(0, 160)}`))).toEqual([]);
+    // One feature of this mission was checked by a second AI and no test, so no surface may say that the new tests judged the new work (finding R1).
+    for (const s of c.surfaces) expect(s.lines.filter((l) => NEW_TESTS.test(l)), s.name).toEqual([]);
+    // The card of the dashboard says the mixed sentence, like the report (the sentence is the same on both).
+    expect(c.surfaces.find((s) => s.name === "dashboard")?.lines).toContain(MIXED_CARD);
   });
 
   it("example A when the architect finds no command for single files: the mission goes on, and no surface claims a test (the fixer's finding)", async () => {
