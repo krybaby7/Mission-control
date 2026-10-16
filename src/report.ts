@@ -9,6 +9,7 @@ import { checkedLine, checkedWords, hasModeFeature, howChecked, isModeFeature, t
 import { plainName } from "./checks.js";
 import { endState, isCheckpointShape, isWaitingForCheck, localClock, MAX_SEND_BACKS, planReviewShort, sendBacks, shown, subjectOf, waitingWhat, whyStopped } from "./checkpoint.js";
 import { inContainer } from "./config.js";
+import { alsoMadeSentences } from "./later-files.js";
 import { planOf } from "./state.js";
 import type { Attempt, Feature, Finding, Mission, MissionStatus, PendingCheckpoint, Provider, ReportProseOutput, UsageRecord } from "./types.js";
 import { cleanAiText } from "./util/ai-text.js";
@@ -131,6 +132,18 @@ function filesToOpen(m: Mission): OpenFiles | undefined {
 }
 
 /**
+ * The files the owner opens besides trying the app, in a mission that has both kinds of feature: the files of the finished features that are checked
+ * by reading, when every one of them is a document, a page or a data file and all are known (real run R6: the finished report named no file). For a
+ * mission with no mode feature, or with none that tests check, there is none: `filesToOpen` is for that.
+ */
+function filesToOpenAlongside(m: Mission): OpenFiles | undefined {
+  if (!hasModeFeature(m.features) || noneCheckedByTests(m)) return undefined;
+  const done = m.features.filter((f) => f.status === "done" && isModeFeature(f));
+  if (done.length === 0 || done.some((f) => !Array.isArray(f.checked?.files))) return undefined;
+  return openFilesOf(done.flatMap((f) => f.checked?.files ?? []));
+}
+
+/**
  * Shell commands that let the user try the result, or [] when no feature was finished (there is nothing new
  * to try, and a greenfield app may not even exist yet). Greenfield apps use the house Next.js stack. A changed app
  * is started with its own "dev" (or "start") script when its package.json has one, else its checks are run, unless no
@@ -145,11 +158,24 @@ export function howToRun(m: Mission, opts: HowToRunOptions = {}): string[] {
   const reads = filesToOpen(m) !== undefined;
   if (m.kind === "greenfield") return reads ? steps : [...steps, "npm install", "npm run dev", "open http://localhost:3000"];
   if (reads) return steps;
-  if (m.verify?.install) steps.push(m.verify.install);
   const start = startCommand(m.repoPath);
+  // Documents beside code, and nothing to start: the file to open comes first, and the project's own checks are an extra after it (`ownChecksSentence`).
+  if (!start && filesToOpenAlongside(m) !== undefined) return steps;
+  if (m.verify?.install) steps.push(m.verify.install);
   if (start) return [...steps, start];
   if (m.verify?.full && !noneCheckedByTests(m)) steps.push(m.verify.full);
   return steps;
+}
+
+/**
+ * The project's own checks as an extra, in a mission where they do not cover the file that was just named: `about` says so, then how to run them
+ * (the install command first, when there is one). Nothing when the project has no command for them.
+ */
+function ownChecksSentence(m: Mission, about: string): string[] {
+  const full = m.verify?.full;
+  if (!full) return [];
+  const install = m.verify?.install;
+  return [`${about} If you also want to run them, run ${install ? `${code(install)} first, and then ${code(full)}` : code(full)}.`];
 }
 
 /**
@@ -159,9 +185,7 @@ export function howToRun(m: Mission, opts: HowToRunOptions = {}): string[] {
  * `folderSaid`: the sentence before this one already gave the Windows path of the folder. `lead` starts the sentence.
  */
 function openText(open: OpenFiles, folder: string | undefined, folderSaid = false, lead = "Then open"): string {
-  const named = open.files.slice(0, 5);
-  const more = open.files.length - named.length;
-  const list = listWords([...named.map((f) => code(f)), ...(more > 0 ? [`${more} more`] : [])]);
+  const list = namedFiles(open);
   const where = open.pages ? "in your browser" : "in your app folder";
   // A page among other files is opened in a browser, and the sentence says so, for the others are opened in the app's folder (real run R3b).
   const browser = !open.pages && open.pageFiles.length > 0 ? ` Open ${listWords(open.pageFiles.slice(0, 3).map((f) => code(f)))} in your browser.` : "";
@@ -172,6 +196,13 @@ function openText(open: OpenFiles, folder: string | undefined, folderSaid = fals
   return open.files.length === 1
     ? `${lead} ${list} ${where} (in Windows File Explorer: ${code(`${windows}\\${first.replaceAll("/", "\\")}`)}).`
     : `${lead} ${list} ${where} (in Windows File Explorer, the app's folder is ${code(windows)}).${browser}`;
+}
+
+/** The files to open as the owner reads them: the first five, then "2 more". */
+function namedFiles(open: OpenFiles): string {
+  const named = open.files.slice(0, 5);
+  const more = open.files.length - named.length;
+  return listWords([...named.map((f) => code(f)), ...(more > 0 ? [`${more} more`] : [])]);
 }
 
 /** "npm run dev" or "npm start" when the app's package.json has that script; best effort, never throws. */
@@ -272,9 +303,19 @@ export function buildReportFacts(m: Mission, usage: UsageRecord[]): string {
 /** For a mission that is documents and pages only: what is opened after the steps (the fact sheet has no Markdown, so the files are named plainly). */
 function openFact(m: Mission): string[] {
   const open = filesToOpen(m);
-  if (!open) return [];
+  if (!open) return openAlongsideFact(m);
   const browser = !open.pages && open.pageFiles.length > 0 ? ` Open ${open.pageFiles.slice(0, 3).join(", ")} in your browser.` : "";
   return [`Then open ${open.files.slice(0, 5).join(", ")} ${open.pages ? "in your browser" : "in your app folder"}.${browser} Nothing needs to be run.`];
+}
+
+/** For a mission with documents beside code: the file to open, and that the project's own checks do not cover it (real run R6). The same facts as "How to try it". */
+function openAlongsideFact(m: Mission): string[] {
+  const open = filesToOpenAlongside(m);
+  if (!open) return [];
+  const list = open.files.slice(0, 5).join(", ");
+  const browser = !open.pages && open.pageFiles.length > 0 ? ` Open ${open.pageFiles.slice(0, 3).join(", ")} in your browser.` : "";
+  const full = m.verify?.full;
+  return [`Then open ${list} ${open.pages ? "in your browser" : "in your app folder"}.${browser}${full ? ` The project's own checks (${full}) are an extra: they do not cover ${list}.` : ""}`];
 }
 
 function factSection(title: string, items: string[]): string[] {
@@ -284,9 +325,14 @@ function factSection(title: string, items: string[]): string[] {
 function featureFact(m: Mission, f: Feature): string {
   const head = `${f.id} "${f.title}" [${f.status}]`;
   switch (f.status) {
-    case "done":
+    case "done": {
       // A feature no test checked says how it was checked, so the writer of the summary cannot call it tested (docs/modes-spec.md 8.5).
-      return !isModeFeature(f) ? `${head}: ${f.story}` : `${head}: ${sentence(f.story)} ${checkedByFact(m, f)}${picturesFact(f)}`;
+      if (isModeFeature(f)) return `${head}: ${sentence(f.story)} ${checkedByFact(m, f)}${picturesFact(f)}`;
+      // In a mission that also has such a feature, a feature that tests check says so too: with no word about it the writer said that
+      // it "has no record of how it was checked" (real run R6). A mission with no such feature gets the line it always had.
+      if (!hasModeFeature(m.features)) return `${head}: ${f.story}`;
+      return [`${head}: ${sentence(f.story)}`, testsCheckedByFact(m, f), ...alsoMadeSentences(m, f)].join(" ");
+    }
     case "blocked": {
       const tries = f.attempts.length > 0 ? ` (after ${plural(f.attempts.length, "attempt")})` : "";
       return `${head}: ${f.blockedReason ?? "no reason recorded"}${tries}`;
@@ -301,6 +347,17 @@ function featureFact(m: Mission, f: Feature): string {
 /** `Checked by: a second AI against your list and approved by you. No tests were written for it.` (the words of the `Checked:` line, without the leading "by "). */
 function checkedByFact(m: Mission, f: Feature): string {
   return `Checked by: ${checkedWords(howChecked(m, f)).replace(/^by /, "")}. No tests were written for it.`;
+}
+
+/**
+ * `Checked by: tests written first.` for a feature that tests check, in a mission that also has a feature checked by reading. The same facts as
+ * the `Checked:` line, in the same words (`checkedWords`): an approval, or no test written, is said too.
+ */
+function testsCheckedByFact(m: Mission, f: Feature): string {
+  const h = howChecked(m, f);
+  if (h.row === 3) return "Checked by: tests written first.";
+  if (h.row === 1) return "Checked by: tests written first, and approved by you.";
+  return `Checked by: ${checkedWords(h).replace(/^by /, "")}.`;
 }
 
 /**
@@ -471,8 +528,39 @@ export function holdsNeverSay(text: string): boolean {
  */
 function guardProse(m: Mission, prose: ReportProseOutput | null | undefined): { prose: ReportProseOutput | null | undefined; left: boolean } {
   if (!prose || !hasModeFeature(m.features)) return { prose, left: false };
+  prose = withoutNoRecordSentences(m, prose);
   const texts = [prose.narrative, ...(Array.isArray(prose.whatYouCanDo) ? prose.whatYouCanDo : [])];
   return texts.some((t) => typeof t === "string" && holdsNeverSay(t)) ? { prose: null, left: true } : { prose, left: false };
+}
+
+/**
+ * A sentence that says that nobody recorded how a feature was checked: "The word counting feature has no record of how it was checked, so it
+ * should be confirmed before you rely on it" (real run R6, in a report whose `Checked:` line said "1 feature by tests"). Every finished feature
+ * is in that line, so the sentence is false whenever the line is there. The writer had been given no word about how a feature that tests check was
+ * checked; it now is (`testsCheckedByFact`), and this is the check that does not depend on it.
+ */
+const NO_RECORD: readonly RegExp[] = [
+  /\bno\s+(?:record|records|information|details|evidence|sign|trace|mention)\b[^.!?]{0,80}\b(?:check|checks|checked|checking|tested|testing|verified|verification|reviewed)\b/iu,
+  /\b(?:not|never|isn't|wasn't|aren't|weren't)\s+(?:been\s+)?(?:recorded|written\s+down|noted|kept|logged)\b[^.!?]{0,80}\b(?:check|checks|checked|checking|tested|testing|verified|reviewed)\b/iu,
+  /\bhow\b[^.!?]{0,80}\b(?:checked|tested|verified|reviewed)\b[^.!?]{0,40}\b(?:is|was|are|were)\s+(?:not\s+(?:recorded|known|clear|stated|said|written\s+down)|unknown|unclear)\b/iu,
+  /\b(?:unclear|unknown|not\s+(?:sure|clear|known))\s+how\b[^.!?]{0,80}\b(?:checked|tested|verified|reviewed)\b/iu,
+  /\bnothing\s+(?:records|says|shows|tells\s+(?:me|us|you))\s+(?:how|whether|if)\b[^.!?]{0,80}\b(?:checked|tested|verified|reviewed)\b/iu,
+];
+
+/** `text` without the sentences that say nobody recorded how a feature was checked. The text itself when none does. */
+function withoutNoRecord(text: string): string {
+  // Each sentence with the space after it, so the rest keeps its spacing and its paragraph breaks.
+  const pieces = text.match(/[^]*?(?:[.!?]+(?:\s+|$)|$)/gu)?.filter((p) => p !== "") ?? [];
+  const kept = pieces.filter((p) => !NO_RECORD.some((re) => re.test(p)));
+  return kept.length === pieces.length ? text : kept.join("").trim();
+}
+
+/** The prose of the report with the sentences of `NO_RECORD` taken out, when the `Checked:` line is there to say how each finished feature was checked. */
+function withoutNoRecordSentences(m: Mission, prose: ReportProseOutput): ReportProseOutput {
+  if (checkedLine(m) === undefined) return prose;
+  const narrative = typeof prose.narrative === "string" ? withoutNoRecord(prose.narrative) : prose.narrative;
+  const items = Array.isArray(prose.whatYouCanDo) ? prose.whatYouCanDo.map((t) => (typeof t === "string" ? withoutNoRecord(t) : t)).filter((t) => t !== "") : prose.whatYouCanDo;
+  return JSON.stringify([narrative, items]) === JSON.stringify([prose.narrative, prose.whatYouCanDo]) ? prose : { ...prose, narrative, whatYouCanDo: items };
 }
 
 /**
@@ -602,7 +690,9 @@ function lookHowTo(m: Mission, cp: PendingCheckpoint, container: boolean): strin
   // those checks do not cover it, so the file to open is named after them, in words of its own (real run R4: a table, and nothing said which file to open).
   const focus = cp.kind === "feature" ? m.features.find((f) => f.id === cp.featureId) : undefined;
   const alongside = open === undefined && focus !== undefined && isModeFeature(focus) ? openFilesOf(cp.look.files ?? []) : undefined;
-  if (open === undefined) {
+  // The look at a feature checked by reading, beside code that tests check: the file to open comes first. Installing and starting the app, and the
+  // project's own checks, are extras after it, and say that they do not cover this feature (real run R6: `npm test` was step 3, before that was said).
+  if (open === undefined && alongside === undefined) {
     if (m.kind === "greenfield") steps.push("npm install", "npm run dev", "open http://localhost:3000");
     else {
       if (m.verify?.install) steps.push(m.verify.install);
@@ -623,7 +713,7 @@ function lookHowTo(m: Mission, cp: PendingCheckpoint, container: boolean): strin
       : "Open a terminal and run these one at a time:",
     steps.map((cmd, i) => `${i + 1}. ${describeStep(m, cmd)}`).join("\n"),
     ...(open ? [openText(open, appsSubfolder(m, container))] : []),
-    ...(alongside ? [openText(alongside, appsSubfolder(m, container), false, "The project's own checks do not cover this feature. To look at it, open")] : []),
+    ...(alongside ? [openText(alongside, appsSubfolder(m, container)), ...ownChecksSentence(m, "The project's own checks do not cover this feature.")] : []),
     `When you're done, ${listWords(leave)}.`,
   ].join("\n\n");
 }
@@ -752,9 +842,16 @@ function howToTrySection(m: Mission, container: boolean): string {
   );
   const starts = steps.some((cmd) => cmd === "npm run dev" || cmd === "npm start");
   const open = filesToOpen(m);
+  const beside = open === undefined ? filesToOpenAlongside(m) : undefined;
   if (open) parts.push(openText(open, folder, true));
-  else if (m.kind === "feature") {
-    parts.push(starts ? "Then open the address it prints (often http://localhost:3000) in your browser." : "Then start your app the way you usually do.");
+  else if (beside && m.kind === "feature" && !starts) {
+    // Documents beside code, and nothing to start: the file to open comes first, and the project's own checks are an extra after it (real run R6).
+    parts.push(openText(beside, folder, true), ...ownChecksSentence(m, `The project's own checks do not cover ${namedFiles(beside)}.`));
+  } else {
+    if (m.kind === "feature") {
+      parts.push(starts ? "Then open the address it prints (often http://localhost:3000) in your browser." : "Then start your app the way you usually do.");
+    }
+    if (beside) parts.push(openText(beside, folder, true, "Also open"));
   }
   const leaveSteps = [
     ...(starts ? ["press Ctrl+C to stop the app"] : []),
@@ -887,8 +984,14 @@ function retryItem(m: Mission, container: boolean): string | undefined {
 function featuresSection(m: Mission): string {
   if (m.features.length === 0) return section("Features", "No features were planned yet.");
   const byReading = hasModeFeature(m.features);
-  const rows = m.features.map((f) => `| ${featureIcon(f)} | ${cell(f.title)} | ${cell(featureOutcome(f, byReading ? m : undefined))} |`);
+  const rows = m.features.map((f) => `| ${featureIcon(f)} | ${cell(f.title)} | ${cell(withAlsoMade(m, f, featureOutcome(f, byReading ? m : undefined)))} |`);
   return section("Features", ["|  | Feature | What happened |", "|---|---|---|", ...rows].join("\n"));
+}
+
+/** A finished feature that made a file which a later feature is planned to make says so after its outcome (real run R6). Unchanged for any other. */
+function withAlsoMade(m: Mission, f: Feature, outcome: string): string {
+  const said = f.status === "done" ? alsoMadeSentences(m, f) : [];
+  return said.length === 0 ? outcome : `${outcome}. ${said.join(" ")}`;
 }
 
 function featureIcon(f: Feature): string {

@@ -171,6 +171,8 @@ const notes = Array.isArray(m.notes) ? m.notes : [];
 put("unfinished_reviews", notes.filter((n) => typeof n === "string" && /^The review of .* did not finish/.test(n)).length);
 // The review notes that were left open: the ones the report lists under "Review notes" (the copy of the report below does not reach that far).
 put("open_notes", features.reduce((n, f) => n + (Array.isArray(f.openFindings) ? f.openFindings.length : 0), 0));
+// The final review's notes are kept as run notes, not as findings of a feature, and the report lists them under "Run notes".
+put("final_notes", notes.filter((n) => typeof n === "string" && /^Final review \((?:blocker|major|minor)\): /.test(n)).length);
 // A mission that stopped to wait for the owner's check (the plan, a feature or the finished app) says so; one that is only paused does not.
 if (m.checkpoint && typeof m.checkpoint === "object" && m.checkpoint.state === "pending" && m.stage !== "complete") put("waiting", "1");
 
@@ -182,30 +184,83 @@ for (const r of (Array.isArray(m.checkpointLog) ? m.checkpointLog : []).slice(-5
   put("answer", r.kind, r.decision, feature ? plain(feature.title || feature.id, 100) || "-" : "-");
 }
 
-// The first lines of the report, without the steps for trying the app on this PC and without pictures.
+// The first lines of the report, without the steps for trying the app on this PC and without pictures. The copy is cut at the end of a section,
+// never inside one, so it can't end in half a table (real runs R5 and R6): a section that does not fit is left out with all that follows it.
+const COPY_LINES = 30;
+// A paragraph of lines that start with "|" is a table.
+const isTable = (lines) => lines.length > 0 && lines.every((l) => l.trimStart().startsWith("|"));
+const withoutEdgeBlanks = (lines) => {
+  let from = 0;
+  let to = lines.length;
+  while (from < to && lines[from] === "") from++;
+  while (to > from && lines[to - 1] === "") to--;
+  return lines.slice(from, to);
+};
+// The paragraphs of a section (blank-line separated), each without its blank lines.
+const paragraphsOf = (lines) => {
+  const out = [];
+  let current = [];
+  for (const line of lines) {
+    if (line === "") {
+      if (current.length > 0) out.push(current);
+      current = [];
+    } else current.push(line);
+  }
+  if (current.length > 0) out.push(current);
+  return out;
+};
 try {
   const file = path.join(dir, "report.md");
   const st = fs.lstatSync(file);
   if (st.isFile() && st.size <= 5 * 1024 * 1024) {
+    const sections = [];
+    let current = [];
     let skipping = false;
     let lastBlank = true;
-    let kept = 0;
     let checked = "";
-    for (const raw of fs.readFileSync(file, "utf8").split("\n").slice(0, 120)) {
-      const line = raw.replace(/\r$/, "");
+    const raws = fs.readFileSync(file, "utf8").split("\n");
+    for (let index = 0; index < raws.length; index++) {
+      const line = raws[index].replace(/\r$/, "");
       // The report's own "Checked:" line (in its header), copied as the report wrote it.
-      if (checked === "" && /^Checked: /.test(line)) {
+      if (checked === "" && index < 120 && /^Checked: /.test(line)) {
         checked = plain(line, 600);
         put("checked", checked);
       }
-      if (/^#{1,2} /.test(line)) skipping = /^## (How to try it|Usage|Technical details)\b/.test(line);
+      if (/^#{1,2} /.test(line)) {
+        sections.push(current);
+        current = [];
+        skipping = /^## (How to try it|Usage|Technical details)\b/.test(line);
+      }
       if (skipping || line.trim().startsWith("![")) continue;
       const text = reportLine(line);
       if (text === "" && lastBlank) continue;
       lastBlank = text === "";
-      put("report", text);
-      if (++kept >= 30) break;
+      current.push(text);
     }
+    sections.push(current);
+    const kept = [];
+    let used = 0;
+    const add = (lines) => {
+      const cost = lines.length + (kept.length > 0 ? 1 : 0);
+      if (used + cost > COPY_LINES) return false;
+      if (kept.length > 0) kept.push("");
+      kept.push(...lines);
+      used += cost;
+      return true;
+    };
+    for (const lines of sections.map(withoutEdgeBlanks).filter((l) => l.length > 0)) {
+      if (add(lines)) continue;
+      if (kept.length > 0) break;
+      // The very first section is longer than the copy: its whole paragraphs, and no table that would be cut.
+      for (const paragraph of paragraphsOf(lines)) {
+        if (add(paragraph)) continue;
+        if (isTable(paragraph)) continue;
+        if (kept.length === 0) kept.push(...paragraph.slice(0, COPY_LINES));
+        break;
+      }
+      break;
+    }
+    for (const text of kept) put("report", text);
   }
 } catch (err) {
   // No report: the pull request says so.
@@ -911,7 +966,7 @@ read_mission_facts() {
 # Sets the F_* variables from FACTS_SCRIPT's lines. A value is data: it is only compared, counted and checked later.
 parse_mission_facts() {
   F_ID="" F_KIND="" F_STATUS="" F_TITLE="" F_REPO="" F_BASE="" F_BRANCH="" F_BASESHA="" F_PLAN=""
-  F_TOTAL=0 F_DONE=0 F_TESTED=0 F_MODES=0 F_UNFINISHED_REVIEWS=0 F_OPEN_NOTES=0 F_WAITING="" F_BASELINE_BROKEN="" F_CHECKED=""
+  F_TOTAL=0 F_DONE=0 F_TESTED=0 F_MODES=0 F_UNFINISHED_REVIEWS=0 F_OPEN_NOTES=0 F_FINAL_NOTES=0 F_WAITING="" F_BASELINE_BROKEN="" F_CHECKED=""
   F_OPEN=() F_ASKED=() F_ANSWERS=() F_REPORT=()
   local line key rest
   while IFS= read -r line; do
@@ -937,6 +992,7 @@ parse_mission_facts() {
       checked) F_CHECKED="$rest" ;;
       unfinished_reviews) F_UNFINISHED_REVIEWS="$rest" ;;
       open_notes) F_OPEN_NOTES="$rest" ;;
+      final_notes) F_FINAL_NOTES="$rest" ;;
       waiting) F_WAITING="$rest" ;;
       baseline_broken) F_BASELINE_BROKEN="$rest" ;;
       open) F_OPEN+=("$rest") ;;
@@ -950,7 +1006,7 @@ parse_mission_facts() {
     greenfield | feature) ;;
     *) F_KIND="" ;;
   esac
-  for key in F_TOTAL F_DONE F_TESTED F_MODES F_UNFINISHED_REVIEWS F_OPEN_NOTES; do
+  for key in F_TOTAL F_DONE F_TESTED F_MODES F_UNFINISHED_REVIEWS F_OPEN_NOTES F_FINAL_NOTES; do
     [[ "${!key}" =~ ^[0-9]{1,6}$ ]] || printf -v "$key" '%s' 0
   done
 }
@@ -1028,13 +1084,30 @@ write_pull_request_body() {
     else
       printf '%s\n' "- Review: a separate AI reviewer reads each feature before it is added. The first lines of the report are below. The whole report, with what the reviewers left open, is in Mission Control on the owner's PC: \`mc report $F_ID\`."
     fi
-    # The copy of the report below is cut short, so the notes the reviewers left open are counted here, in a line of their own.
-    if [ "$F_OPEN_NOTES" -eq 0 ]; then
-      printf '%s\n' "- Open review notes: the reviewers left none open."
-    elif [ "$F_OPEN_NOTES" -eq 1 ]; then
-      printf '%s\n' "- Open review notes: the reviewers left 1 note open. The full report lists it: \`mc report $F_ID\` in Mission Control on the owner's PC."
+    # The copy of the report below is cut short, so the notes the reviewers left open are counted here, in a line of their own. The final
+    # review's notes are kept apart from the features' (the report lists them under "Run notes"), so they have a line of their own when
+    # there are any; without them the line says what it always said (real run R6: "none" while the final review had left a note).
+    if [ "$F_FINAL_NOTES" -eq 0 ]; then
+      if [ "$F_OPEN_NOTES" -eq 0 ]; then
+        printf '%s\n' "- Open review notes: the reviewers left none open."
+      elif [ "$F_OPEN_NOTES" -eq 1 ]; then
+        printf '%s\n' "- Open review notes: the reviewers left 1 note open. The full report lists it: \`mc report $F_ID\` in Mission Control on the owner's PC."
+      else
+        printf '%s\n' "- Open review notes: the reviewers left $F_OPEN_NOTES notes open. The full report lists them: \`mc report $F_ID\` in Mission Control on the owner's PC."
+      fi
     else
-      printf '%s\n' "- Open review notes: the reviewers left $F_OPEN_NOTES notes open. The full report lists them: \`mc report $F_ID\` in Mission Control on the owner's PC."
+      if [ "$F_OPEN_NOTES" -eq 0 ]; then
+        printf '%s\n' "- Open review notes: the feature reviews left none open."
+      elif [ "$F_OPEN_NOTES" -eq 1 ]; then
+        printf '%s\n' "- Open review notes: the feature reviews left 1 note open. The full report lists it: \`mc report $F_ID\` in Mission Control on the owner's PC."
+      else
+        printf '%s\n' "- Open review notes: the feature reviews left $F_OPEN_NOTES notes open. The full report lists them: \`mc report $F_ID\` in Mission Control on the owner's PC."
+      fi
+      if [ "$F_FINAL_NOTES" -eq 1 ]; then
+        printf '%s\n' "- Final review: it left 1 note open. The full report lists it under Run notes: \`mc report $F_ID\` in Mission Control on the owner's PC."
+      else
+        printf '%s\n' "- Final review: it left $F_FINAL_NOTES notes open. The full report lists them under Run notes: \`mc report $F_ID\` in Mission Control on the owner's PC."
+      fi
     fi
     local -a stops=() unanswered=()
     local kind_name answered

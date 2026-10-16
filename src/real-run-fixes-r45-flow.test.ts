@@ -273,15 +273,18 @@ describe("the look at a table names the file to open (real run R4)", () => {
     expect(report).toContain("Then open `data/columns.csv` in your app folder");
   });
 
-  it("when a test checks another feature of the mission: the steps keep the project's own checks, and the file to open is named after them", async () => {
+  it("when a test checks another feature of the mission: the file to open comes first, and the project's own checks are an extra after it (real run R6)", async () => {
     const hh = harness({ agents: tableMaker() });
     const id = hh.createMission("greenfield", { plan: planSource(`${HEAD()}${GREET}${block("column-notes", "Description of each column", ["mode: owner", "needs: greet", "columns: Column, Meaning, Example", "rows: 3-3"], ["Every column has a row in the description."])}`) }).id;
     const parked = await hh.run(id);
     expect(parked.checkpoint?.scope).toBe("feature:column-notes");
     const steps = stepsOf(reportOf(hh, id));
-    expect(steps).toContain("The project's own checks do not cover this feature. To look at it, open `data/columns.csv` in your app folder.");
-    expect(steps).not.toContain("Then open");
-    expect(steps.indexOf("go to the app's folder")).toBeLessThan(steps.indexOf("To look at it, open"));
+    expect(steps).toContain("Then open `data/columns.csv` in your app folder.");
+    expect(steps).toContain("The project's own checks do not cover this feature. If you also want to run them, run `node --test \"tests/**/*.test.mjs\"`.");
+    expect(steps.indexOf("go to the app's folder")).toBeLessThan(steps.indexOf("Then open"));
+    expect(steps.indexOf("Then open")).toBeLessThan(steps.indexOf("If you also want to run them"));
+    // the project's own checks are no numbered step
+    expect(steps).not.toMatch(/\n3\. /);
   });
 
   it("a mission with no mode feature keeps the section, and its look, as they were", async () => {

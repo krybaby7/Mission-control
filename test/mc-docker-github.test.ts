@@ -1015,6 +1015,136 @@ describe("publish: the pull request", () => {
     expect(run(["publish", ID, ...TO]).gh[0]!.body!).toContain("- Open review notes: the reviewers left none open.\n");
   });
 
+  // ─────────── the real run R6: the pull request body ───────────
+
+  /** The finished report of the real run R6, word for word: its Run notes hold a minor note of the final review, and its tables are longer than the copy. */
+  const REAL_R6_REPORT = fs.readFileSync(path.join(REPO_DIR, "test", "fixtures", "publish", "real-r6-report.md"), "utf8");
+  const FINAL_NOTE = "Final review (minor): The README still lists only capitalize(word). The new wordCount(text) export isn't mentioned there, so someone reading the README won't know it exists. (README.md)";
+  const done = (id: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ id, title: id, status: "done", frozenTests: [{ path: "t", sha256: "0" }], attempts: [], reviewRounds: 0, openFindings: [], ...extra });
+
+  it("R6-4: counts the final review's notes too: the line about the feature reviews says none, and a line of its own says the final review left one", () => {
+    setup({ notes: [FINAL_NOTE], features: [done("a"), done("b", { frozenTests: [], mode: "owner" })] });
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), REAL_R6_REPORT);
+    const body = run(["publish", ID, ...TO]).gh[0]!.body!;
+    expect(body).toContain("- Open review notes: the feature reviews left none open.\n");
+    expect(body).toContain(`- Final review: it left 1 note open. The full report lists it under Run notes: \`mc report ${ID}\` in Mission Control on the owner's PC.\n`);
+    // the old sentence, which was false for this mission, is not there
+    expect(body).not.toContain("the reviewers left none open");
+    // the line about the feature reviews comes first, and both come before the people line
+    expect(body.indexOf("- Open review notes:")).toBeLessThan(body.indexOf("- Final review:"));
+    expect(body.indexOf("- Final review:")).toBeLessThan(body.indexOf("- People:"));
+  });
+
+  it("R6-4: says how many notes each kind of review left, in the singular and the plural", () => {
+    const world = setup({
+      notes: [FINAL_NOTE, "Final review (major): The export is not tested. (src/index.js)", "Final review (blocker): The build fails."],
+      features: [done("a", { openFindings: [{ severity: "minor", description: "x" }] }), done("b", { openFindings: [{ severity: "minor", description: "y" }, { severity: "major", description: "z" }] })],
+    });
+    const many = run(["publish", ID, ...TO]).gh[0]!.body!;
+    expect(many).toContain(`- Open review notes: the feature reviews left 3 notes open. The full report lists them: \`mc report ${ID}\` in Mission Control on the owner's PC.\n`);
+    expect(many).toContain(`- Final review: it left 3 notes open. The full report lists them under Run notes: \`mc report ${ID}\` in Mission Control on the owner's PC.\n`);
+    writeMission(world, { notes: [FINAL_NOTE], features: [done("a", { openFindings: [{ severity: "minor", description: "x" }] })] });
+    const one = run(["publish", ID, ...TO]).gh[0]!.body!;
+    expect(one).toContain("- Open review notes: the feature reviews left 1 note open. The full report lists it: ");
+    expect(one).toContain("- Final review: it left 1 note open. The full report lists it under Run notes: ");
+  });
+
+  it("R6-4: a note that only looks like a final review note is not counted, and a mission without one reads as it always did", () => {
+    const world = setup({
+      notes: ["Final review did not finish.", "The final review did not finish.", "final review (minor): lower case", "Final review (nit): not a severity", " Final review (minor): starts with a space", 7, null, { text: "Final review (minor): in an object" }],
+    });
+    const body = run(["publish", ID, ...TO]).gh[0]!.body!;
+    expect(body).toContain("- Open review notes: the reviewers left none open.\n");
+    expect(body).not.toContain("- Final review:");
+    expect(body).not.toContain("the feature reviews");
+    // no list of notes at all
+    writeMission(world, { notes: "no" });
+    expect(run(["publish", ID, ...TO]).gh[0]!.body!).toContain("- Open review notes: the reviewers left none open.\n");
+  });
+
+  it("R6-4: the final review's notes never carry text of their own into the body: only a count", () => {
+    setup({ notes: ["Final review (minor): @everyone see #12 <b>x</b> `rm -rf` https://evil.example/x"] });
+    const body = run(["publish", ID, ...TO]).gh[0]!.body!;
+    expect(body).toContain("- Final review: it left 1 note open.");
+    const head = body.split("## From the report")[0]!;
+    for (const left of ["@everyone", "#12", "<b>", "rm -rf", "evil.example"]) expect(head, left).not.toContain(left);
+  });
+
+  /** The lines of the copy of the report in a body (between the fences). */
+  const copyOf = (body: string): string[] => reportLinesOf(body);
+  const isTableLine = (l: string): boolean => l.trimStart().startsWith("|");
+
+  it("R6-4: the copy of the report ends at the end of a section, never in half a table", () => {
+    setup();
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), REAL_R6_REPORT);
+    const lines = copyOf(run(["publish", ID, ...TO]).gh[0]!.body!);
+    expect(lines.length).toBeLessThanOrEqual(30);
+    // the sections that fit are whole
+    expect(lines).toContain("## Features");
+    expect(lines).toContain("| ✅ | Notes on what word-tools is for and where it stops | Built; 1 check left for you; approved by you |");
+    // the section after them, a table that would be cut, is left out with its heading
+    expect(lines).not.toContain("## Your checks");
+    expect(lines.join("\n")).not.toContain("| What you checked |");
+    // the copy ends on a whole row, and every table in it has its header, its separator line and its rows
+    expect(lines.at(-1)).toMatch(/^\| ✅ .* \|$/);
+    const at = lines.indexOf("|  | Feature | What happened |");
+    expect(lines[at + 1]).toBe("|---|---|---|");
+    expect(lines.slice(at).filter(isTableLine)).toHaveLength(4);
+    // the summary line is still cut at the end of a sentence
+    expect(lines.find((l) => l.startsWith("The word-tools project now has"))!.endsWith(" ...")).toBe(true);
+    // the copy of the old report of R5 was a whole number of sections too
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), REAL_R5_REPORT);
+    const r5 = copyOf(run(["publish", ID, ...TO]).gh[0]!.body!);
+    expect(r5.length).toBeLessThanOrEqual(30);
+    expect(r5.filter((l) => l.startsWith("## ")).every((h) => REAL_R5_REPORT.includes(`\n${h}\n`))).toBe(true);
+  });
+
+  it("R6-4: a section that does not fit is left out whole, with all the sections after it, and one that fits exactly stays", () => {
+    setup();
+    const para = (n: number, text: string): string[] => ["", ...Array.from({ length: n }, (_, i) => `${text} ${i + 1}`)];
+    const exact = ["# Title", ...para(1, "intro"), "", "## Part one", ...para(8, "a"), "", "## Part two", ...para(8, "b"), "", "## Part three", ...para(2, "c")];
+    // 1 + 2 + 1 + 1 + 9 ... counted by the copy itself; make the third part land exactly on 30 lines
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), exact.join("\n"));
+    let lines = copyOf(run(["publish", ID, ...TO]).gh[0]!.body!);
+    expect(lines.length).toBeLessThanOrEqual(30);
+    expect(lines.at(-1)).toBe("c 2");
+    // one line more in the third part: it no longer fits and is left out, though its first lines would have
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), [...exact, "c 3", "c 4", "c 5", "c 6", "c 7", "c 8", "c 9", "c 10", "c 11", "c 12"].join("\n"));
+    lines = copyOf(run(["publish", ID, ...TO]).gh[0]!.body!);
+    expect(lines).not.toContain("## Part three");
+    expect(lines.at(-1)).toBe("b 8");
+  });
+
+  it("R6-4: a table that would be cut is dropped, also when it is in the first section", () => {
+    setup();
+    const table = ["| A | B |", "|---|---|", ...Array.from({ length: 40 }, (_, i) => `| row${i} | x |`)];
+    // the first section: a paragraph, a table that does not fit, a paragraph
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), ["# Title", "", "A first paragraph.", "", ...table, "", "A last paragraph.", "", "## Next", "", "never"].join("\n"));
+    const lines = copyOf(run(["publish", ID, ...TO]).gh[0]!.body!);
+    expect(lines.some(isTableLine)).toBe(false);
+    expect(lines).toContain("A first paragraph.");
+    expect(lines).toContain("A last paragraph.");
+    expect(lines).not.toContain("never");
+    // a long paragraph that is not a table is cut at 30 lines, as the copy always was
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), ["# Title", ...Array.from({ length: 50 }, (_, i) => `line ${i + 1}`)].join("\n"));
+    const long = copyOf(run(["publish", ID, ...TO]).gh[0]!.body!);
+    expect(long).toHaveLength(30);
+    expect(long.at(-1)).toBe("line 29");
+    // a table that fits in a later section stays whole
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), ["# Title", "", "Text.", "", "## Table", "", "| A | B |", "|---|---|", "| 1 | 2 |", "| 3 | 4 |"].join("\n"));
+    const small = copyOf(run(["publish", ID, ...TO]).gh[0]!.body!);
+    expect(small.slice(-4)).toEqual(["| A | B |", "|---|---|", "| 1 | 2 |", "| 3 | 4 |"]);
+  });
+
+  it("R6-4: a report with no tables and fewer than 30 lines is copied as it was, and the Checked line is still found", () => {
+    setup({ features: [done("a"), done("b", { frozenTests: [], mode: "owner" })] });
+    const report = ["# Dark mode", "", "**Done**", "", "Checked: 1 feature by tests.", "", "Text.", "", "## What you can do now", "", "- one", "- two"];
+    fs.writeFileSync(path.join(mcHome, "missions", ID, "report.md"), report.join("\n"));
+    const body = run(["publish", ID, ...TO]).gh[0]!.body!;
+    expect(copyOf(body)).toEqual(report);
+    expect(body).toContain("- Checked: 1 feature by tests.");
+  });
+
   it("R5-2: says the whole report is in Mission Control on the owner's PC, with the command, and no longer points to a file a reader on GitHub cannot open", () => {
     const world = setup();
     const body = run(["publish", ID, ...TO]).gh[0]!.body!;

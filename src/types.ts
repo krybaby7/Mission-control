@@ -388,6 +388,18 @@ export interface Feature extends SpecFeature {
    * Absent when the repair touched no approved file. Set at the repair's own review, again after every change of it.
    */
   changesApproved?: string[];
+  /**
+   * Only a feature checked by tests, in a mission that has a feature checked by reading: the files it made (new in its branch) that belong to a later
+   * feature of the mission, because that feature's checks name them (real run R6: the first feature made the notes file the second one was planned to make).
+   * Found by comparing text only; the plan's words are never used as a path. Absent when there is none.
+   */
+  alsoMade?: AlsoMade[];
+}
+
+/** A file a feature made that a later feature of the same mission is planned to make: the file, and the id of that later feature. */
+export interface AlsoMade {
+  file: string;
+  belongsTo: string;
 }
 
 /** One verdict of the second AI on one written check. "cannot_judge" is never a pass. */

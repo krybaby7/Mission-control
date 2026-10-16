@@ -330,6 +330,23 @@ describe("leader/CLAUDE.md: the plans the leader writes (docs/plans-spec.md, 8 a
     expect("The script is scripts/region-totals.js and it writes reports/totals.csv with one row for each region.").not.toMatch(/[`{}]|https?:|node |npm /);
   });
 
+  it("R6-1: a feature checked by reading needs no contract line for its files, and a contract line is only for a name that tests and code must agree on", () => {
+    expect(plans).toContain(
+      "A feature checked by reading (mode review or owner) needs no `contract` line for its files. Its checks and its `heading` lines already say what the file is: say its name and folder in a check, in the CEO's words, for example: The notes are saved as NOTES.md in the docs folder of the project.",
+    );
+    expect(plans).toContain(
+      "Every contract line is read by the whole team, also by the feature checked by tests that comes first, and that feature may then write tests for the file or make it before its own feature does. Use `contract` only for a name that tests and code must agree on.",
+    );
+    expect(rowOf("| `contract` |")).toContain("Not for a file that only a feature checked by reading makes: its checks and `heading` lines carry that.");
+    // it sits where the contract rule for a file is given, and after the rule it limits
+    expect(plans.indexOf("Without that line the team's plan reviewer asks for the path")).toBeLessThan(plans.indexOf("needs no `contract` line for its files"));
+    // the example in the guide is a plain sentence: no path with a folder, no backtick, no curly bracket, no web address, no command
+    expect("The notes are saved as NOTES.md in the docs folder of the project.").not.toMatch(/[`{}/]|https?:|node |npm /);
+    // the rule for a file that tests check is still there, and so is the Docker-free doc
+    expect(plans).toContain("For a job that makes a script or a file, put one `contract` line with its file path and what it writes");
+    expect(LEADER_DOC).toContain("A feature checked by reading needs no such line");
+  });
+
   it("R4-2: at the plan stop, tells the CEO which checks the team removed and which it added, word for word", () => {
     expect(plans).toContain(
       "When `plan show` lists checks that the team removed or added, tell the CEO which checks the team removed and which it added, for each feature, word for word, and say plainly that the team changed the checks you wrote. The CEO decides whether to approve the plan as it now stands or to send it back.",

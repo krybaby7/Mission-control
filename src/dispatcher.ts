@@ -50,6 +50,7 @@ import {
 import { resolveFamily } from "./config.js";
 import { AuthUnavailableError, DeadlineError, type ExecResult, ProvidersFailingError, type RoleExecutor, StopRequestedError } from "./executor.js";
 import type { Git } from "./git.js";
+import { alsoMadeSentences, laterFeatureFiles } from "./later-files.js";
 import type { Notifier } from "./notify.js";
 import { checkChangeLines, checkChanges, checkChangeSummary, describePlan, reviewLines } from "./plan.js";
 import {
@@ -80,6 +81,7 @@ import { normalizeSpecText, normalizeVerifyConfig, SCHEMAS } from "./schemas.js"
 import { type MissionStore, planOf, slugify } from "./state.js";
 import type {
   Access,
+  AlsoMade,
   Attempt,
   BuildOutput,
   CheckpointKind,
@@ -1996,6 +1998,7 @@ class MissionRun {
       if (!this.reviewSettled(f)) {
         const finished = !isModeFeature(f) ? await this.reviewAndFix(f, wt) : await this.rubricAndFix(f, wt);
         await this.noteApprovedChanges(f, wt); // before `looksAt`: the answer decides whether the owner looks, and it must be saved with the commit
+        await this.noteLaterFeatureFiles(f, wt); // before the stop: the look says it
         if (this.looksAt(f)) this.scratch.updateUnit(f.id, { reviewedCommit: f.passingCommit, reviewSkipped: !finished });
       }
       const gate = await this.checkpointGate("feature", f);
@@ -2031,6 +2034,25 @@ class MissionRun {
     if (touched.length === 0 ? f.changesApproved === undefined : JSON.stringify(f.changesApproved) === JSON.stringify(touched)) return;
     if (touched.length === 0) delete f.changesApproved;
     else f.changesApproved = touched;
+    this.save();
+  }
+
+  /**
+   * A feature checked by tests, in a mission that also has a feature checked by reading: the files it made that a later feature is planned to
+   * make (real run R6). Recorded on the feature, so the report and the look can say it; nothing is undone or refused. Text only: the plan's words
+   * are compared with the file names git lists and are never used as a path. When git cannot say, nothing is recorded.
+   */
+  private async noteLaterFeatureFiles(f: Feature, wt: string): Promise<void> {
+    if (isModeFeature(f) || !hasModeFeature(this.m.features)) return;
+    let found: AlsoMade[] = [];
+    try {
+      found = laterFeatureFiles(this.m, f, (await this.deps.git.changedFilesByKind(wt, this.m.integrationBranch)).added);
+    } catch {
+      return;
+    }
+    if (found.length === 0 ? f.alsoMade === undefined : JSON.stringify(f.alsoMade) === JSON.stringify(found)) return;
+    if (found.length === 0) delete f.alsoMade;
+    else f.alsoMade = found;
     this.save();
   }
 
@@ -3024,6 +3046,8 @@ class MissionRun {
           lines: [
             ...(failed ? ["Your change could not be made, so this is the earlier version."] : []),
             `“${shown(feature.title)}” is built and passed its checks${unreviewed ? ", but its review did not finish" : ", and was reviewed"}.`,
+            // A file that a later feature is planned to make (real run R6); nothing for a mission with no feature checked by reading.
+            ...alsoMadeSentences(m, feature),
             ...(built ? [`What was built: ${shown(built)}`] : []),
             ...(notes.length > 0 ? [`The reviewer left ${plural(notes.length, notes.every((n) => n.severity === "minor") ? "small note" : "note")}: ${notes.slice(0, 3).map((n) => shown(n.description)).join("; ")}${notes.length > 3 ? ` and ${notes.length - 3} more` : ""}.`] : []),
             ...(reason !== undefined ? [askedBecause(reason, 0, approvedTitles(m, feature))] : []),

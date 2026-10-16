@@ -1088,8 +1088,10 @@ describe("a report for a mission that has a feature no test checks", () => {
       const mixedTests = guideMission(["docs/USAGE.md"]);
       mixedTests.features.push(feature({ id: "code", title: "Code", status: "done", acceptance: ["a"], frozenTests: [{ path: "a.test.ts", sha256: "x" }] }));
       const withTests = tryIt(mixedTests);
-      expect(withTests).toContain("`npm run verify`: run the project's own checks");
-      expect(withTests).not.toContain("Then open");
+      // R6-3: still a way to try it, but as an extra after the file to open (the file comes first)
+      expect(withTests).toContain("Then open `docs/USAGE.md` in your app folder (in Windows File Explorer: ");
+      expect(withTests).toContain("The project's own checks do not cover `docs/USAGE.md`. If you also want to run them, run `npm install` first, and then `npm run verify`.");
+      expect(withTests).not.toMatch(/\n3\./);
       // a feature that was blocked does not count either way
       const blocked = guideMission(["docs/USAGE.md"]);
       blocked.features.push(feature({ id: "stuck", title: "Stuck", status: "blocked", blockedReason: "x" }));
@@ -1158,14 +1160,16 @@ describe("a report for a mission that has a feature no test checks", () => {
         expect(lookText(lookOf(["README.md", "site/index.html"]))).toContain(". Open `site/index.html` in your browser.");
       });
 
-      it("R4-5: with a feature checked by tests in the same mission, keeps the project's own checks and names the file after them, in other words", () => {
+      it("R4-5 and R6-3: with a feature checked by tests in the same mission, names the file first and shows the project's own checks as an extra after it, in other words", () => {
         const withTests = lookOf(["data/columns.csv"]);
         withTests.features.push(feature({ id: "code", title: "Code", status: "pending", acceptance: ["a"] }));
         const text = lookText(withTests);
-        expect(text).toContain("4. `npm run verify`: run the project's own checks");
-        expect(text).toContain("The project's own checks do not cover this feature. To look at it, open `data/columns.csv` in your app folder (in Windows File Explorer: ");
-        expect(text).not.toContain("Then open");
-        expect(text.indexOf("npm run verify")).toBeLessThan(text.indexOf("To look at it, open"));
+        // R6-3: the file to open comes first; the project's own checks are an extra after it, and are not a numbered step
+        expect(text).toContain("Then open `data/columns.csv` in your app folder (in Windows File Explorer: ");
+        expect(text).toContain("The project's own checks do not cover this feature. If you also want to run them, run `npm install` first, and then `npm run verify`.");
+        expect(text).not.toMatch(/\n3\./);
+        expect(text).not.toContain("run the project's own checks\n");
+        expect(text.indexOf("Then open")).toBeLessThan(text.indexOf("npm run verify"));
         // a feature that tests check, looked at in the same mission, gets no such sentence
         const tested = lookOf(["src/index.js"]);
         tested.features[0] = { ...tested.features[0]!, mode: undefined, frozenTests: [{ path: "a.test.ts", sha256: "x" }] };
@@ -1194,16 +1198,18 @@ describe("a report for a mission that has a feature no test checks", () => {
         expect(report(withLook({ files: ["a.md"], existingFiles: "no" }))).toContain("Files that changed: `a.md`.");
       });
 
-      it("keeps the project's own checks away from a mission that no test checks, but not from one a test checks", () => {
+      it("keeps the project's own checks away from a mission that no test checks, and shows them only as an extra where a test checks another feature", () => {
         const code = lookText(lookOf(["docs/USAGE.md", "src/index.js"]));
         expect(code).toContain("3. `npm install`: download what the app needs (slow the first time)");
         expect(code).not.toMatch(/npm run verify|Then open/);
         const mixedTests = lookOf(["docs/USAGE.md"]);
         mixedTests.features.push(feature({ id: "code", title: "Code", status: "pending", acceptance: ["a"] }));
         const text = lookText(mixedTests);
-        expect(text).toContain("3. `npm install`");
-        expect(text).toContain("4. `npm run verify`: run the project's own checks");
-        expect(text).not.toContain("Then open");
+        // R6-3: the file to open first; installing and running the project's own checks come after it, as an extra, and are not numbered steps
+        expect(text).not.toMatch(/\n3\./);
+        expect(text).toContain("Then open `docs/USAGE.md` in your app folder");
+        expect(text).toContain("If you also want to run them, run `npm install` first, and then `npm run verify`.");
+        expect(text.indexOf("Then open")).toBeLessThan(text.indexOf("npm run verify"));
         // ten files listed: the list may have been cut
         expect(lookText(lookOf(Array.from({ length: 10 }, (_, i) => `docs/part${i}.md`)))).not.toContain("Then open");
       });
@@ -1280,9 +1286,10 @@ describe("a report for a mission that has a feature no test checks", () => {
     expect(render(part, { prose: null })).not.toContain("are built and checked.");
   });
 
-  it("puts how a finished feature was checked in the facts for the summary writer, only for a feature that has a mode", () => {
+  it("puts how a finished feature was checked in the facts for the summary writer, only in a mission that has a feature with a mode", () => {
     const facts = buildReportFacts(mixed(), []);
-    expect(facts).toContain('- add-habit "Add a habit" [done]: You can add a habit.\n');
+    // R6-2: a feature that tests check says so too, in a mission that has a feature checked by reading
+    expect(facts).toContain('- add-habit "Add a habit" [done]: You can add a habit. Checked by: tests written first.\n');
     expect(facts).toContain('- guide "Setup guide" [done]: You can setup guide. Checked by: a second AI against your list. No tests were written for it.\n');
     expect(facts).toContain('- landing "Landing page" [done]: You can landing page. Checked by: a second AI against your list and approved by you. No tests were written for it.\n');
     expect(buildReportFacts(realisticMission(), [])).not.toContain("Checked by:");

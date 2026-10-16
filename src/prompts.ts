@@ -270,6 +270,7 @@ export function testAuthorPrompt(
       ]),
     featureSection(f),
     uiContractSection(m),
+    otherFeaturesSection(m, f, "tests"),
     fileListSection(ctx.fileList),
   );
 }
@@ -301,6 +302,7 @@ export function buildPrompt(
     ]),
     featureSection(f),
     uiContractSection(m),
+    otherFeaturesSection(m, f, "code"),
     frozenTestsSection(f),
     verifySection(m, f),
     findings.length > 0 && section("Review findings to fix", [renderFindings(findings)]),
@@ -695,6 +697,26 @@ function uiContractSection(m: Mission): string {
   return section("UI contract", [
     "Shared by the tests and the implementation: routes, labels and test ids must match exactly.",
     m.spec?.uiContract.trim() || "(none defined)",
+  ]);
+}
+
+/**
+ * In a mission that has a feature checked by reading, the lines of the UI contract belong to the whole plan, and one of them may name a file that
+ * another feature makes (real run R6: the contract said the notes file and its headings, so the test author of the first feature wrote a test of
+ * that file and its engineer made the file; the feature that was meant to make it only rewrote it). The author of the tests and the engineer of a
+ * feature checked by tests are told so. A mission with no such feature gets nothing here, and its briefs are the ones they always were.
+ */
+function otherFeaturesSection(m: Mission, f: Feature, who: "tests" | "code"): string | false {
+  if (!hasModeFeature(m.features) || isModeFeature(f)) return false;
+  const at = m.features.findIndex((x) => x.id === f.id);
+  const later = at < 0 ? [] : m.features.slice(at + 1);
+  const own = code(f.id);
+  return section("The contract and the other features", [
+    "The UI contract above is for the whole plan. A line of it may describe a file or a name that another feature makes.",
+    who === "tests"
+      ? `Write tests only for the acceptance criteria of feature ${own}. Never create a file, and never test a file, that only another feature's checks name.`
+      : `Make only what the acceptance criteria of feature ${own} ask for, and what its frozen tests need. Never create a file that only another feature's checks name, even when a line of the contract describes it.`,
+    later.length > 0 && `The features that come after this one are made by other agents later. Their files are not yours:\n${bullets(later.map(featureTitle))}`,
   ]);
 }
 
