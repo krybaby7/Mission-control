@@ -128,6 +128,7 @@ Two parts, for someone who is not technical (a CEO, say) and looks at an iPad or
 
 | File | What's in it |
 |---|---|
+| [docs/HANDOFF.md](docs/HANDOFF.md) | For a new agent or a new chat that takes over: what exists, what was decided and why, what is still open, and what to do next |
 | [docs/brainstorm.md](docs/brainstorm.md) | Research, economics, fact-check of the X post, and prior art |
 | [docs/design-v1.md](docs/design-v1.md) | The architecture and the decisions behind it |
 | [docs/mvp-spec.md](docs/mvp-spec.md) | The exact build contract, including verified CLI facts and the decision log |
