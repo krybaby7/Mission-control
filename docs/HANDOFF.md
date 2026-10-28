@@ -230,7 +230,7 @@ These quotes come from the owner's messages in the cloud chats (typos kept as ty
 >
 > On 21 Oct, asked whether to swap Mission Control for an open-source harness: “I don't mind even losing the 28,000 lines of code if DeepSeek harness can just give us what we need instantly and without hassle, without having to test anything.” (The advice was not to swap: it is a single-agent workbench, a developer preview, and its Claude link goes through the Agent SDK, which has terms-of-service risk on a subscription.) The owner cares about a team that works without hassle, not about the code itself.
 
-The owner also had a real job in mind as a benchmark (12 Oct): a large task in a separate private project (`tameni-map-lab`) that refines a set of 3D landmark models, with a mandatory visual check by the owner and a draft pull request. It was judged too big for a first job and never run. Do not reach into that project without the owner.
+The owner also had a real job in mind as a benchmark (12 Oct): a large task in another of their private projects, with a mandatory visual check by the owner and a draft pull request. It was judged too big for a first job and never run. Ask the owner about it; do not reach into other projects without them.
 
 ### 6.2 Binding decisions (with the question each answered)
 
@@ -253,13 +253,13 @@ The owner also had a real job in mind as a benchmark (12 Oct): a large task in a
 | Run the whole brief autonomously; ask only for decisions that are truly the owner's | 15 Oct: “I am a non-technical CEO and will not be at the keyboard. Only ask me when a decision is truly mine.” |
 | Scope gates are the owner's: on 9 Oct, “Once the architecture is built do not implement anything. Stop there.” | Read as: build Mission Control itself, then stop, with no missions and no sample apps until the owner says go. Respect gates like this. |
 | Light work is always Haiku 5.5, never GPT Luna: “forget about luna, it is bad, keep it to haiku 5.5 for those kind of tasks” | Which cheap model? (9 Oct, unprompted) |
-| Keep Mission Control walled off from the owner's other projects, above all `trade-graph`, which holds exchange and API keys | 11 Oct: Mission Control's agents have full control in their box and must never see those keys. The agreed flow: Mission Control pushes a branch, the owner reviews it, the other system pulls it. |
+| Keep Mission Control walled off from the owner's other projects and their secrets | 11 Oct: Mission Control's agents have full control in their box and must never see another project's keys. The agreed flow when Mission Control works on another project: it pushes a branch, the owner reviews it, the other system pulls it. |
 
 ### 6.2a Questions the owner was asked and never answered
 
 | Asked | Question | Safe default until they answer |
 |---|---|---|
-| 11 Oct | Run Mission Control non-stop on a rented Linux server instead of the PC? The owner first said “I don t want to have to cap anything, so I ll go with the 8cpu /16gb option”, then asked “What if I go with contabo for the trade graph and hetzner for the Mission Control ?” The assistant endorsed a Hetzner CPX32 (4 CPU, 8 GB, about €36 a month) and offered to write a server setup guide (plain Ubuntu + Docker, no WSL). No answer, nothing bought. | The PC, as all later work assumed. `scripts/mc-docker.sh` should work on plain Ubuntu, but it was never tried there. |
+| 11 Oct | Run Mission Control non-stop on a rented Linux server instead of the PC? The owner leaned towards a server with no resource caps, and a 4 CPU / 8 GB rented server was suggested for Mission Control, with an offer to write its setup guide (plain Ubuntu + Docker, no WSL). No answer, nothing bought. | The PC, as all later work assumed. `scripts/mc-docker.sh` should work on plain Ubuntu, but it was never tried there. |
 | 11 Oct | Delete the branch `wip/build`? The owner said yes, but that session could not delete branches. It still exists (with `wip/ceo-dashboard`). | Offer to delete both once more; both are superseded. |
 | 21 Oct | Self-review gap: A (flag it in the report) or B (pause the feature)? | A. See 7.1 item 0. |
 | 21 Oct | Build a “primitives” layer? (advice was no; the owner did not reply) | Do not. Extract the shared attempt sequence only when you touch that code anyway. |
