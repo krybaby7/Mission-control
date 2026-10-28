@@ -162,7 +162,7 @@ The `wip/*` branches and `feat/ceo-dashboard` / `feat/checkpoints` are fully con
 8. [`docs/mvp-spec.md`](mvp-spec.md) (the engine contract and the decision log), [`docs/design-v1.md`](design-v1.md), [`docs/brainstorm.md`](brainstorm.md) (the research and economics behind it all).
 9. [`docs/dev-real-run.md`](dev-real-run.md): how real runs were made in the cloud.
 
-Two pages outside the repo (private claude.ai artifacts of the owner): the roadmap of 16 Oct, https://claude.ai/artifact/A2Siyxoa7C6JFu6548bMjA, and the visual overview written with this handoff (link in the owner's chat of 28 Oct).
+Two pages outside the repo (private claude.ai artifacts of the owner): the roadmap of 16 Oct, https://claude.ai/artifact/A2Siyxoa7C6JFu6548bMjA, and the “Mission Control Field Guide” written with this handoff (28 Oct), https://claude.ai/artifact/Rc8gSQFziurJAbJVFCNT7k: how it works, what it can and cannot do, the dashboard's real screens, and the decisions waiting for the owner.
 
 ---
 
