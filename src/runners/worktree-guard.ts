@@ -1,8 +1,8 @@
 // Keeps a read-only agent run read-only where no sandbox can: snapshots the git working tree it runs in, and
 // afterwards puts back whatever the run changed (files, the index, the branch and its commits).
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { controllerGitEnv } from "../util/launch-env.js";
 import { runProcess } from "../util/process.js";
 
 export interface WorktreeSnapshot {
@@ -30,7 +30,6 @@ const MAX_UNTRACKED_FILES = 2_000;
 const GIT_TIMEOUT_MS = 2 * 60_000;
 /** As in git.ts: raw paths, no colors, and no fsmonitor or hook commands from a config the agent may have written. */
 const SAFE_ARGS = ["-c", "core.quotepath=off", "-c", "color.ui=false", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"];
-const REPO_LOCATION_VARS = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX"];
 
 /** The state of the git working tree around `cwd`; undefined when it is not in one, or git fails. */
 export async function snapshotWorktree(cwd: string): Promise<WorktreeSnapshot | undefined> {
@@ -174,24 +173,23 @@ async function treePaths(root: string, tree: string): Promise<string[]> {
   return out.ok ? out.out.split("\0").filter(Boolean) : [];
 }
 
-async function withTempIndex<T>(use: (env: NodeJS.ProcessEnv, indexFile: string) => Promise<T>): Promise<T> {
-  const dir = mkdtempSync(join(tmpdir(), "mc-guard-"));
+async function withTempIndex<T>(use: (env: { indexFile: string }, indexFile: string) => Promise<T>): Promise<T> {
+  const dir = mkdtempSync(join("/tmp", "mc-guard-"));
   const indexFile = join(dir, "index");
   try {
-    return await use({ GIT_INDEX_FILE: indexFile }, indexFile);
+    return await use({ indexFile }, indexFile);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-async function git(cwd: string, args: string[], extraEnv: NodeJS.ProcessEnv = {}, stdin?: string): Promise<{ ok: boolean; out: string }> {
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" };
-  for (const key of REPO_LOCATION_VARS) delete env[key];
+async function git(cwd: string, args: string[], extraEnv: { indexFile?: string } = {}, stdin?: string): Promise<{ ok: boolean; out: string }> {
+  const env = controllerGitEnv({ indexFile: extraEnv.indexFile });
   const result = await runProcess({
     command: "git",
     args: [...SAFE_ARGS, ...args],
     cwd,
-    env: { ...env, ...extraEnv },
+    env,
     timeoutMs: GIT_TIMEOUT_MS,
     ...(stdin !== undefined && { stdin }),
   });

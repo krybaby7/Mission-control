@@ -316,6 +316,13 @@ export function parkedNotice(m: Mission, cp: PendingCheckpoint, ignored = false)
 
 /** What the team's plan reviewer (gate A) did with a plan the leader wrote, in full: the owner's look and `mc plan show`. */
 export function planReviewSentence(review: PlanReview): string {
+  if (review.latestRevision !== undefined) {
+    const latest = review.latestRevision === "applied" ? "The requested technical wording was applied."
+      : review.latestRevision === "partly_rejected" ? "Some technical wording was applied; changes to supplied requirements were rejected."
+        : "The latest proposed changes were not applied.";
+    const retained = review.outcome === "revised" ? " Earlier usable wording remains where applicable." : " The original usable plan was retained.";
+    return `${latest}${retained} Supplied checks, feature identities and dependencies were retained.${asked(review.issues)}`;
+  }
   switch (review.outcome) {
     case "approved":
       return "The team's plan reviewer read it and asked for no changes.";
@@ -330,6 +337,9 @@ export function planReviewSentence(review: PlanReview): string {
 
 /** The same, shortened for the report's header line. */
 export function planReviewShort(review: PlanReview): string {
+  if (review.latestRevision === "partly_rejected") return "technical wording was revised; changes to supplied requirements were rejected.";
+  if (review.latestRevision === "not_applied") return `the latest proposed changes were rejected; ${review.outcome === "revised" ? "earlier usable wording remains" : "the original plan was retained"}.`;
+  if (review.latestRevision === "applied") return "technical wording was revised; supplied requirements were retained.";
   switch (review.outcome) {
     case "approved":
       return "the team's plan reviewer asked for no changes.";

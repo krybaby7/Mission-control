@@ -1,0 +1,63 @@
+// Research reproduction against Cezar v0.16.3; stand-in agent only.
+// Scenario follows upstream issue #1733. Not a Mission Control implementation.
+import { execFile } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+import { expect, it } from 'vitest';
+import { RunStore } from '../runs/store.ts';
+import { RunManager } from './run.ts';
+import { graphToSteps, type WorkflowGraph } from './graph.ts';
+
+it('research: Continue should finish the previously failed workflow checks', async () => {
+  const shell = promisify(execFile);
+  const repo = mkdtempSync(join(tmpdir(), 'cezar-research-continue-'));
+  let manager: RunManager | undefined;
+  let store: ReturnType<typeof RunStore.open> | undefined;
+  try {
+    await shell('git', ['init', '-q', '-b', 'main'], {cwd:repo});
+    writeFileSync(join(repo, 'base.txt'), 'fixture\n');
+    await shell('git', ['add', '-A'], {cwd:repo});
+    await shell('git', ['-c','user.name=Research fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'], {cwd:repo});
+    store = RunStore.open(join(repo, '.ai/cezar'));
+    manager = new RunManager(store, repo);
+    const graph: WorkflowGraph = {
+      nodes:[
+        {id:'start', type:'start'},
+        {id:'build', type:'agent', prompt:'Make the fixture'},
+        {id:'verify', type:'check', command:'test -f ready.txt'},
+        {id:'downstream', type:'check', command:'printf reviewed > downstream.txt'},
+        {id:'done', type:'end', status:'success'},
+        {id:'failed', type:'end', status:'failed'},
+      ],
+      edges:[
+        {from:'start', to:'build'},
+        {from:'build.done', to:'verify'},
+        {from:'verify.pass', to:'downstream'},
+        {from:'verify.fail', to:'failed'},
+        {from:'downstream.pass', to:'done'},
+        {from:'downstream.fail', to:'failed'},
+      ],
+    };
+    const record=manager.startRun({name:'research-continue',source:'file',steps:graphToSteps(graph),graph},{task:'Test continuation',worktree:false});
+    const waitFor=async (ready:()=>boolean) => {
+      const end=Date.now()+20000;
+      while(!ready()){ if(Date.now()>end) throw new Error('fixture timeout'); await new Promise(r=>setTimeout(r,50)); }
+    };
+    await waitFor(()=>store!.getRun(record.id)?.status==='failed');
+    // Allow the completed process cleanup to settle before pressing Continue.
+    await new Promise(r=>setTimeout(r,200));
+    writeFileSync(join(repo,'ready.txt'),'fixed\n');
+    expect(manager.continueRun(record.id,{text:'The failed check is fixed. Continue the workflow.'})).toEqual({ok:true});
+    await waitFor(()=>['waiting','done','failed'].includes(store!.getRun(record.id)?.steps.find(s=>s.id==='continue-1')?.status ?? ''));
+    const final=store.getRun(record.id)!;
+    console.log('RESEARCH_OBSERVATION',JSON.stringify({status:final.status,steps:final.steps.map(s=>({id:s.id,status:s.status})),downstreamRan:existsSync(join(repo,'downstream.txt'))}));
+    expect(final.steps.find(s=>s.id==='verify')?.status).toBe('done');
+    expect(existsSync(join(repo,'downstream.txt'))).toBe(true);
+  } finally {
+    manager?.dispose();
+    store?.flush();
+    rmSync(repo,{recursive:true,force:true});
+  }
+},30000);

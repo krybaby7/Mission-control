@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Logger, VerifyConfig } from "./types.js";
 import {
   checkFrozen,
@@ -26,6 +26,7 @@ function makeTempDir(prefix = "mc-verify-"): string {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
   tempDirs = [];
 });
@@ -1187,7 +1188,9 @@ describe("Verifier", () => {
   it("ignores the shell's login and rc files, which agents could rewrite outside the repository", async () => {
     const home = makeTempDir("mc-verify-home-");
     for (const file of [".bash_profile", ".profile", ".bashrc", ".bash_login"]) writeFileSync(join(home, file), "exit 0\n");
-    const withHome = new Verifier({ logsDir, timeoutMs: 20_000, env: { ...process.env, HOME: home } });
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("BASH_ENV", join(home, ".profile"));
+    const withHome = new Verifier({ logsDir, timeoutMs: 20_000 });
     const result = await withHome.runFull(cwd, config("echo running tests; exit 1"));
     expect(result.ok).toBe(false);
     expect(result.exitCode).toBe(1);
@@ -1275,9 +1278,11 @@ describe("Verifier", () => {
     expect(log).toContain("line-500\n");
   });
 
-  it("runs in cwd with CI=1, FORCE_COLOR=0 and a scrubbed environment", async () => {
-    const env = { ...process.env, ANTHROPIC_API_KEY: "sk-secret", OPENAI_API_KEY: "sk-openai", MC_TEST_VALUE: "kept" };
-    const scrubbed = new Verifier({ logsDir, timeoutMs: 20_000, env });
+  it("runs in cwd with CI=1, FORCE_COLOR=0 and a positive environment", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-secret");
+    vi.stubEnv("OPENAI_API_KEY", "sk-openai");
+    vi.stubEnv("MC_TEST_VALUE", "synthetic-excluded");
+    const scrubbed = new Verifier({ logsDir, timeoutMs: 20_000 });
     const result = await scrubbed.runFull(
       cwd,
       config('echo "pwd=$(pwd)"; echo "CI=$CI FORCE_COLOR=$FORCE_COLOR"; echo "keys=${ANTHROPIC_API_KEY:-none}/${OPENAI_API_KEY:-none} value=$MC_TEST_VALUE"'),
@@ -1285,7 +1290,7 @@ describe("Verifier", () => {
     expect(result.ok).toBe(true);
     expect(result.outputTail).toContain(`pwd=${cwd}`);
     expect(result.outputTail).toContain("CI=1 FORCE_COLOR=0");
-    expect(result.outputTail).toContain("keys=none/none value=kept");
+    expect(result.outputTail).toContain("keys=none/none value=");
     expect(result.outputTail).not.toContain("sk-secret");
   });
 
@@ -1423,5 +1428,31 @@ describe("Verifier", () => {
       ["info", "verify failed", 2],
     ]);
     expect(entries[1]?.data?.logFile).toBe(join(logsDir, "verify-red.log"));
+  });
+});
+
+describe("Verifier positive launch policy", () => {
+  it("does not pass an unrelated value to a project verification command", async () => {
+    const cwd = makeTempDir();
+    vi.stubEnv("MC_UNRELATED_SECRET", "synthetic-secret");
+    const verifier = new Verifier({ logsDir: join(cwd, "logs"), timeoutMs: 5000 });
+    const result = await verifier.runFull(cwd, config('printf "%s" "${MC_UNRELATED_SECRET-unset}"'));
+    expect(result.ok).toBe(true);
+    expect(result.outputTail).toContain("unset");
+    expect(result.outputTail).not.toContain("synthetic-secret");
+  });
+});
+
+describe("Verifier environment preparation failure", () => {
+  it("returns a failed verification without launching or echoing the invalid value", async () => {
+    const cwd = makeTempDir();
+    const verifier = new Verifier({ logsDir: join(cwd, "logs"), timeoutMs: 5000, path: ["/mnt/c/synthetic-private-value"] });
+    const result = await verifier.runFull(cwd, config("echo synthetic-launched"));
+    expect(result.ok).toBe(false);
+    expect(result.outputTail).toContain("path[0]");
+    expect(result.outputTail).not.toContain("synthetic-private-value");
+    expect(result.outputTail).not.toContain("synthetic-launched");
+    expect(result.signature).not.toBe("");
+    expect(readFileSync(result.logFile, "utf8")).toContain("path[0]");
   });
 });

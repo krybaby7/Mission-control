@@ -83,7 +83,8 @@ export function parseUntil(hhmm: string, nowMs: number): number {
 
 /** Works through the queue (or one mission) until done, stopped or out of time. Throws only for setup problems. */
 export async function runNight(opts: NightOptions = {}): Promise<NightResult> {
-  const config = withAbsolutePaths(opts.config ?? loadConfig());
+  const sourceConfig = withAbsolutePaths(opts.config ?? loadConfig());
+  const config = { ...sourceConfig, pacing: { ...sourceConfig.pacing } };
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
   const deadline = opts.until === undefined ? undefined : parseUntil(opts.until, startedAt);
@@ -532,6 +533,9 @@ function renderSummary(night: Night, missions: Mission[], waitingForYou: Mission
     "",
     `Started ${clockTime(startedAt)}, finished ${clockTime(clock.now())}. ${endingSentence(night, missions)}`,
     "",
+    `Allowance policy for this run: ${night.config.pacing.unknownAllowance ?? "warn"}.`,
+    ...(night.config.pacing.unknownAllowance !== "stop" ? ["Allowance may be unconfirmed; the reserve is not assured. Existing usage limits still apply."] : []),
+    "",
     "## Missions",
     "",
     ...(missions.length > 0
@@ -597,6 +601,9 @@ function nightMessage(missions: Mission[], waitingForYou: Mission[], waitingForC
 
 /** A mission's result in plain words, e.g. "Partly done, 4 of 6 features done". */
 export function missionOutcome(m: Mission): string {
+  if (!isWaitingForCheck(m) && m.pause?.kind === "allowance_unknown" && m.status === "stopped") {
+    return `Paused: allowance could not be confirmed, ${featureCount(m)}`;
+  }
   return `${isWaitingForCheck(m) ? "Waiting for your check" : statusPhrase(m.status)}, ${featureCount(m)}`;
 }
 

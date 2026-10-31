@@ -1,7 +1,7 @@
 // Codex CLI runner: drives `codex exec --json`, feeding the prompt on stdin and reading its JSONL event stream.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AllowanceReadOptions, AllowanceReadResult } from "../allowance.js";
 import { detectLimitText } from "../limits.js";
 import { validateOutput } from "../schemas.js";
 import type {
@@ -18,19 +18,19 @@ import type {
 } from "../types.js";
 import { ensureDir } from "../util/fs.js";
 import { parseJsonLine } from "../util/ndjson.js";
-import { runProcess, scrubEnv, type SpawnResult } from "../util/process.js";
-import { readCodexAccount, type CodexAccountReading } from "./codex-app-server.js";
+import { providerLaunchEnv, validateTempRoot, type ProviderLaunchOptions } from "../util/launch-env.js";
+import { runProcess, type SpawnResult } from "../util/process.js";
+import { readCodexAccount, validMetadataTimeout, type CodexAccountReading } from "./codex-app-server.js";
 import { restoreWorktree, snapshotWorktree, type WorktreeSnapshot } from "./worktree-guard.js";
 
-export interface CodexRunnerOptions {
+
+export interface CodexRunnerOptions extends ProviderLaunchOptions {
   /** Default "codex". */
   command?: string;
   logger?: Logger;
   /** Sandbox for workspace-write jobs. */
   writeSandbox: "danger-full-access" | "workspace-write";
-  /** Default process.env; always scrubbed of API keys so the ChatGPT login is used. */
-  env?: NodeJS.ProcessEnv;
-  /** Where per-run temp files (output schema, last message) go. Default os.tmpdir(). */
+  /** Where per-run temp files (output schema, last message) go. Default /tmp. */
   tmpDir?: string;
   /** How long codex may keep running once its turn has ended before it is stopped. Default 30 s. */
   exitGraceMs?: number;
@@ -126,15 +126,16 @@ export class CodexRunner implements AgentRunner {
   private readonly command: string;
   private readonly logger: Logger | undefined;
   private readonly writeSandbox: CodexRunnerOptions["writeSandbox"];
-  private readonly env: NodeJS.ProcessEnv | undefined;
+  private readonly launch: ProviderLaunchOptions;
   private readonly tmpDir: string;
   private readonly exitGraceMs: number;
   private readonly stallMs: number;
   private readonly appServerTimeoutMs: number;
   private readonly usagePollIntervalMs: number;
-  /** The first app-server reading (login type and usage), shared by every run of this runner. */
-  private firstReading: Promise<CodexAccountReading | undefined> | undefined;
-  private firstUsageReported = false;
+  /** First-query preparation is shared; only the known billing identity is cached. */
+  private loginChecked: Promise<void> | undefined;
+  /** A missing later answer cannot forget a previously known billing identity. */
+  private knownAccountType: string | null | undefined;
   private lastUsageReadAt = -Infinity;
   /** The sandbox read-only jobs get, once probed (see readOnlySandbox). */
   private readOnlyMode: Promise<Sandbox> | undefined;
@@ -143,8 +144,8 @@ export class CodexRunner implements AgentRunner {
     this.command = opts.command ?? "codex";
     this.logger = opts.logger;
     this.writeSandbox = opts.writeSandbox;
-    this.env = opts.env;
-    this.tmpDir = opts.tmpDir ?? tmpdir();
+    this.launch = { path: opts.path, configHome: opts.configHome };
+    this.tmpDir = opts.tmpDir ?? "/tmp";
     this.exitGraceMs = opts.exitGraceMs ?? DEFAULT_EXIT_GRACE_MS;
     this.stallMs = opts.stallMs ?? DEFAULT_STALL_MS;
     this.appServerTimeoutMs = opts.appServerTimeoutMs ?? DEFAULT_APP_SERVER_TIMEOUT_MS;
@@ -173,18 +174,22 @@ export class CodexRunner implements AgentRunner {
   async run(job: AgentJob, opts: RunOptions = {}): Promise<RunResult> {
     let workDir: string;
     try {
+      validateTempRoot(this.tmpDir);
       workDir = mkdtempSync(join(ensureDir(this.tmpDir), "mc-codex-"));
     } catch (err) {
       return crashedBeforeStart(`cannot create temp files for codex: ${errorMessage(err)}`);
     }
     try {
       return await this.runIn(workDir, job, opts);
+    } catch (err) {
+      return crashedBeforeStart(errorMessage(err));
     } finally {
       removeQuietly(workDir);
     }
   }
 
   private async runIn(workDir: string, job: AgentJob, opts: RunOptions): Promise<RunResult> {
+    const env = providerLaunchEnv({ purpose: "worker", provider: "codex", ownedDir: workDir, ...this.launch });
     const emit = (event: RunEvent): void => {
       try {
         opts.onEvent?.(event);
@@ -194,9 +199,9 @@ export class CodexRunner implements AgentRunner {
     };
     // An aborted run starts nothing (runProcess sees the signal), so it needs no preparation either.
     const aborted = opts.signal?.aborted === true;
-    const refusal = aborted ? undefined : await this.loginRefusal(job, emit);
+    const refusal = aborted ? undefined : await this.loginRefusal(job, emit, opts.signal);
     if (refusal) return refusal;
-    const readOnlySandbox = aborted ? "read-only" : await this.readOnlySandbox();
+    const readOnlySandbox = opts.signal?.aborted ? "read-only" : await this.readOnlySandbox();
     const unsandboxedReadOnly = job.access === "read-only" && this.sandboxFor(job, readOnlySandbox) === "danger-full-access";
     const files: CodexRunFiles = { lastMessageFile: join(workDir, "last-message.txt") };
     if (job.outputSchema !== undefined) {
@@ -210,8 +215,8 @@ export class CodexRunner implements AgentRunner {
 
     const guard = unsandboxedReadOnly ? await snapshotWorktree(job.cwd) : undefined;
     const stream = new StreamState();
-    const proc = await this.spawn(job, files, stream, emit, opts.signal, readOnlySandbox, unsandboxedReadOnly);
-    if (guard) await this.undoChanges(job, guard, emit);
+    const proc = await this.spawn(job, files, stream, emit, opts.signal, readOnlySandbox, unsandboxedReadOnly, env);
+    const readonlyMutation = guard ? await this.undoChanges(job, guard, emit) : unsandboxedReadOnly ? "unknown" : undefined;
     const text = readTextOr(files.lastMessageFile).trim() || stream.finalText;
     const callerAborted = proc.aborted && opts.signal?.aborted === true;
     const verdict = classify(job, proc, stream, text, callerAborted);
@@ -222,9 +227,10 @@ export class CodexRunner implements AgentRunner {
       exitCode: proc.exitCode,
       durationMs: proc.durationMs,
     });
-    if (!callerAborted && proc.spawnError === undefined) await this.readUsage(emit);
+    if (!callerAborted && proc.spawnError === undefined) await this.readUsage(emit, opts.signal);
     return {
       outcome: verdict.outcome,
+      ...(readonlyMutation !== undefined && { readonlyMutation }),
       text,
       ...(verdict.structured !== undefined && { structured: verdict.structured }),
       ...(stream.sessionId !== undefined && { sessionId: stream.sessionId }),
@@ -249,6 +255,7 @@ export class CodexRunner implements AgentRunner {
     callerSignal: AbortSignal | undefined,
     readOnlySandbox: Sandbox,
     unsandboxedReadOnly: boolean,
+    env: NodeJS.ProcessEnv,
   ): Promise<SpawnResult> {
     const ourStop = new AbortController();
     let graceTimer: NodeJS.Timeout | undefined;
@@ -263,7 +270,7 @@ export class CodexRunner implements AgentRunner {
         command: this.command,
         args: this.buildArgs(job, files, readOnlySandbox),
         cwd: job.cwd,
-        env: scrubEnv(this.env ?? process.env),
+        env,
         stdin: fullPrompt(job, unsandboxedReadOnly),
         timeoutMs: job.limits.timeoutMs,
         signal: callerSignal === undefined ? ourStop.signal : AbortSignal.any([callerSignal, ourStop.signal]),
@@ -311,30 +318,35 @@ export class CodexRunner implements AgentRunner {
   }
 
   private async probeReadOnlySandbox(): Promise<Sandbox> {
-    const probe = await runProcess({
-      command: this.command,
-      args: ["sandbox", "-c", tomlSetting("sandbox_mode", "read-only"), "--", "true"],
-      cwd: ensureDir(this.tmpDir),
-      env: scrubEnv(this.env ?? process.env),
-      timeoutMs: SANDBOX_PROBE_TIMEOUT_MS,
-    });
-    // A missing codex is reported by the run itself.
-    if (probe.exitCode === 0 || probe.spawnError !== undefined) return "read-only";
-    const detail = clip(lastLines(probe.stderr, 3).trim() || (probe.timedOut ? "it did not answer" : `exit code ${probe.exitCode}`), 500);
-    this.logger?.warn("codex's read-only sandbox does not work here; read-only jobs run without it, and changes they make are undone", { detail });
-    return "danger-full-access";
+    const ownedDir = mkdtempSync(join(ensureDir(this.tmpDir), "mc-codex-probe-"));
+    try {
+      const probe = await runProcess({
+        command: this.command,
+        args: ["sandbox", "-c", tomlSetting("sandbox_mode", "read-only"), "--", "true"],
+        cwd: ownedDir,
+        env: providerLaunchEnv({ purpose: "provider-metadata", provider: "codex", ownedDir, ...this.launch }),
+        timeoutMs: SANDBOX_PROBE_TIMEOUT_MS,
+      });
+      // A missing codex is reported by the run itself.
+      if (probe.exitCode === 0 || probe.spawnError !== undefined) return "read-only";
+      const detail = clip(lastLines(probe.stderr, 3).trim() || (probe.timedOut ? "it did not answer" : `exit code ${probe.exitCode}`), 500);
+      this.logger?.warn("codex's read-only sandbox does not work here; read-only jobs run without it, and changes they make are undone", { detail });
+      return "danger-full-access";
+    } finally { removeQuietly(ownedDir); }
   }
 
   /** Puts back whatever an unsandboxed read-only run changed in its worktree. */
-  private async undoChanges(job: AgentJob, guard: WorktreeSnapshot, emit: (event: RunEvent) => void): Promise<void> {
+  private async undoChanges(job: AgentJob, guard: WorktreeSnapshot, emit: (event: RunEvent) => void): Promise<RunResult["readonlyMutation"]> {
     try {
       const undone = await restoreWorktree(guard);
       if (undone.length === 0) return;
       const paths = undone.slice(0, 20).join(", ") + (undone.length > 20 ? `, … (${undone.length} in all)` : "");
       this.logger?.warn("a read-only codex run changed files; they were put back", { job: job.id, paths });
       emit({ type: "progress", text: clip(`read-only run changed files, put back: ${paths}`, PROGRESS_CHARS) });
+      return "restored";
     } catch (err) {
       this.logger?.warn("could not check what a read-only codex run changed", { job: job.id, error: errorMessage(err) });
+      return "unknown";
     }
   }
 
@@ -343,38 +355,72 @@ export class CodexRunner implements AgentRunner {
    * pay-per-use credits, not the ChatGPT plan, so no run starts on it; it needs a human, like a lost login. The same
    * reading gives the first usage windows. Unknown (an older codex, a timeout) lets the run go ahead.
    */
-  private async loginRefusal(job: AgentJob, emit: (event: RunEvent) => void): Promise<RunResult | undefined> {
-    this.firstReading ??= this.askAppServer(true);
-    const reading = await this.firstReading;
-    if (!this.firstUsageReported) {
-      this.firstUsageReported = true;
-      for (const info of reading?.utilization ?? []) emit({ type: "utilization", info });
-    }
-    const error = billingLoginError(reading?.accountType);
+  private async loginRefusal(job: AgentJob, emit: (event: RunEvent) => void, signal?: AbortSignal): Promise<RunResult | undefined> {
+    this.loginChecked ??= this.askAppServer(true, { signal }).then((reading) => this.emitAllowance(reading, emit));
+    await this.loginChecked;
+    const error = billingLoginError(this.knownAccountType);
     if (error === undefined) return undefined;
-    this.logger?.warn("codex run refused: its login bills pay-per-use credits", { job: job.id, account: reading?.accountType });
+    this.logger?.warn("codex run refused: its login needs attention", { job: job.id, account: this.knownAccountType });
     return { outcome: "auth", text: "", usage: emptyUsage(), error, durationMs: 0, exitCode: null };
   }
 
-  /** After a run, at most every usagePollIntervalMs: how full codex's usage windows are, for pacing. */
-  private async readUsage(emit: (event: RunEvent) => void): Promise<void> {
-    if (Date.now() - this.lastUsageReadAt < this.usagePollIntervalMs) return;
-    const reading = await this.askAppServer(false);
-    for (const info of reading?.utilization ?? []) emit({ type: "utilization", info });
+  /** Explicit controller refresh: a new transport query, never a receipt replay. */
+  async readAllowance(opts: AllowanceReadOptions = {}): Promise<AllowanceReadResult> {
+    if (opts.signal?.aborted) return { status: "aborted" };
+    if (!validMetadataTimeout(this.appServerTimeoutMs) ||
+      (opts.timeoutMs !== undefined && (!Number.isFinite(opts.timeoutMs) || opts.timeoutMs <= 0))) return { status: "unavailable" };
+    const timeoutMs = Math.min(this.appServerTimeoutMs, opts.timeoutMs ?? this.appServerTimeoutMs);
+    // Even an unavailable explicit query consumes first-login preparation. A worker
+    // must not secretly repeat admission's query or restamp its cached samples.
+    const pending = this.askAppServer(true, { ...opts, timeoutMs });
+    this.loginChecked ??= pending.then(() => {});
+    const reading = await pending;
+    if (opts.signal?.aborted) return { status: "aborted" };
+    const error = billingLoginError(this.knownAccountType);
+    if (error !== undefined) return { status: "auth", error };
+    if (!reading?.complete || reading.accountType !== "chatgpt") return { status: "unavailable" };
+    return { status: "observed", observations: reading.observations };
   }
 
-  private async askAppServer(account: boolean): Promise<CodexAccountReading | undefined> {
+  private rememberAccount(reading: CodexAccountReading | undefined): void {
+    const account = reading?.accountType;
+    if (account === "chatgpt" || account === "apiKey" || account === "amazonBedrock" || account === null) this.knownAccountType = account;
+  }
+
+  private emitAllowance(reading: CodexAccountReading | undefined, emit: (event: RunEvent) => void): void {
+    if (reading?.complete && reading.observations.length > 0) emit({ type: "allowance", observations: reading.observations });
+  }
+
+  /** After a run, at most every usagePollIntervalMs: one batch per actual response. */
+  private async readUsage(emit: (event: RunEvent) => void, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted || Date.now() - this.lastUsageReadAt < this.usagePollIntervalMs) return;
+    const reading = await this.askAppServer(false, { signal });
+    this.emitAllowance(reading, emit);
+  }
+
+  private async askAppServer(account: boolean, opts: AllowanceReadOptions = {}): Promise<CodexAccountReading | undefined> {
     this.lastUsageReadAt = Date.now();
+    let ownedDir: string | undefined;
     try {
-      return await readCodexAccount({
+      const timeoutMs = opts.timeoutMs ?? this.appServerTimeoutMs;
+      if (!validMetadataTimeout(timeoutMs) || opts.signal?.aborted) return undefined;
+      validateTempRoot(this.tmpDir);
+      ownedDir = mkdtempSync(join(ensureDir(this.tmpDir), "mc-codex-metadata-"));
+      const reading = await readCodexAccount({
         command: this.command,
-        env: scrubEnv(this.env ?? process.env),
-        cwd: ensureDir(this.tmpDir),
-        timeoutMs: this.appServerTimeoutMs,
+        launch: { ownedDir, ...this.launch },
+        cwd: ownedDir,
+        timeoutMs,
+        signal: opts.signal,
         account,
       });
-    } catch {
+      if (account) this.rememberAccount(reading);
+      return reading;
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Invalid child environment setting:")) this.logger?.warn(err.message);
       return undefined;
+    } finally {
+      if (ownedDir !== undefined) removeQuietly(ownedDir);
     }
   }
 }
@@ -388,6 +434,7 @@ function billingLoginError(accountType: string | null | undefined): string | und
   if (accountType === "amazonBedrock") {
     return `Codex is set up to use Amazon Bedrock, which bills your AWS account instead of your ChatGPT plan, so the run was not started. ${fix}`;
   }
+  if (accountType === null) return "Codex is not logged in. Log in with your ChatGPT account (codex login --device-auth).";
   return undefined;
 }
 

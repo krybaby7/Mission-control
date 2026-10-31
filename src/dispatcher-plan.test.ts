@@ -134,7 +134,7 @@ describe("a mission queued with a plan written outside the team", () => {
     expect(done.plan?.review?.outcome).toBe("approved");
   });
 
-  it("uses the revised plan when its reviewer asks for changes, and says so in the look", async () => {
+  it("rejects a supplied-plan revision that drops a feature, and says so in the look", async () => {
     const issues = ["Name the label of the greeting.", "Say what farewell returns."];
     const hh = harness({
       agents: {
@@ -145,15 +145,14 @@ describe("a mission queued with a plan written outside the team", () => {
     const id = hh.createMission("greenfield", { plan: planSource(TWO), checkpoints: ["plan"] }).id;
     const parked = await hh.run(id);
     expect(labels(hh)).toEqual(["gate-a", "spec"]);
-    expect(parked.plan?.review).toEqual({ outcome: "revised", issues });
+    expect(parked.plan?.review).toMatchObject({ outcome: "not_applied", latestRevision: "not_applied", issues });
     expect(parked.plan?.spec.features.map((f) => f.id)).toEqual(["greet", "farewell"]); // what the leader wrote is kept
-    expect(parked.features.map((f) => f.id)).toEqual(["greet"]); // what the team works from is the revision
-    expect(parked.checkpoint?.look.lines.slice(0, 2)).toEqual([
-      "This plan was written by the leader, not by the team's planner.",
-      "The team's plan reviewer asked for changes, so the team's planner revised the plan. This is the revised plan. It asked: Name the label of the greeting. Say what farewell returns.",
-    ]);
-    expect(parked.checkpoint?.look.lines).toContain("Check for “Feature greet”: Revised check.");
-    expect(readFileSync(hh.store.reportPath(id), "utf8")).toContain("the team's plan reviewer asked for changes and the planner revised it.");
+    expect(parked.features.map((f) => f.id)).toEqual(["greet", "farewell"]);
+    expect(parked.checkpoint?.look.lines[0]).toBe("This plan was written by the leader, not by the team's planner.");
+    expect(parked.checkpoint?.look.lines.join(" ")).toContain("latest proposed changes were not applied");
+    expect(parked.checkpoint?.look.lines.join(" ")).toContain("farewell");
+    expect(parked.checkpoint?.look.lines).toContain("Check for “Feature greet”: answer in src/greet.mjs returns greet");
+    expect(readFileSync(hh.store.reportPath(id), "utf8")).toContain("the latest proposed changes were rejected; the original plan was retained.");
   });
 
   // R3-8 of the real runs: a long answer of the plan reviewer is wrapped into several lines without a lead of their own, and the report made a bullet of each.
@@ -168,10 +167,10 @@ describe("a mission queued with a plan written outside the team", () => {
     const id = hh.createMission("greenfield", { plan: planSource(TWO), checkpoints: ["plan"] }).id;
     const parked = await hh.run(id);
     const lines = parked.checkpoint?.look.lines ?? [];
-    const first = lines.findIndex((l) => l.startsWith("The team's plan reviewer asked for changes"));
+    const first = lines.findIndex((l) => l.startsWith("The latest proposed changes were not applied"));
     const asked = lines.findIndex((l) => l.startsWith("You asked:"));
-    // The revised plan has other checks than the leader's, so a line about that follows the answer (it is a line of its own, not a piece of the answer).
-    const counted = lines.findIndex((l) => l.startsWith("Compared with the plan the leader wrote"));
+    // Rejected edits remain with the wrapped review, followed by the original plan facts.
+    const counted = asked;
     expect(counted).toBeGreaterThan(first);
     expect(first).toBe(1);
     expect(counted).toBeGreaterThan(first + 2); // the answer needs more than one line
@@ -179,7 +178,7 @@ describe("a mission queued with a plan written outside the team", () => {
     expect(lines.slice(0, first + 1).some((l) => l.startsWith(" "))).toBe(false);
     expect(lines.slice(asked).some((l) => l.startsWith(" "))).toBe(false); // the lines of a fact keep their lead and are not indented
     const report = readFileSync(hh.store.reportPath(id), "utf8").split("\n");
-    const at = report.findIndex((l) => l.startsWith("- The team's plan reviewer asked for changes"));
+    const at = report.findIndex((l) => l.startsWith("- The latest proposed changes were not applied"));
     expect(at).toBeGreaterThan(-1);
     for (const piece of lines.slice(first + 1, counted)) {
       expect(report).toContain(`  ${piece.trim()}`);
@@ -205,10 +204,11 @@ describe("a mission queued with a plan written outside the team", () => {
     });
     const id = hh.createMission("greenfield", { plan: planSource(TWO), checkpoints: ["plan"] }).id;
     const parked = await hh.run(id);
-    expect(parked.plan?.review).toEqual({ outcome: "not_applied", issues: ["Add a check."] });
+    expect(parked.plan?.review).toMatchObject({ outcome: "not_applied", latestRevision: "not_applied", issues: ["Add a check."] });
     expect(parked.features.map((f) => f.id)).toEqual(["greet", "farewell"]);
-    expect(parked.checkpoint?.look.lines[1]).toBe("The team's plan reviewer asked for changes that could not be applied, so the plan is as the leader wrote it. It asked: Add a check.");
-    expect(parked.notes).toContain("The plan reviewer asked for changes that could not be applied: Add a check.");
+    expect(parked.checkpoint?.look.lines.join(" ")).toContain("The latest proposed changes were not applied.");
+    expect(parked.checkpoint?.look.lines.join(" ")).toContain("It asked: Add a check.");
+    expect(parked.plan?.review?.rejectedChanges?.join(" ")).toContain("no plan");
   });
 
   it("says the plan reviewer did not finish when it gave no answer", async () => {
@@ -289,7 +289,9 @@ describe("a mission queued with a plan written outside the team", () => {
     hh.store.save(m);
     const again = await hh.run(id);
     expect(count(hh, "gate-a")).toBe(2);
-    expect(again.plan?.review).toEqual({ outcome: "revised", issues: ["Add a check."] });
+    expect(again.plan?.review).toMatchObject({ outcome: "revised", issues: ["Add a check."] });
+    expect(again.plan?.spec).toEqual(planSource(TWO).spec);
+    expect(again.features.map((f) => f.acceptance)).toEqual(planSource(TWO).spec.features.map((f) => f.acceptance));
   });
 
   it("treats a damaged plan field as no plan: the team's planner writes the plan", async () => {

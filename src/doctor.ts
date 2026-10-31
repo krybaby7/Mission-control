@@ -1,7 +1,7 @@
 // `mc doctor`: checks that this computer is ready for a run (tools, logins, settings, folders, disk
 // space), and with `live` makes one tiny real request to each AI. Every check catches its own errors, so the
 // doctor always finishes and reports, whatever is broken.
-import { accessSync, constants, existsSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, rmSync, statfsSync, statSync, writeFileSync, mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { configPath, defaultConfig, effectivePermissions, inContainer, loadConfig, resolveModel, validateConfig } from "./config.js";
@@ -13,7 +13,8 @@ import type { AgentRunner, Config, Family, JsonSchema, Provider, Tier } from "./
 import { systemClock } from "./util/clock.js";
 import { ensureDir, expandHome } from "./util/fs.js";
 import { nullLogger } from "./util/logger.js";
-import { runProcess, scrubEnv, type SpawnResult } from "./util/process.js";
+import { cleanupLaunchDir, controllerGitEnv, providerLaunchEnv, type ToolPathOptions } from "./util/launch-env.js";
+import { runProcess, type SpawnResult } from "./util/process.js";
 
 export interface DoctorCheck {
   name: string;
@@ -26,7 +27,8 @@ export interface DoctorCheck {
   severity: "error" | "warn";
 }
 
-export interface DoctorOptions {
+
+export interface DoctorOptions extends ToolPathOptions {
   /** The settings to check against. Default: the settings file, whose own problems become a check. */
   config?: Config;
   /** Also make one tiny real request per AI family and the light model (uses a little of each plan). */
@@ -70,15 +72,15 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorCheck[]
   // once can log Codex out for the rest of the run (design-v1 §2.1), so commands that may talk to the servers wait for the run.
   const nightRun = activeNightRun(c);
   // One codex process at a time, for the same reason.
-  const codexLogin = guarded("Codex login", "error", () => (nightRun ? skippedDuringRun("Codex login", nightRun) : codexLoginCheck(c)));
-  const codexModels = codexLogin.then(() => guarded("Codex models", "error", () => (nightRun ? [] : codexModelsCheck(c))));
+  const codexLogin = guarded("Codex login", "error", () => (nightRun ? skippedDuringRun("Codex login", nightRun) : codexLoginCheck(c, opts.path)));
+  const codexModels = codexLogin.then(() => guarded("Codex models", "error", () => (nightRun ? [] : codexModelsCheck(c, opts.path))));
   const groups = await Promise.all([
     guarded("Node.js", "error", () => nodeCheck(process.versions.node)),
-    guarded("Git", "error", () => gitChecks()),
+    guarded("Git", "error", () => gitChecks(opts.path)),
     [settings.check],
-    guarded("Claude Code", "error", () => cliVersionCheck(claudeTool(c))),
-    guarded("Claude login", "error", () => claudeLoginCheck(c)),
-    guarded("Codex", "error", () => cliVersionCheck(codexTool(c))),
+    guarded("Claude Code", "error", () => cliVersionCheck(claudeTool(c), opts.path)),
+    guarded("Claude login", "error", () => claudeLoginCheck(c, opts.path)),
+    guarded("Codex", "error", () => cliVersionCheck(codexTool(c), opts.path)),
     codexLogin,
     codexModels,
     guarded("API keys", "error", () => apiKeyCheck()),
@@ -185,14 +187,14 @@ function nodeCheck(version: string): DoctorCheck {
   return fail("Node.js", "error", `version ${version} is too old: Mission Control needs ${min} or newer.`, `Install Node.js ${min} or newer, or use the Mission Control container (it has the right version).`);
 }
 
-async function gitChecks(): Promise<DoctorCheck[]> {
-  const version = await runCli("git", ["--version"]);
+async function gitChecks(path?: readonly string[]): Promise<DoctorCheck[]> {
+  const version = await runCli("git", ["--version"], COMMAND_TIMEOUT_MS, undefined, path);
   if (version.spawnError || version.exitCode !== 0) {
     const fix = "Install git (on Ubuntu: sudo apt install git). The Mission Control container already has it.";
     return [fail("Git", "error", `git is not installed or doesn't start: ${problemText(version)}`, fix)];
   }
-  const name = (await runCli("git", ["config", "--get", "user.name"])).stdout.trim();
-  const email = (await runCli("git", ["config", "--get", "user.email"])).stdout.trim();
+  const name = (await runCli("git", ["config", "--get", "user.name"], COMMAND_TIMEOUT_MS, undefined, path)).stdout.trim();
+  const email = (await runCli("git", ["config", "--get", "user.email"], COMMAND_TIMEOUT_MS, undefined, path)).stdout.trim();
   const identity =
     name && email
       ? pass("Git identity", `commits are signed as ${name} <${email}>`, "warn")
@@ -206,6 +208,7 @@ async function gitChecks(): Promise<DoctorCheck[]> {
 }
 
 interface Tool {
+  provider: "claude" | "codex";
   name: string;
   command: string;
   pinned: string | undefined;
@@ -213,15 +216,15 @@ interface Tool {
 }
 
 function claudeTool(c: Config): Tool {
-  return { name: "Claude Code", command: c.cli.claudeCommand, pinned: c.cli.claudeVersion, npmPackage: "@anthropic-ai/claude-code" };
+  return { provider: "claude", name: "Claude Code", command: c.cli.claudeCommand, pinned: c.cli.claudeVersion, npmPackage: "@anthropic-ai/claude-code" };
 }
 
 function codexTool(c: Config): Tool {
-  return { name: "Codex", command: c.cli.codexCommand, pinned: c.cli.codexVersion, npmPackage: "@openai/codex" };
+  return { provider: "codex", name: "Codex", command: c.cli.codexCommand, pinned: c.cli.codexVersion, npmPackage: "@openai/codex" };
 }
 
-async function cliVersionCheck(tool: Tool): Promise<DoctorCheck> {
-  const result = await runCli(tool.command, ["--version"]);
+async function cliVersionCheck(tool: Tool, path?: readonly string[]): Promise<DoctorCheck> {
+  const result = await runCli(tool.command, ["--version"], COMMAND_TIMEOUT_MS, tool.provider, path);
   if (result.spawnError) {
     return fail(tool.name, "error", `${tool.name} isn't installed: the command "${tool.command}" was not found.`, installFix(tool));
   }
@@ -246,11 +249,11 @@ function installFix(tool: Tool): string {
 
 // ───────────────────────────── Logins ─────────────────────────────
 
-async function claudeLoginCheck(c: Config): Promise<DoctorCheck> {
+async function claudeLoginCheck(c: Config, path?: readonly string[]): Promise<DoctorCheck> {
   const name = "Claude login";
   const credentials = join(claudeConfigDir(), ".credentials.json");
   if (isNonEmptyFile(credentials)) return pass(name, "logged in");
-  const status = await runCli(c.cli.claudeCommand, ["auth", "status"]);
+  const status = await runCli(c.cli.claudeCommand, ["auth", "status"], COMMAND_TIMEOUT_MS, "claude", path);
   if (status.spawnError) return fail(name, "error", "Can't check: Claude Code isn't installed.", installFix(claudeTool(c)));
   if (status.exitCode === 0) return pass(name, "logged in");
   return fail(name, "error", "Claude Code is not logged in.", loginFix("claude"));
@@ -262,9 +265,9 @@ function claudeConfigDir(): string {
   return dir ? absolute(dir) : join(homedir(), ".claude");
 }
 
-async function codexLoginCheck(c: Config): Promise<DoctorCheck> {
+async function codexLoginCheck(c: Config, path?: readonly string[]): Promise<DoctorCheck> {
   const name = "Codex login";
-  const status = await runCli(c.cli.codexCommand, ["login", "status"]);
+  const status = await runCli(c.cli.codexCommand, ["login", "status"], COMMAND_TIMEOUT_MS, "codex", path);
   if (status.spawnError) return fail(name, "error", "Can't check: Codex isn't installed.", installFix(codexTool(c)));
   if (status.exitCode !== 0) return fail(name, "error", "Codex is not logged in.", loginFix("codex"));
   if (/api key/i.test(commandOutput(status))) {
@@ -284,11 +287,11 @@ function loginFix(family: Family): string {
   return family === "claude" ? "Run claude, type /login and follow the steps." : "Run: codex login --device-auth";
 }
 
-async function codexModelsCheck(c: Config): Promise<DoctorCheck[]> {
+async function codexModelsCheck(c: Config, path?: readonly string[]): Promise<DoctorCheck[]> {
   const { provider, frontier, standard } = c.families.codex;
   if (provider !== "codex") return [];
   const name = "Codex models";
-  const result = await runCli(c.cli.codexCommand, ["debug", "models"], MODEL_LIST_TIMEOUT_MS);
+  const result = await runCli(c.cli.codexCommand, ["debug", "models"], MODEL_LIST_TIMEOUT_MS, "codex", path);
   if (result.spawnError) return [fail(name, "warn", "Can't check: Codex isn't installed.")];
   if (result.exitCode !== 0) return [fail(name, "warn", `"codex debug models" failed: ${problemText(result)}`)];
   const listed = commandOutput(result);
@@ -554,9 +557,22 @@ function liveFix(family: Family): string {
 
 // ───────────────────────────── Helpers ─────────────────────────────
 
-function runCli(command: string, args: string[], timeoutMs = COMMAND_TIMEOUT_MS): Promise<SpawnResult> {
-  // Scrubbed like the agents' own environment, so logins are checked the way the agents will use them.
-  return runProcess({ command: expandHome(command), args, cwd: tmpdir(), env: scrubEnv(), timeoutMs });
+async function runCli(command: string, args: string[], timeoutMs = COMMAND_TIMEOUT_MS, provider?: "claude" | "codex", path?: readonly string[]): Promise<SpawnResult> {
+  let ownedDir: string | undefined;
+  try {
+    let env: Record<string, string>;
+    if (provider === undefined) env = controllerGitEnv({ path });
+    else {
+      ownedDir = mkdtempSync(join("/tmp", "mc-doctor-metadata-"));
+      env = providerLaunchEnv({ purpose: "provider-metadata", provider, ownedDir, path });
+    }
+    return await runProcess({ command: expandHome(command), args, cwd: ownedDir ?? "/tmp", env, timeoutMs });
+  } catch (err) {
+    const message = err instanceof Error && err.message.startsWith("Invalid child environment setting:") ? err.message : "could not prepare diagnostic environment";
+    return { exitCode: null, signal: null, timedOut: false, aborted: false, stdout: "", stderr: "", durationMs: 0, spawnError: message };
+  } finally {
+    cleanupLaunchDir(ownedDir);
+  }
 }
 
 function commandOutput(r: SpawnResult): string {

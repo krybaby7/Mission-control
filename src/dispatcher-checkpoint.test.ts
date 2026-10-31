@@ -13,6 +13,7 @@ import {
   labelOf,
   MissionHarness,
   review,
+  finalReview,
   writeFile,
 } from "../test/fixtures/mission-harness.js";
 import { applyAnswer } from "./checkpoint.js";
@@ -377,7 +378,7 @@ describe("the feature checkpoint", () => {
       features: [feature("greet")],
       agents: {
         reviewer: (job, call) => {
-          if (call.label === "gate-c" && ++reviewed === 1) return { structured: review([finding("blocker", "greet is broken")]) };
+          if (call.label === "gate-c" && ++reviewed === 1) return { structured: finalReview([finding("blocker", "greet is broken")]) };
           return byDefault("reviewer")(job, call);
         },
       },

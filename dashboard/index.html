@@ -931,6 +931,14 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     return el("p", "small muted", text);
   }
 
+  function evidenceBlock(lines) {
+    if (!Array.isArray(lines) || lines.length === 0) return null;
+    var box = el("details", "small muted");
+    box.appendChild(el("summary", "", "Recorded AI reviews"));
+    lines.forEach(function (line) { box.appendChild(el("p", "", line)); });
+    return box;
+  }
+
   function tile(f, m, snap) {
     var lk = look(FEATURE_LOOK, f.state);
     var t = el("article", "tile");
@@ -943,6 +951,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     if (f.isRepair) top.appendChild(el("span", "tag", W.repairFeature));
     var title = el("h4", "tile-title", f.title);
     add(t, top, title);
+    if (f.reviewRecord) add(t, evidenceBlock(f.reviewRecord.review.concat(f.reviewRecord.tests)));
     add(t, said(f.reason, snap, "reason"));
     if (firstTryDone(f)) {
       t.className += " compact";
@@ -1027,6 +1036,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
       row.appendChild(tellButton(m.tellLeader, "tell:mission:" + m.id, h, true));
       head.appendChild(row);
     }
+    if (m.reviewRecord) add(head, evidenceBlock(m.reviewRecord.plan.concat(m.reviewRecord.application)));
     group.appendChild(head);
     if (m.features.length > 0) {
       var tiles = el("div", "tiles");
@@ -1186,6 +1196,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     add(head, el("span", "name", p.label), chip(lk, p.pill.word));
     row.appendChild(head);
     if (!compact) p.windows.forEach(function (w) { row.appendChild(gauge(w, p)); });
+    if (p.uncertainty) row.appendChild(el("p", "small muted", p.uncertainty));
     if (p.limitedText) row.appendChild(el("p", "", p.limitedText));
     if (p.note && (!compact || p.windows.length === 0)) row.appendChild(el("p", "small muted", p.note));
     return row;
@@ -1203,6 +1214,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     var list = el("div", "providers");
     a.providers.forEach(function (p) { list.appendChild(providerRow(p, false)); });
     box.appendChild(list);
+    if (a.policyText) box.appendChild(el("p", "foot-note", a.policyText));
     if (a.fileChangedText) box.appendChild(el("p", "foot-note", a.fileChangedText));
     return box;
   }
@@ -1460,6 +1472,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
       add(li, el("p", "name", f.title), once ? quoted(f.note, "muted") : said(f.note, snap, "muted"));
       // How the feature was checked, when the snapshot says (only for a mission with a feature checked by a second AI).
       if (f.checkedBy) li.appendChild(el("p", "small muted", f.checkedBy));
+      if (f.reviewRecord) add(li, evidenceBlock(f.reviewRecord.review.concat(f.reviewRecord.tests)));
       list.appendChild(li);
     });
     add(sect, el("h4", "section-label", heading), anyAi ? aiLabel(snap.leader.aiNotice) : null, list);
@@ -1490,6 +1503,7 @@ h4 { font-size: 18px; line-height: 1.3; font-weight: 700; }
     var h = el("h3", "", d.title);
     add(head, h, chip(lk, d.verdict.word));
     add(box, head, el("p", "", d.verdict.sentence));
+    if (d.reviewRecord) add(box, evidenceBlock(d.reviewRecord.plan.concat(d.reviewRecord.application)));
     add(box, featureList(W.gotHeading, d.got, snap, true));
     add(box, featureList(W.notFinished, d.leftOut, snap, false));
     add(box, featureList(W.recovered, d.recovered, snap, true));

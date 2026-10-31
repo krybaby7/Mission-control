@@ -7,7 +7,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
-import { type AgentHandler, buildOutput, checkerBehavior, finding, labelOf, MissionHarness, planSource, review, writeFile } from "../test/fixtures/mission-harness.js";
+import { type AgentHandler, buildOutput, checkerBehavior, finding, labelOf, MissionHarness, planSource, review, finalReview, writeFile } from "../test/fixtures/mission-harness.js";
 import { applyAnswer } from "./checkpoint.js";
 import type { Mission } from "./types.js";
 
@@ -35,7 +35,7 @@ const NEW_LINE = "A whole new paragraph that the owner never saw.";
 /** Gate C answers once with a serious finding; the repair is written by `repairWrites`. */
 function team(repairWrites: (cwd: string) => void): MissionHarness {
   const blockingOnce: AgentHandler = (job, call) => {
-    if (call.label === "gate-c" && call.n === 1) return { structured: review([finding("major", "The guide contradicts itself in step two", "docs/guide.md")]) };
+    if (call.label === "gate-c" && call.n === 1) return { structured: finalReview([finding("major", "The guide contradicts itself in step two", "docs/guide.md")]) };
     return call.label.startsWith("review-") ? checkerBehavior(job) : hh.defaults.reviewer(job, call);
   };
   const repairing: AgentHandler = async (job, call) => {

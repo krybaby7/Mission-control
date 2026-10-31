@@ -136,7 +136,7 @@ describe("a plan from the leader, from the command line to the dashboard", () =>
     });
     // The card holds the first lines of the look, as the engine wrote them; it is not the place for the whole plan.
     expect(card?.lines?.map((l) => l.text)).toEqual(look.slice(0, 12));
-    expect(s.missions[0]).toMatchObject({ id, state: "paused", pausedWhy: "checkpoint", sentence: "Waiting for your check of the plan." });
+    expect(s.missions[0]).toMatchObject({ id, state: "paused", pausedWhy: "checkpoint", sentence: "Waiting for your check of the plan. Last run allowance policy: warn." });
     expect(s.lamp).toMatchObject({ state: "needs_look", word: "Needs a look" });
     expect(s.lamp.reasons.filter((r) => r.code === "checkpoint_waiting")).toHaveLength(1);
     expect(s.timeline.items.at(-1)).toMatchObject({ missionId: id, tone: "warn", text: "Waiting for your check of the plan for “Fixture app”." });

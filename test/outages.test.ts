@@ -66,8 +66,9 @@ describe("a broken agent CLI", () => {
 
     const paused = await drive(hh, clock, id);
 
-    expect(paused).toMatchObject({ status: "stopped", stage: "spec", agentRuns: 0 });
+    expect(paused).toMatchObject({ status: "stopped", stage: "spec", agentRuns: hh.jobs.length });
     expect(paused.decisionsNeeded.join("\n")).not.toMatch(/describ|rephrase|plain sentences/i);
+    expect(paused.notes.join("\n")).toContain("AI invocations still count toward the mission safety cap");
     expect(paused.notes.join("\n")).toContain("unexpected argument '--permission-prompts'");
     expect(hh.notifications).toEqual([
       expect.objectContaining({ title: "Fixture app: paused, the AI isn't working", message: expect.stringContaining("--permission-prompts"), opts: expect.objectContaining({ priority: "high" }) }),
@@ -211,7 +212,7 @@ describe("the night run during an outage", () => {
 
     // The first mission pauses; the night then ends instead of waiting out the same failing CLIs for the next one.
     expect(queued.map((m) => store.load(m.id).status)).toEqual(["stopped", "queued"]);
-    expect(store.load(queued[0]?.id ?? "")).toMatchObject({ stage: "spec", agentRuns: 0 });
+    expect(store.load(queued[0]?.id ?? "")).toMatchObject({ stage: "spec", agentRuns: runners.claude.calls.length + runners.codex.calls.length });
     expect(result.missions.map((m) => m.id)).toEqual([queued[0]?.id]);
     const summary = readFileSync(result.summaryPath, "utf8");
     expect(summary).toContain("Ended early because the AI command lines keep failing");

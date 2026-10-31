@@ -231,6 +231,8 @@ export function missionSentence(x: MissionSentenceFacts): string {
           return x.u === 0 ? `${PAUSED_NO_AI_BEFORE_STOP} It continues on the next run.` : `${PAUSED_NO_AI_BEFORE_STOP} ${waitingForRun(x.u, x.n)}`;
         case "stop_requested":
           return x.u === 0 ? `${PAUSED_WHEN_TOLD_TO_STOP} It continues on the next run.` : `${PAUSED_WHEN_TOLD_TO_STOP} ${waitingForRun(x.u, x.n)}`;
+        case "allowance_unknown":
+          return "Paused: allowance could not be confirmed. No AI job started for this attempt.";
         case "disk":
           return "Paused: the disk is almost full.";
         case "ai_failing":

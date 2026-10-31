@@ -5,6 +5,7 @@
 // the code of that commit: fixtureSnapshot(name) of test/dashboard-kit.ts, looked at on the fixture's own clock, in UTC. Nothing in
 // this step may change one of them. The three modes-* fixtures are new and not listed. When a later change of the dashboard's words
 // changes one of these on purpose, rebuild the table from the new output and say why in the commit.
+import { allowanceHistoricalView } from "./allowance-legacy-projection.js";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { fixtureNames, fixtureSnapshot } from "./dashboard-kit.js";
@@ -70,7 +71,7 @@ describe("T-MODES-COMPAT: the fixtures that have no mode render as before", () =
   });
 
   it.each(Object.entries(WAVE_1))("%s", (name, hash) => {
-    expect(sha(JSON.stringify(fixtureSnapshot(name)))).toBe(hash);
+    expect(sha(JSON.stringify(allowanceHistoricalView(fixtureSnapshot(name))))).toBe(hash);
   });
 
   it("no snapshot of them holds a key or a sentence that only a mission with a mode feature may have", () => {

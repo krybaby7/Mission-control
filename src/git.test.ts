@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { nativeToolPath } from "./util/launch-env.js";
 import { Git, GitError } from "./git.js";
 
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -21,13 +22,14 @@ const savedEnv = { ...process.env };
 let configDir: string;
 let globalConfig: string;
 const tempDirs: string[] = [];
-const git = new Git();
+let git: Git;
 
 // Hermetic git: no system config and an empty global config (the machine's may sign commits or set an identity).
 beforeAll(() => {
   configDir = mkdtempSync(join(tmpdir(), "mc-git-config-"));
   globalConfig = join(configDir, "gitconfig");
   writeFileSync(globalConfig, "");
+  git = new Git({ globalConfig, home: configDir });
   process.env.GIT_CONFIG_GLOBAL = globalConfig;
   process.env.GIT_CONFIG_NOSYSTEM = "1";
   for (const key of ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "EMAIL"]) {
@@ -105,18 +107,12 @@ function nestedRepo(dir: string, files: Record<string, string>, commit: boolean)
 }
 
 /** Runs `fn` with a fake `git` first on PATH. */
-async function withFakeGit<T>(script: string, fn: () => Promise<T>): Promise<T> {
+async function withFakeGit<T>(script: string, fn: (fakeGit: Git) => Promise<T>): Promise<T> {
   const bin = join(tempDir(), "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "git"), `#!/bin/sh\n${script}\n`);
   chmodSync(join(bin, "git"), 0o755);
-  const path = process.env.PATH;
-  process.env.PATH = `${bin}:${path ?? ""}`;
-  try {
-    return await fn();
-  } finally {
-    process.env.PATH = path;
-  }
+  return fn(new Git({ path: [bin, ...nativeToolPath()], globalConfig, home: configDir }));
 }
 
 describe("GitError", () => {
@@ -1242,10 +1238,10 @@ describe("environment", () => {
     const record = join(tempDir(), "record");
     const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
     const script = `printf '%s\\n' "$@" > "${record}.args"; env > "${record}.env"; exec "${realGit}" "$@"`;
-    await withFakeGit(script, () => git.isClean(repo));
+    await withFakeGit(script, (fakeGit) => fakeGit.isClean(repo));
     const args = readFileSync(`${record}.args`, "utf8");
-    expect(args).toMatch(/^(-c\n[^\n]+\n)*-c\ncore\.quotepath=off\n(-c\n[^\n]+\n)*status\n/);
-    expect(args).toMatch(/^(-c\n[^\n]+\n)*-c\ncore\.hooksPath=\/dev\/null\n(-c\n[^\n]+\n)*status\n/);
+    expect(args).toMatch(/^--no-replace-objects\n(-c\n[^\n]+\n)*-c\ncore\.quotepath=off\n(-c\n[^\n]+\n)*status\n/);
+    expect(args).toMatch(/^--no-replace-objects\n(-c\n[^\n]+\n)*-c\ncore\.hooksPath=\/dev\/null\n(-c\n[^\n]+\n)*status\n/);
     const env = readFileSync(`${record}.env`, "utf8").split("\n");
     expect(env).toContain("GIT_TERMINAL_PROMPT=0");
     expect(env).toContain("GIT_EDITOR=true");
@@ -1274,13 +1270,8 @@ describe("environment", () => {
 
   it("reports a missing git binary as a GitError", async () => {
     const repo = await newRepo();
-    const path = process.env.PATH;
-    process.env.PATH = join(tempDir(), "empty-bin");
-    try {
-      await expect(git.isClean(repo)).rejects.toThrow(/git not found/);
-    } finally {
-      process.env.PATH = path;
-    }
+    const missing = new Git({ path: [join(tempDir(), "empty-bin")], globalConfig, home: configDir });
+    await expect(missing.isClean(repo)).rejects.toThrow(/git not found/);
   });
 });
 
@@ -1345,5 +1336,62 @@ describe("Git and repository settings an agent wrote", () => {
     await git.commitAll(repo, "a");
     await git.changedFiles(repo, "HEAD");
     expect(existsSync(marker)).toBe(false);
+  });
+});
+
+describe("exact merge operation receipt", () => {
+  async function setup(diverge = true, format?: "sha256") {
+    const repo = format ? join(tempDir(), "repo") : await newRepo();
+    if (format) { mkdirSync(repo); sh(repo, "init", "--object-format=sha256", "-b", "main"); await git.ensureRepo(repo); }
+    commitFile(repo, "base.txt", "base");
+    const root = tempDir(), integration = join(root, "integration"), unit = join(root, "unit");
+    await git.addWorktree(repo, integration, "mc/proof", "main"); await git.addWorktree(repo, unit, "mc/proof-unit", "main");
+    const source = commitFile(unit, "feature.txt", "feature");
+    if (diverge) commitFile(integration, "other.txt", "other");
+    return { repo, integration, unit, source, before: await git.headSha(integration) };
+  }
+  it("confirms native SHA256 merge objects without shortening their identities", async () => {
+    const f = await setup(true, "sha256"); const result = await git.merge(f.integration, f.source, "fixture sha256 merge");
+    expect(result.ok).toBe(true); if (!result.ok) return;
+    expect(f.before).toHaveLength(64); expect(f.source).toHaveLength(64); expect(result.sha).toHaveLength(64);
+    expect(await git.confirmMergeReceipt(f.integration, f.before, f.source, result.sha)).toBe(true);
+  });
+  it.each([true, false])("binds exact source and ordered merge parents when divergence=%s", async diverge => {
+    const f = await setup(diverge); const result = await git.merge(f.integration, f.source, "fixture receipt");
+    expect(result.ok).toBe(true); if (!result.ok) return;
+    expect(await git.confirmMergeReceipt(f.integration, f.before, f.source, result.sha)).toBe(true);
+    expect(await git.confirmMergeReceipt(f.integration, f.source, f.before, result.sha)).toBe(false);
+  });
+  it("accepts an already-present source only at the unchanged integration head", async () => {
+    const f = await setup(); const first = await git.merge(f.integration, f.source, "fixture merge"); expect(first.ok).toBe(true); if (!first.ok) return;
+    const second = await git.merge(f.integration, f.source, "fixture no-op"); expect(second.ok).toBe(true); if (!second.ok) return;
+    expect(second.sha).toBe(first.sha); expect(await git.confirmMergeReceipt(f.integration, first.sha, f.source, second.sha)).toBe(true);
+    expect(await git.confirmMergeReceipt(f.integration, f.before, f.source, f.before)).toBe(false);
+  });
+  it("rejects an unrelated descendant even if it contains both expected ancestors", async () => {
+    const f = await setup(); const result = await git.merge(f.integration, f.source, "fixture merge"); expect(result.ok).toBe(true); if (!result.ok) return;
+    const later = commitFile(f.integration, "later.txt", "external later change");
+    expect(await git.isAncestor(f.integration, f.before, later)).toBe(true); expect(await git.isAncestor(f.integration, f.source, later)).toBe(true);
+    expect(await git.confirmMergeReceipt(f.integration, f.before, f.source, later)).toBe(false);
+    expect(await git.confirmMergeReceipt(f.integration, f.before, f.source, result.sha)).toBe(false);
+  });
+  it("does not substitute replacement parents for the exact returned object", async () => {
+    const f = await setup(); const result = await git.merge(f.integration, f.source, "fixture merge"); expect(result.ok).toBe(true); if (!result.ok) return;
+    const later = commitFile(f.integration, "later.txt", "later");
+    sh(f.integration, "replace", later, result.sha);
+    expect(await git.confirmMergeReceipt(f.integration, f.before, f.source, later)).toBe(false);
+  });
+  it("merges exact source objects even when a local replacement masks their content", async () => {
+    const f = await setup(false); sh(f.repo, "replace", f.source, f.before);
+    const result = await git.merge(f.integration, f.source, "fixture exact source"); expect(result.ok).toBe(true); if (!result.ok) return;
+    expect(result.sha).not.toBe(f.before); expect(read(f.integration, "feature.txt")).toBe("feature");
+    expect(await git.confirmMergeReceipt(f.integration, f.before, f.source, result.sha)).toBe(true);
+  });
+  it("does not silently accept a fast-forward as this controller's promised no-ff merge form", async () => {
+    const f = await setup(false); sh(f.integration, "merge", "--ff-only", f.source);
+    expect(await git.confirmMergeReceipt(f.integration, f.before, f.source, f.source)).toBe(false);
+  });
+  it.each(["HEAD", "--all", "", "a".repeat(39)])("refuses non-exact identity %j without needing a repository", async value => {
+    expect(await git.confirmMergeReceipt("/nonexistent-merge-proof-fixture", "a".repeat(40), value, "b".repeat(40))).toBe(false);
   });
 });

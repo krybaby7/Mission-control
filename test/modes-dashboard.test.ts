@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildOutput, checkerBehavior, finding, isChecker, isMaker, review, writeFile } from "./fixtures/mission-harness.js";
+import { buildOutput, checkerBehavior, finding, isChecker, isMaker, review, finalReview, writeFile } from "./fixtures/mission-harness.js";
 import { CODE_A, CODE_B, EXAMPLE_A, EXAMPLE_B, MADE, openWorld, TITLE, type World } from "./modes-real-kit.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -49,7 +49,7 @@ describe("example A: a guide checked by a second AI, run to the end", () => {
     expect(mission?.ticks.find((t) => t.id === "delivered")?.why).toBe("The feature was built. It was checked by a second AI against your list.");
     expect(mission?.ticks.find((t) => t.id === "final_review")?.caveat).toBe("1 feature has no tests. The list below says how it was checked.");
     expect(s.debrief?.honestyNote).toBe("These are the AI team's own checks, not a human review."); // nobody was asked to look at a feature
-    expect(s.missions[0]).toMatchObject({ state: "done", sentence: "The feature is built." });
+    expect(s.missions[0]).toMatchObject({ state: "done", sentence: "The feature is built. Last run allowance policy: warn." });
     const timeline = s.timeline.items.map((i) => i.text);
     expect(timeline).toContain(`A second AI checked “${TITLE.guide}” against your list: 4 of 4 checks passed.`);
     expect(timeline).toContain(`“${TITLE.guide}” is added.`);
@@ -92,7 +92,7 @@ describe("example B: a page marked for the owner's look, run to the owner's stop
       "Pictures of the page as it first loads: 2 taken, at phone width and desktop width. To see them in Windows, run mc copy-reports in Ubuntu, then open the screenshots folder.",
       "You are asked because the plan marks this feature for your look.",
     ]);
-    expect(s.missions[0]).toMatchObject({ state: "paused", pausedWhy: "checkpoint", sentence: `Waiting for your check of “${TITLE.page}”.` });
+    expect(s.missions[0]).toMatchObject({ state: "paused", pausedWhy: "checkpoint", sentence: `Waiting for your check of “${TITLE.page}”. Last run allowance policy: warn.` });
     expect(s.lamp).toMatchObject({ state: "needs_look", word: "Needs a look" });
 
     // The owner approves through the command line; the team adds the feature and finishes.
@@ -143,7 +143,7 @@ describe("example B: the final review's repair rewrites the page the owner appro
           return world.w!.h.defaults.engineer(job, call);
         },
         reviewer: (job, call) => {
-          if (call.label === "gate-c" && call.n === 1) return { structured: review([finding("major", "The headline is too short", page.path)]) };
+          if (call.label === "gate-c" && call.n === 1) return { structured: finalReview([finding("major", "The headline is too short", page.path)]) };
           if (isChecker(job)) return checkerBehavior(job, (results) => results.forEach((r) => (r.evidence = `The file says “${page.quote}” in ${page.path}.`)));
           return world.w!.h.defaults.reviewer(job, call);
         },

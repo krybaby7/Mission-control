@@ -53,6 +53,29 @@ Mission Control's own checks of a document, a page or a table send nothing out. 
 3. Never set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. They would switch you from your subscription to pay-per-use billing. `mc doctor` checks for this.
 4. Treat your notification topic name (Step 6) like a password.
 
+## Optional: fewer helper jobs
+
+To omit context suggestions, failure summaries and AI-written report prose, put this section in your Mission Control settings:
+
+```yaml
+helpers:
+  contextPack: false
+  failureDigest: false
+  reportProse: false
+pacing:
+  unknownAllowance: stop
+```
+
+Each setting can also be enabled separately. Missing settings mean `true`. The choice is saved when a mission is queued. Changing the settings later applies to newly queued missions; existing missions keep their saved choice. Older missions without a saved choice keep all three helpers enabled.
+
+Required planning review, test authorship, building, checking, review and your selected approval stops still apply. Raw failure details remain available when summaries are off. Haiku remains the light model, including for mechanical builds and enabled helpers. The plain report still explains the result and records which helpers were enabled.
+
+The allowance setting is separate from helper choices. New setup files explicitly use pacing.unknownAllowance: stop. Before each AI job, both the five-hour and weekly readings must have usable reset times and a controller receipt from the last ten minutes. Missing, stale or malformed readings pause required work without failing its feature. Codex can obtain metadata without a model call; Claude has no new preflight, so a cold strict start may pause honestly. These paths are tested with stand-ins; real account compatibility is untried.
+
+An older settings file that omits this setting keeps warn: existing usage limits still apply, but the reserve is not assured. Only stop and warn are accepted. A deliberate settings change applies on the next run, and the report records that run's policy. Existing files are not rewritten. The dashboard labels its opening settings separately from each mission's saved run policy. Old percentages can remain as retained restrictions; they are not fresh readings. The weekly-share baseline still restarts with each coordinator invocation and is not an account-wide reservation.
+
+A supplied plan queued through the existing `mc plan queue` route still skips the team's initial planning job. Its review and your plan approval remain. Preparing the supplied plan may itself use AI allowance. Fewer helper jobs do not prove lower total allowance or equal real output quality; those need a separately authorized real comparison.
+
 ## Step 1: Turn on WSL2 and install Ubuntu
 
 WSL2 runs Linux (Ubuntu) inside Windows. Mission Control runs from there.

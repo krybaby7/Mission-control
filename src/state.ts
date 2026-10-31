@@ -14,6 +14,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { resolveHelpers } from "./helpers.js";
 import type { CheckpointKind, Mission, MissionEvent, MissionKind, PlanSource, RoleOverride, UsageRecord } from "./types.js";
 import { appendJsonl, ensureDir, readJson, readJsonl, sha256, writeJsonAtomic } from "./util/fs.js";
 
@@ -43,6 +44,7 @@ export interface CreateMissionInit {
   baseBranch: string;
   profile: string;
   roleOverrides?: RoleOverride[];
+  helpers?: import("./types.js").HelperSettings;
   /** Where the owner wants to look before the mission goes on; absent or empty = nowhere. */
   checkpoints?: CheckpointKind[];
   /** A plan written outside the team (mc plan queue); the mission adopts it instead of asking the planner. */
@@ -96,6 +98,7 @@ export class MissionStore {
 
   createMission(init: CreateMissionInit): Mission {
     const at = isoTime(init.nowMs); // validates nowMs before an id is reserved on disk
+    const helpers = resolveHelpers(init.helpers);
     const id = this.reserveMissionId(`${localDate(init.nowMs)}-${slugify(init.title)}`);
     const mission: Mission = {
       id,
@@ -107,6 +110,7 @@ export class MissionStore {
       integrationBranch: `mc/${id}`,
       profile: init.profile,
       roleOverrides: init.roleOverrides?.map((o) => ({ ...o })) ?? [],
+      helpers,
       status: "queued",
       stage: init.kind === "greenfield" ? "spec" : "onboard",
       createdAt: at,
@@ -396,6 +400,7 @@ const MISSION_FIELD_CHECKS = {
  */
 function invalidMissionField(data: unknown): string | undefined {
   if (!isRecord(data)) return "object";
+  try { resolveHelpers(data.helpers, true); } catch { return "helpers"; }
   return Object.entries(MISSION_FIELD_CHECKS).find(([field, check]) => !check(data[field]))?.[0] ?? invalidHowChecked(data);
 }
 
@@ -435,7 +440,9 @@ export function planOf(m: Pick<Mission, "plan">): PlanSource | undefined {
   const plan: unknown = m.plan;
   if (!isRecord(plan) || !isString(plan.sha256) || !isString(plan.at) || !isSpecShape(plan.spec)) return undefined;
   const review = plan.review;
-  if (review === undefined || (isRecord(review) && PLAN_OUTCOMES.includes(review.outcome) && isStringList(review.issues))) return m.plan;
+  if (review === undefined || (isRecord(review) && PLAN_OUTCOMES.includes(review.outcome) && isStringList(review.issues)
+    && (review.latestRevision === undefined || (typeof review.latestRevision === "string" && ["applied", "partly_rejected", "not_applied"].includes(review.latestRevision)))
+    && (review.rejectedChanges === undefined || (Array.isArray(review.rejectedChanges) && review.rejectedChanges.length <= 40 && review.rejectedChanges.every((s: unknown) => typeof s === "string" && s.length <= 1200))))) return m.plan;
   const { review: _damaged, ...rest } = plan;
   return rest as unknown as PlanSource;
 }

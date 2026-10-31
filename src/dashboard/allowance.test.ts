@@ -1,4 +1,6 @@
 // T-ALLOW: the allowance rows, pills, blocks and notes (docs/dashboard-spec.md, section 10).
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { copyHome, emptyHome, FIXTURE_MTIME_MS, makeEvent, makeFeature, makeMission, withLock, writeMission } from "../../test/dashboard-helpers.js";
 import { buildAllowance } from "./allowance.js";
@@ -115,7 +117,7 @@ describe("T-ALLOW windows", () => {
         resetsAt: at(RESET_TODAY),
         resetsText: "resets 12:20",
         pauseAt: 0.97,
-        text: "62% used, resets 12:20",
+        text: "Retained restriction: 62% used, resets 12:20; latest observation unconfirmed",
       },
       {
         id: "seven_day",
@@ -127,10 +129,10 @@ describe("T-ALLOW windows", () => {
         resetsAt: at(RESET_THU),
         resetsText: "resets Thu 09:00",
         pauseAt: 0.85,
-        text: "41% used, resets Thu 09:00",
+        text: "Retained restriction: 41% used, resets Thu 09:00; latest observation unconfirmed",
       },
     ]);
-    expect(claude.pill).toEqual({ state: "plenty", word: "Plenty" });
+    expect(claude.pill).toEqual({ state: "no_reading", word: "Allowance unconfirmed" });
     expect(claude.note).toBeNull();
     expect(claude.limitedUntil).toBeNull();
   });
@@ -210,7 +212,7 @@ describe("T-ALLOW the pill", () => {
   const pillFor = (window: string, value: number, reset = RESET_TODAY) => row(build(quota({ utilization: [reading("claude", window, value, reset)] })), "claude").pill;
 
   it.each([
-    [0.69, "plenty", "Plenty"],
+    [0.69, "no_reading", "Allowance unconfirmed"],
     [0.7, "getting_low", "Getting low"],
     [0.89, "getting_low", "Getting low"],
     [0.9, "nearly_out", "Nearly out"],
@@ -242,7 +244,7 @@ describe("T-ALLOW the pill", () => {
   it("a provider with no valid reading has no reading, even when another provider has one", () => {
     const a = build(quota({ utilization: [reading("codex", "seven_day", 0.18, RESET_THU)] }));
     expect(row(a, "claude").pill.state).toBe("no_reading");
-    expect(row(a, "codex").pill.state).toBe("plenty");
+    expect(row(a, "codex").pill.state).toBe("no_reading");
   });
 });
 
@@ -252,12 +254,12 @@ describe("T-ALLOW blocks, resume time and wording", () => {
     const claude = row(a, "claude");
     expect(claude.pill).toEqual({ state: "waiting_reset", word: "Waiting for reset" });
     expect(claude.limitedUntil).toBe(at("2026-10-15T08:59:15.000Z"));
-    expect(claude.limitedText).toBe("Waiting for the weekly limit to reset. Work resumes Thu 09:00.");
+    expect(claude.limitedText).toBe("Waiting for the weekly limit to reset. A new allowance check can be made Thu 09:00.");
   });
 
   it("a paced 5-hour window at its cap blocks too, and today's resume time says 'at'", () => {
     const a = build(quota({ utilization: [reading("claude", "five_hour", 0.98, "2026-10-11T12:58:25.000Z")] }));
-    expect(row(a, "claude").limitedText).toBe("Waiting for the 5-hour limit to reset. Work resumes at 12:59.");
+    expect(row(a, "claude").limitedText).toBe("Waiting for the 5-hour limit to reset. A new allowance check can be made at 12:59.");
   });
 
   it("the resume time is the end plus the engine's margin, the same minute as the wait banner", () => {
@@ -265,7 +267,7 @@ describe("T-ALLOW blocks, resume time and wording", () => {
     const a = build(quota({ limits: [{ provider: "codex", kind: "session", until: end }] }));
     const codex = row(a, "codex");
     expect(codex.limitedUntil).toBe(end);
-    expect(codex.limitedText).toBe("Waiting for the 5-hour limit to reset. Work resumes at 12:59.");
+    expect(codex.limitedText).toBe("Waiting for the 5-hour limit to reset. A new allowance check can be made at 12:59.");
     expect(WAIT_MARGIN_MS).toBe(45_000);
     // The minute can differ from the end's minute and must match the margin, not the end.
     const early = build(quota({ limits: [{ provider: "codex", kind: "session", until: at("2026-10-11T12:58:10.000Z") }] }));
@@ -273,13 +275,13 @@ describe("T-ALLOW blocks, resume time and wording", () => {
   });
 
   it.each([
-    ["session", "Waiting for the 5-hour limit to reset. Work resumes at 12:59."],
-    ["weekly", "Waiting for the weekly limit to reset. Work resumes at 12:59."],
-    ["model", "Waiting for a model limit to reset. Work resumes at 12:59."],
-    ["spend", "Waiting for the spending cap to reset. Work resumes at 12:59."],
-    ["unknown", "Waiting for a usage limit to reset. Work resumes at 12:59."],
-    ["something-new", "Waiting for a usage limit to reset. Work resumes at 12:59."],
-    ["throttle", "Waiting because the service is busy. Work resumes at 12:59."],
+    ["session", "Waiting for the 5-hour limit to reset. A new allowance check can be made at 12:59."],
+    ["weekly", "Waiting for the weekly limit to reset. A new allowance check can be made at 12:59."],
+    ["model", "Waiting for a model limit to reset. A new allowance check can be made at 12:59."],
+    ["spend", "Waiting for the spending cap to reset. A new allowance check can be made at 12:59."],
+    ["unknown", "Waiting for a usage limit to reset. A new allowance check can be made at 12:59."],
+    ["something-new", "Waiting for a usage limit to reset. A new allowance check can be made at 12:59."],
+    ["throttle", "Waiting because the service is busy. A new allowance check can be made at 12:59."],
   ])("a %s limit reads: %s", (kind, text) => {
     const a = build(quota({ limits: [{ provider: "claude", kind, until: at("2026-10-11T12:58:25.000Z") }] }));
     expect(row(a, "claude").limitedText).toBe(text);
@@ -312,7 +314,7 @@ describe("T-ALLOW blocks, resume time and wording", () => {
   it("only the provider that is blocked waits", () => {
     const a = build(quota({ limits: [{ provider: "claude", kind: "weekly", until: at("2026-10-14T18:30:00.000Z") }], utilization: [reading("codex", "five_hour", 0.3, RESET_TODAY)] }));
     expect(row(a, "claude").pill.state).toBe("waiting_reset");
-    expect(row(a, "codex").pill.state).toBe("plenty");
+    expect(row(a, "codex").pill.state).toBe("no_reading");
   });
 });
 
@@ -320,7 +322,7 @@ describe("T-ALLOW notes", () => {
   it("Codex without a 5-hour window says so, in a sentence", () => {
     const a = build(quota({ utilization: [reading("codex", "seven_day", 0.18, RESET_THU)] }));
     expect(row(a, "codex").note).toBe("No 5-hour limit reported.");
-    expect(row(a, "codex").pill.state).toBe("plenty");
+    expect(row(a, "codex").pill.state).toBe("no_reading");
   });
 
   it("a provider with a 5-hour window has no note", () => {
@@ -331,7 +333,7 @@ describe("T-ALLOW notes", () => {
     const a = build(quota({ modelBlocks: [{ provider: "codex", model: "gpt-6.1-sol", until: at("2026-10-11T11:15:00.000Z") }], utilization: [reading("codex", "five_hour", 0.3, RESET_TODAY)] }));
     expect(row(a, "codex").note).toBe("One kind of model is limited until 11:15.");
     expect(JSON.stringify(a)).not.toContain("gpt-6.1-sol");
-    expect(row(a, "codex").pill.state).toBe("plenty");
+    expect(row(a, "codex").pill.state).toBe("no_reading");
   });
 
   it("a model block that ends on another day says the weekday (M3)", () => {
@@ -368,13 +370,13 @@ describe("T-ALLOW words that are also members of Object.prototype (m2)", () => {
     const a = build(quota({ limits: [{ provider: word, kind: "weekly", until: at(RESET_THU) }], utilization: [reading(word, "five_hour", 0.3, RESET_TODAY)] }));
     const extra = a.providers.find((p) => p.id === word);
     expect(extra?.label).toBe(word);
-    expect(extra?.limitedText).toBe("Waiting for the weekly limit to reset. Work resumes Thu 09:00.");
+    expect(extra?.limitedText).toBe("Waiting for the weekly limit to reset. A new allowance check can be made Thu 09:00.");
     expect(JSON.stringify(a)).not.toMatch(/function|native code/);
   });
 
   it.each(WORDS)("%s as a block kind is a usage limit", (word) => {
     const a = build(quota({ limits: [{ provider: "claude", kind: word, until: at(RESET_THU) }] }));
-    expect(row(a, "claude").limitedText).toBe("Waiting for a usage limit to reset. Work resumes Thu 09:00.");
+    expect(row(a, "claude").limitedText).toBe("Waiting for a usage limit to reset. A new allowance check can be made Thu 09:00.");
   });
 
   it.each(WORDS)("%s as a window id is no paced window: it never blocks and has no pause mark", (word) => {
@@ -393,10 +395,10 @@ describe("T-ALLOW on the fixtures", () => {
 
   it("quota-readings: Claude 62% and 41%, Codex 18% on the week only", () => {
     const a = fromFixture("quota-readings");
-    expect(row(a, "claude").windows.map((w) => w.text)).toEqual(["62% used, resets 12:20", "41% used, resets Thu 09:00"]);
-    expect(row(a, "codex").windows.map((w) => w.text)).toEqual(["18% used, resets Wed 18:30"]);
+    expect(row(a, "claude").windows.map((w) => w.text)).toEqual(["Retained restriction: 62% used, resets 12:20; latest observation unconfirmed", "Retained restriction: 41% used, resets Thu 09:00; latest observation unconfirmed"]);
+    expect(row(a, "codex").windows.map((w) => w.text)).toEqual(["Retained restriction: 18% used, resets Wed 18:30; latest observation unconfirmed"]);
     expect(row(a, "codex").note).toBe("No 5-hour limit reported.");
-    expect(a.providers.map((p) => p.pill.state)).toEqual(["plenty", "plenty"]);
+    expect(a.providers.map((p) => p.pill.state)).toEqual(["no_reading", "no_reading"]);
     expect(a.fileChangedAt).toBe(FIXTURE_MTIME_MS);
   });
 
@@ -423,7 +425,7 @@ describe("T-ALLOW on the fixtures", () => {
 
   it("quota-limited: a weekly limit entry and a model block, with no raw provider text", () => {
     const a = fromFixture("quota-limited");
-    expect(row(a, "claude").limitedText).toBe("Waiting for the weekly limit to reset. Work resumes Wed 18:30.");
+    expect(row(a, "claude").limitedText).toBe("Waiting for the weekly limit to reset. A new allowance check can be made Wed 18:30.");
     expect(row(a, "claude").pill.state).toBe("waiting_reset");
     expect(row(a, "codex").note).toBe("One kind of model is limited until 11:15.");
     expect(JSON.stringify(a)).not.toContain("weekly limit reached");
@@ -441,8 +443,8 @@ describe("T-ALLOW on the fixtures", () => {
     const claude = row(a, "claude");
     expect(claude.pill.state).toBe("waiting_reset");
     expect(claude.limitedUntil).toBe(at("2026-10-15T08:59:15.000Z"));
-    expect(claude.limitedText).toBe("Waiting for the weekly limit to reset. Work resumes Thu 09:00.");
-    expect(row(a, "codex").pill.state).toBe("plenty");
+    expect(claude.limitedText).toBe("Waiting for the weekly limit to reset. A new allowance check can be made Thu 09:00.");
+    expect(row(a, "codex").pill.state).toBe("no_reading");
   });
 
   it("limit-waiting: the Codex row and the banner name the same minute (12:59)", () => {
@@ -452,7 +454,7 @@ describe("T-ALLOW on the fixtures", () => {
     const codex = row(snapshot.allowance, "codex");
     expect(codex.pill.state).toBe("waiting_reset");
     expect(codex.note).toBe("No usage reading yet.");
-    expect(codex.limitedText).toBe("Waiting for the 5-hour limit to reset. Work resumes at 12:59.");
+    expect(codex.limitedText).toBe("Waiting for the 5-hour limit to reset. A new allowance check can be made at 12:59.");
     expect(snapshot.allowance.waiting?.untilText).toBe("12:59");
     expect(snapshot.allowance.waiting?.text).toBe("Waiting for allowance until 12:59. It resumes by itself.");
     expect(row(snapshot.allowance, "claude").pill.state).toBe("no_reading");
@@ -475,4 +477,92 @@ describe("T-ALLOW on the fixtures", () => {
     const snapshot = buildSnapshot({ home: copyHome("multi-mission"), now: NOW, timeZone: "UTC" });
     expect(JSON.stringify(snapshot.allowance)).not.toContain("mock session limit");
   });
+});
+
+describe("reconstructed allowance uncertainty", () => {
+  const observed = (provider: "claude" | "codex" = "codex", receivedAt = NOW) => ["five_hour", "seven_day"].map(window => ({
+    provider, window, utilization: 0, resetsAt: NOW + 60 * 60_000, receivedAt, resetState: "reported" as const,
+  }));
+  it("only fresh complete aggregate evidence can show plenty, including true zero", () => {
+    const q = quota({ observations: observed(), utilization: observed() });
+    expect(row(build(q), "codex").pill.state).toBe("plenty");
+    expect(row(build(q), "codex").uncertainty).toBeUndefined();
+    expect(row(build(q), "codex").windows[0]?.usedPercent).toBe(0);
+  });
+  it("mtime cannot freshen legacy readings or assure a reserve", () => {
+    const q = quota({ utilization: observed() });
+    const p = row(build(q, { mtime: NOW }), "codex");
+    expect(p.pill.state).toBe("no_reading"); expect(p.uncertainty).toContain("receipt time was not recorded");
+    expect(p.uncertainty).toContain("reserve is not assured");
+  });
+  it.each([
+    { rows: observed("codex", NOW - 11 * 60_000), reason: "older than 10 minutes" },
+    { rows: observed("codex", NOW + 1), reason: "clock moved backwards" },
+    { rows: observed().slice(0, 1), reason: "missing" },
+    { rows: [...observed(), observed()[0]!], reason: "conflicting" },
+  ])("unknown evidence overrides a green assurance: $reason", ({ rows, reason }) => {
+    const p = row(build(quota({ observations: rows, utilization: observed() })), "codex");
+    expect(p.pill.state).toBe("no_reading"); expect(p.uncertainty).toContain(reason);
+  });
+  it("identities must be canonical before display sanitization", () => {
+    const bad = observed().map(x => ({ ...x, window: x.window + "\u0007" }));
+    const p = row(build(quota({ observations: bad, utilization: observed() })), "codex");
+    expect(p.pill.state).toBe("no_reading");
+  });
+  it("shows the effective policy and distinguishes allowance pause from approval", () => {
+    const a = build(null, { settings: { ...settings, pacing: { ...settings.pacing, unknownAllowance: "stop" } } });
+    expect(a.policyText).toContain("stop");
+    const home = emptyHome();
+    const m = makeMission({ id: "2026-10-11-allowance", status: "stopped", stage: "spec", pause: { kind: "allowance_unknown", providers: ["codex"], reason: "missing", at: new Date(NOW).toISOString() }, allowancePolicy: "stop" });
+    writeMission(home, m);
+    const s = buildSnapshot({ home, now: NOW });
+    expect(s.missions[0]?.pausedWhy).toBe("allowance_unknown");
+    expect(s.missions[0]?.sentence).toContain("allowance could not be confirmed");
+  });
+});
+
+it.each([false, true])("keeps real numeric constraint rows independent of order: reverse=%s", reverse => {
+  const constraints = [
+    { provider: "codex", window: "five_hour", utilization: 0.99, resetsAt: NOW + 60 * 60_000 },
+    { provider: "codex", window: "five_hour", utilization: 0.1, resetsAt: NOW + 3 * 60 * 60_000 },
+  ];
+  if (reverse) constraints.reverse();
+  const p = row(build(quota({ utilization: constraints })), "codex");
+  expect(p.limitedUntil).toBe(NOW + 60 * 60_000);
+  expect(p.pill.state).toBe("waiting_reset");
+  expect(p.windows[0]?.usedPercent).toBe(99);
+  expect(p.windows[0]?.resetsAt).toBe(NOW + 60 * 60_000);
+});
+
+describe("allowance policy and identity boundaries", () => {
+  it.each(["stop", "warn"] as const)("saved run %s does not inherit dashboard settings", policy => {
+    const home = emptyHome();
+    writeMission(home, makeMission({ id: "2026-10-11-policy", status: "stopped", allowancePolicy: policy }));
+    const s = buildSnapshot({ home, now: NOW, settings: { ...settings, pacing: { ...settings.pacing, unknownAllowance: policy === "stop" ? "warn" : "stop" } } });
+    expect(s.missions[0]?.sentence).toContain("Last run allowance policy: " + policy);
+    expect(s.allowance.policyText).toContain("when this dashboard opened");
+  });
+  it("numeric gauges identify retained restrictions when latest evidence is unconfirmed", () => {
+    const p = row(build(quota({ utilization: [reading("codex", "five_hour", 0.2, RESET_TODAY)] })), "codex");
+    expect(p.windows[0]?.text).toContain("Retained restriction");
+    expect(p.windows[0]?.text).toContain("unconfirmed");
+  });
+  it("hostile provider IDs cannot alias canonical limits or model blocks through disk cleaning", () => {
+    const home = emptyHome();
+    writeFileSync(join(home, "quota.json"), JSON.stringify({ limits: { ["codex\u0007"]: { kind: "weekly", until: NOW + 60000 } },
+      modelBlocks: [{ provider: "codex\u0007", model: "existing-model", until: NOW + 60000 }] }));
+    const q = readHome(home).quota;
+    const p = row(build(q), "codex");
+    expect(p.limitedUntil).toBeNull(); expect(p.note).not.toContain("One kind of model");
+  });
+});
+
+it("does not promise a model restart when an unknown allowance restriction expires", () => {
+  const q = quota({ limits: [{ provider: "codex", kind: "weekly", until: NOW + 60000 }] });
+  const before = row(build(q), "codex");
+  expect(before.limitedText).not.toContain("Work resumes");
+  expect(before.limitedText).toContain("allowance");
+  const after = row(build(q, { now: NOW + 60001 }), "codex");
+  expect(after.limitedUntil).toBeNull(); expect(after.pill.state).toBe("no_reading");
+  expect(after.uncertainty).toContain("missing");
 });

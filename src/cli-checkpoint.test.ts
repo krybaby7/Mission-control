@@ -8,6 +8,7 @@ import { renderReport } from "./report.js";
 import { runNight } from "./run.js";
 import { MissionStore } from "./state.js";
 import type { CheckpointKind, CheckpointRecord, Mission, MissionEvent, PendingCheckpoint } from "./types.js";
+import { controllerGitEnv } from "./util/launch-env.js";
 import { runProcess } from "./util/process.js";
 
 // `mc run` is called through to the real thing, except in the one test that needs a canned night.
@@ -76,7 +77,7 @@ function noticeCount(): number {
 }
 
 async function git(cwd: string, ...args: string[]): Promise<void> {
-  const r = await runProcess({ command: "git", args, cwd, timeoutMs: 30_000 });
+  const r = await runProcess({ env: controllerGitEnv({ isolatedConfig: true }), command: "git", args, cwd, timeoutMs: 30_000 });
   if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
 }
 

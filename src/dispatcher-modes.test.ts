@@ -18,6 +18,7 @@ import {
   picturesInBrief,
   planSource,
   review,
+  finalReview,
   specOutput,
   writeDeliverable,
   writeFile,
@@ -42,8 +43,9 @@ describe("a mission queued the old way", () => {
     expect(now.events).toEqual(then.events);
     expect(now.labels).toEqual(then.labels);
     expect(now.eventKeys).toEqual(then.eventKeys);
-    expect(now.missionKeys).toEqual(then.missionKeys);
-    expect(now.featureKeys).toEqual(then.featureKeys);
+    // Additive helper, allowance, invocation and actual-review audit fields; historical keys/events stay exact.
+    expect(now.missionKeys).toEqual([...then.missionKeys, "helpers", "invocations", "allowancePolicy", "provenance", "workEvidenceVersion", "workTracking", "applicationLedger"].sort());
+    expect(now.featureKeys).toEqual([...then.featureKeys, ...["provenance"]].sort());
     expect({ status: now.status, stage: now.stage, features: now.features }).toEqual({ status: then.status, stage: then.stage, features: then.features });
   });
 
@@ -118,7 +120,7 @@ const answer = (hh: MissionHarness, id: string, decision: "approve" | "send_back
 function checkerTweaked(tweak: (results: RubricResult[]) => void, times = Number.POSITIVE_INFINITY, opts: { openPictures?: boolean } = {}): AgentHandler {
   return (job, call) => {
     if (call.label === "gate-a") return { structured: { verdict: "approve", issues: [] } };
-    if (call.label === "gate-c") return { structured: review() };
+    if (call.label === "gate-c") return { structured: finalReview() };
     return checkerBehavior(job, call.n <= times ? tweak : undefined, opts);
   };
 }
@@ -802,7 +804,7 @@ describe("resume", () => {
 
 describe("repair features", () => {
   const blockingGateC: AgentHandler = (job, call) => {
-    if (call.label === "gate-c" && call.n === 1) return { structured: review([finding("major", "The guide contradicts itself", "docs/guide.md")]) };
+    if (call.label === "gate-c" && call.n === 1) return { structured: finalReview([finding("major", "The guide contradicts itself", "docs/guide.md")]) };
     return h!.defaults.reviewer(job, call);
   };
 
@@ -1024,8 +1026,8 @@ describe("(18) a revision of the plan", () => {
     });
     const id = hh.createMission("greenfield", { plan: planSource(plan(OWNER)), checkpoints: ["plan"] }).id;
     const parked = await hh.run(id);
-    expect(parked.plan?.review).toEqual({ outcome: "not_applied", issues: ["Split the guide in two."] });
-    expect(parked.notes).toContain("The plan reviewer's changed plan dropped a feature that is checked by a second AI, so the plan was used as written.");
+    expect(parked.plan?.review).toMatchObject({ outcome: "not_applied", latestRevision: "not_applied", issues: ["Split the guide in two."] });
+    expect(parked.plan?.review?.rejectedChanges?.join(" ")).toContain("guide");
     expect(parked.features.map((f) => [f.id, f.mode, f.effort])).toEqual([["guide", "owner", "deep"]]);
     expect(parked.features[0]?.expect).toEqual({ headings: ["guide"], words: [1, 500] });
   });
@@ -1043,7 +1045,7 @@ describe("(18) a revision of the plan", () => {
     expect(parked.features.map((f) => [f.id, f.mode])).toEqual([["greet", undefined], ["guide", "owner"]]);
   });
 
-  it("keeps the modes, efforts and checks by feature id when the ids stay, and a feature with a new id is checked by tests", async () => {
+  it("keeps supplied modes, efforts and checks and rejects an added feature ID", async () => {
     const hh = harness({
       agents: {
         reviewer: (job, call) => (call.label === "gate-a" ? { structured: { verdict: "revise", issues: ["Add a second feature."] } } : hh.defaults.reviewer(job, call)),
@@ -1052,8 +1054,9 @@ describe("(18) a revision of the plan", () => {
     });
     const id = hh.createMission("greenfield", { plan: planSource(plan(OWNER)), checkpoints: ["plan"] }).id;
     const parked = await hh.run(id);
-    expect(parked.plan?.review?.outcome).toBe("revised");
-    expect(parked.features.map((f) => [f.id, f.mode, f.effort])).toEqual([["guide", "owner", "deep"], ["extra", undefined, undefined]]);
+    expect(parked.plan?.review?.outcome).toBe("not_applied");
+    expect(parked.plan?.review?.rejectedChanges?.join(" ")).toContain("extra");
+    expect(parked.features.map((f) => [f.id, f.mode, f.effort])).toEqual([["guide", "owner", "deep"]]);
     expect(parked.features[0]?.expect).toEqual({ headings: ["guide"], words: [1, 500] });
   });
 
@@ -1106,13 +1109,12 @@ describe("(18b) the checks of a feature that is checked by reading", () => {
     expect(parked.spec?.features[0]?.acceptance).toEqual([...CHECKS, TASTE]);
     expect(featureOf(parked).acceptance).toEqual([...CHECKS, TASTE]);
     expect(featureOf(parked).mode).toBe("owner");
-    expect(parked.notes).toContain(NOTE("Setup guide"));
-    expect(parked.notes.filter((n) => n.startsWith("The plan reviewer's changes"))).toHaveLength(1);
+    expect(parked.plan?.review?.rejectedChanges).toEqual(["Feature guide: proposed acceptance edits at positions 1, 2, 3, 4 were rejected. All 4 original checks were retained byte for byte in their original order."]);
     // The other changes of the revision stay: the summary is the planner's.
     expect(parked.spec?.summary).toBe("A tiny app used by tests.");
   });
 
-  it("says nothing when the revision left the checks as they were, and keeps the checks of a feature that is checked by tests as the planner wrote them", async () => {
+  it("records no rejection when checks stay, and also preserves supplied tests-mode checks", async () => {
     const same = harness(reviewing([...CHECKS, TASTE]));
     const sameId = same.createMission("greenfield", { plan: planSource(leaderPlan(owner())), checkpoints: ["plan"] }).id;
     const kept = await same.run(sameId);
@@ -1123,11 +1125,11 @@ describe("(18b) the checks of a feature that is checked by reading", () => {
     const id = hh.createMission("greenfield", { plan: planSource(leaderPlan(owner(), greet())), checkpoints: ["plan"] }).id;
     const parked = await hh.run(id);
     expect(featureOf(parked).acceptance).toEqual([...CHECKS, TASTE]);
-    expect(featureOf(parked, "greet").acceptance).toEqual(["answer in src/greet.mjs returns greet, and it is fast"]);
-    expect(parked.notes.filter((n) => n.startsWith("The plan reviewer's changes"))).toEqual([NOTE("Setup guide")]);
+    expect(featureOf(parked, "greet").acceptance).toEqual(parked.plan?.spec.features.find((f) => f.id === "greet")?.acceptance);
+    expect(parked.plan?.review?.rejectedChanges?.join(" ")).toContain("greet");
   });
 
-  it("does not touch a plan with no mode: the revised checks are used as the planner wrote them, with no note", async () => {
+  it("preserves supplied tests-mode checks even when the plan has no reading mode", async () => {
     const hh = harness({
       agents: {
         reviewer: (job, call) => (call.label === "gate-a" ? { structured: { verdict: "revise", issues: ["Be more exact."] } } : hh.defaults.reviewer(job, call)),
@@ -1137,8 +1139,8 @@ describe("(18b) the checks of a feature that is checked by reading", () => {
     const id = hh.createMission("greenfield", { plan: planSource(plan(greet())), checkpoints: ["plan"] }).id;
     const parked = await hh.run(id);
     expect(parked.plan?.review?.outcome).toBe("revised");
-    expect(featureOf(parked, "greet").acceptance).toEqual(["answer returns greet, exactly"]);
-    expect(parked.notes.some((n) => n.startsWith("The plan reviewer's changes"))).toBe(false);
+    expect(featureOf(parked, "greet").acceptance).toEqual(parked.plan?.spec.features[0]?.acceptance);
+    expect(parked.plan?.review?.rejectedChanges?.join(" ")).toContain("greet");
   });
 
   it("does not apply to the owner's own send-back at the plan stop: the owner's note may change the checks on purpose", async () => {
@@ -1170,7 +1172,7 @@ describe("(18b) the checks of a feature that is checked by reading", () => {
     expect(spec).toContain("Keep every check of these features exactly as it is in the previous spec, in the same order, with none added and none taken away");
   });
 
-  it("R3-4: a revised plan whose contract came back as one line with backslash-n text is adopted as a list, by gate A and by the owner's send-back", async () => {
+  it("R3-4: gate A and owner send-back preserve a double-escaped contract literally", async () => {
     const real = readFileSync(join(import.meta.dirname, "..", "test", "fixtures", "modes", "real-r3", "revised-contract.txt"), "utf8");
     expect(real).not.toContain("\n");
     const hh = harness({
@@ -1182,14 +1184,13 @@ describe("(18b) the checks of a feature that is checked by reading", () => {
     const id = hh.createMission("greenfield", { plan: planSource(leaderPlan(owner())), checkpoints: ["plan"] }).id;
     const parked = await hh.run(id);
     expect(parked.plan?.review?.outcome).toBe("revised");
-    expect(parked.spec?.uiContract.split("\n")).toHaveLength(10);
-    expect(parked.spec?.uiContract).toContain('- Benefits container: data-testid="benefits"\n- Each benefit: data-testid="benefit"');
-    expect(parked.spec?.uiContract).not.toMatch(/\\[n"]/u);
+    expect(parked.spec?.uiContract).toBe(real);
+    expect(parked.spec?.uiContract.split("\n")).toHaveLength(1);
     // The same when the owner sends the plan back and the planner answers in the same way.
     answer(hh, id, "send_back", "Name the file in the contract.");
     const again = await hh.run(id);
-    expect(again.spec?.uiContract.split("\n")).toHaveLength(10);
-    expect(again.spec?.uiContract).not.toMatch(/\\[n"]/u);
+    expect(again.spec?.uiContract).toBe(real);
+    expect(hh.jobsLabeled("spec")).toHaveLength(2);
   });
 
   it("R3-4: a plan that is written well is adopted as it is, with the same strings", async () => {

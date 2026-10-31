@@ -5,9 +5,11 @@ import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type CliIO, main, readCapped } from "./cli.js";
+import { missionEvidenceView } from "./mission-evidence.js";
 import { parsePlan } from "./plan.js";
 import { MissionStore } from "./state.js";
 import type { Mission } from "./types.js";
+import { controllerGitEnv } from "./util/launch-env.js";
 import { runProcess } from "./util/process.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "plans");
@@ -58,7 +60,7 @@ function readdirSafe(dir: string): string[] {
 }
 
 async function git(cwd: string, ...args: string[]): Promise<void> {
-  const r = await runProcess({ command: "git", args, cwd, timeoutMs: 30_000 });
+  const r = await runProcess({ env: controllerGitEnv({ isolatedConfig: true }), command: "git", args, cwd, timeoutMs: 30_000 });
   if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
 }
 
@@ -540,7 +542,7 @@ describe("mc plan show", () => {
     const m = await queued();
     expect(await mc(["plan", "show", m.id])).toBe(0);
     expect(out).toBe(
-      `${SHOW_HEAD(m.id)}Written by the leader. Plan code a4adaca5 (of the plan as the leader wrote it).\n\n${BLOCK_ONE}`,
+      `${SHOW_HEAD(m.id)}Written by the leader. Plan code a4adaca5 (of the plan as the leader wrote it).\n\n${BLOCK_ONE}\nRecorded AI reviews:\n${[...missionEvidenceView(m).plan,...missionEvidenceView(m).application].join("\n")}\n`,
     );
   });
 

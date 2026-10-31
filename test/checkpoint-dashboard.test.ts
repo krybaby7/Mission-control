@@ -84,7 +84,7 @@ describe("the plan check, as the dashboard shows it", () => {
     const s = snapshotOf(hh);
 
     expect(s.missions).toHaveLength(1);
-    expect(s.missions[0]).toMatchObject({ id, state: "paused", pausedWhy: "checkpoint", scope: "recent", sentence: "Waiting for your check of the plan." });
+    expect(s.missions[0]).toMatchObject({ id, state: "paused", pausedWhy: "checkpoint", scope: "recent", sentence: "Waiting for your check of the plan. Last run allowance policy: warn." });
 
     const [card, ...others] = cardsOf(s);
     expect(others).toEqual([]);
@@ -126,7 +126,7 @@ describe("the plan check, as the dashboard shows it", () => {
     answer(hh, id, "approve", "plan is fine");
     const s = snapshotOf(hh);
 
-    expect(s.missions[0]).toMatchObject({ state: "paused", pausedWhy: "checkpoint", sentence: "You answered. It continues on the next run." });
+    expect(s.missions[0]).toMatchObject({ state: "paused", pausedWhy: "checkpoint", sentence: "You answered. It continues on the next run. Last run allowance policy: warn." });
     expect(s.needsYou).toEqual([]);
     expect(reasonCodes(s)).not.toContain("checkpoint_waiting");
     expect(timelineTexts(s).slice(-2)).toEqual(["Waiting for your check of the plan for “Fixture app”.", "You approved the plan. “Fixture app” carries on when the next run starts."]);
@@ -176,7 +176,7 @@ describe("the feature check, as the dashboard shows it", () => {
     expect(card?.lines).toEqual(cp.look.lines.map((text) => ({ text, author: "ai" })));
     expect(card?.lines?.[0]?.text).toBe("“Feature greet” is built and passed its checks, and was reviewed.");
     expect(card?.answers?.approve).toBe('About the check of "Fixture app" (the feature "Feature greet"): approved, go ahead.');
-    expect(s.missions[0]?.sentence).toBe("Waiting for your check of “Feature greet”.");
+    expect(s.missions[0]?.sentence).toBe("Waiting for your check of “Feature greet”. Last run allowance policy: warn.");
     expect(s.missions[0]?.features.map((f) => [f.id, f.state])).toEqual([
       ["greet", "paused"],
       ["farewell", "waiting_turn"], // the next feature is not started, so it is not "paused" mid-work
@@ -204,7 +204,7 @@ describe("the feature check, as the dashboard shows it", () => {
     expect(cut.status).toBe("stopped");
     expect(cut.checkpoint).toMatchObject({ id: "feature:greet#1", state: "answered", reworkFrom: passing });
     const midway = snapshotOf(hh);
-    expect(midway.missions[0]).toMatchObject({ state: "paused", pausedWhy: "checkpoint", sentence: "You answered. It continues on the next run." });
+    expect(midway.missions[0]).toMatchObject({ state: "paused", pausedWhy: "checkpoint", sentence: "You answered. It continues on the next run. Last run allowance policy: warn." });
     expect(midway.needsYou).toEqual([]);
     expect(reasonCodes(midway)).not.toContain("checkpoint_waiting");
 
@@ -257,7 +257,7 @@ describe("the final check, as the dashboard shows it", () => {
     });
     expect(card?.lines?.map((l) => l.text)).toEqual(expect.arrayContaining(["All 2 features are built.", "The final checks passed."]));
     expect(card?.lines).toEqual(cp.look.lines.map((text) => ({ text, author: "ai" })));
-    expect(s.missions[0]).toMatchObject({ state: "paused", pausedWhy: "checkpoint", sentence: "Waiting for your check of the finished app.", featuresDone: 2, featuresTotal: 2 });
+    expect(s.missions[0]).toMatchObject({ state: "paused", pausedWhy: "checkpoint", sentence: "Waiting for your check of the finished app. Last run allowance policy: warn.", featuresDone: 2, featuresTotal: 2 });
     expect(s.timeline.items.at(-1)?.text).toBe("Waiting for your check of the finished app.");
     expect(s.lamp.state).toBe("needs_look");
     expect(s.debrief).toBeNull();

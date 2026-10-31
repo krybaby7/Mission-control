@@ -150,6 +150,7 @@ describe("e2e: a new app, start to finish", () => {
       "How to try it",
       "Needs your decision",
       "Features",
+      "Recorded AI reviews",
       "Choices I made for you",
       "Review notes",
       "Usage",

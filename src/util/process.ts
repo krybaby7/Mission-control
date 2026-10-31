@@ -10,8 +10,8 @@ export interface SpawnSpec {
   command: string;
   args: string[];
   cwd: string;
-  /** Default: process.env. */
-  env?: NodeJS.ProcessEnv;
+  /** Explicit environment constructed for this launch purpose. Never defaults to parent env. */
+  env: NodeJS.ProcessEnv;
   /** Written to stdin, then stdin is closed. When undefined, stdin is closed immediately (never left open). */
   stdin?: string;
   timeoutMs: number;
@@ -49,29 +49,6 @@ const DEFAULT_MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_STDERR_BYTES = 256 * 1024;
 /** setTimeout silently turns larger delays into 1 ms. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
-
-/** Variables that would make the CLIs bill an API account (or misbehave as a nested session) instead of using the subscription login. */
-const SCRUBBED_ENV_VARS = [
-  "ANTHROPIC_API_KEY",
-  "ANTHROPIC_AUTH_TOKEN",
-  "ANTHROPIC_BASE_URL",
-  "CLAUDE_CODE_USE_BEDROCK",
-  "CLAUDE_CODE_USE_VERTEX",
-  "CLAUDE_CODE_USE_FOUNDRY",
-  "OPENAI_API_KEY",
-  "OPENAI_BASE_URL",
-  "CODEX_API_KEY",
-  "CLAUDECODE",
-  "CLAUDE_CODE_ENTRYPOINT",
-  "CLAUDE_CODE_SSE_PORT",
-] as const;
-
-/** Returns a copy of `env` without the API-key / provider-routing variables. */
-export function scrubEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const clean = { ...env };
-  for (const key of SCRUBBED_ENV_VARS) delete clean[key];
-  return clean;
-}
 
 /**
  * Signals the process group led by `pid` (or just `pid` if it leads no group), plus any descendants
@@ -171,11 +148,12 @@ function stillRunning(entry: ProcEntry): boolean {
 export function runProcess(spec: SpawnSpec): Promise<SpawnResult> {
   const startedAt = Date.now();
   if (spec.signal?.aborted) return Promise.resolve(emptyResult({ aborted: true }));
+  if (spec.env === undefined || spec.env === null) return Promise.resolve(emptyResult({ spawnError: "missing child environment: env is required" }));
   let child: ChildProcess;
   try {
     child = spawn(spec.command, spec.args, {
       cwd: spec.cwd,
-      env: spec.env ?? process.env,
+      env: spec.env,
       detached: true,
       shell: false,
       stdio: "pipe",

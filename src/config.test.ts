@@ -159,13 +159,15 @@ describe("defaultConfig", () => {
 });
 
 describe("configTemplateYaml", () => {
-  it("parses to exactly defaultConfig()", () => {
-    expect(parseYaml(configTemplateYaml())).toEqual(defaultConfig());
+  it("parses to defaults with explicit strict allowance policy", () => {
+    const expected = defaultConfig(); expected.pacing.unknownAllowance = "stop";
+    expect(parseYaml(configTemplateYaml())).toEqual(expected);
   });
 
-  it("loads to the same config as a missing file", () => {
+  it("loads to the same config as a missing file except explicit strict allowance policy", () => {
     const file = writeConfig(configTemplateYaml());
-    expect(loadConfig(file)).toEqual(loadConfig(join(dir, "missing.yaml")));
+    const expected = loadConfig(join(dir, "missing.yaml")); expected.pacing.unknownAllowance = "stop";
+    expect(loadConfig(file)).toEqual(expected);
   });
 
   it("words its comments in terms of a run; only the stable setting name maxWeeklySharePerNight keeps the older word", () => {
@@ -903,5 +905,21 @@ describe("effectivePermissions", () => {
       codexWriteSandbox: "danger-full-access",
       downgraded: asRoot,
     });
+  });
+});
+
+describe("unknown allowance policy reconstruction", () => {
+  it("keeps omission distinct from an explicit warn choice", () => {
+    expect(loadConfig(writeConfig("version: 1")).pacing.unknownAllowance).toBeUndefined();
+    expect(loadConfig(writeConfig("pacing:\n  unknownAllowance: warn")).pacing.unknownAllowance).toBe("warn");
+  });
+  it("writes strict policy for newly generated configuration", () => {
+    expect(parseYaml(configTemplateYaml()).pacing.unknownAllowance).toBe("stop");
+  });
+  it.each(["stop", "warn"])("accepts explicit %s", policy => {
+    expect(loadConfig(writeConfig("pacing:\n  unknownAllowance: " + policy)).pacing.unknownAllowance).toBe(policy);
+  });
+  it.each(["allow", "false", "null", "0"])("rejects invalid %s", policy => {
+    expect(loadError("pacing:\n  unknownAllowance: " + policy)).toContain("pacing.unknownAllowance");
   });
 });

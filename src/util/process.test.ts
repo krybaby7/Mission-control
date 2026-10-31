@@ -3,7 +3,10 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { killTree, runProcess, scrubEnv, type SpawnSpec } from "./process.js";
+import { killTree, runProcess, type SpawnSpec } from "./process.js";
+
+import { buildChildEnv } from "./child-env.js";
+import { controllerGitEnv } from "./launch-env.js";
 
 const NODE = process.execPath;
 const hasProc = existsSync("/proc/self/stat");
@@ -30,7 +33,7 @@ afterEach(() => {
 });
 
 function runNode(script: string, extra: Partial<SpawnSpec> = {}) {
-  return runProcess({ command: NODE, args: ["-e", script], cwd: dir, timeoutMs: 15_000, ...extra });
+  return runProcess({ env: controllerGitEnv(), command: NODE, args: ["-e", script], cwd: dir, timeoutMs: 15_000, ...extra });
 }
 
 /** Alive and not a zombie (zombies linger until reaped, which a container's PID 1 may never do). */
@@ -87,7 +90,7 @@ describe("runProcess: results", () => {
   });
 
   it("runs without a shell: arguments are passed literally", async () => {
-    const r = await runProcess({
+    const r = await runProcess({ env: controllerGitEnv(),
       command: NODE,
       args: ["-e", "console.log(process.argv.slice(1).join('|'))", "$HOME; echo hi", "*", "a b"],
       cwd: dir,
@@ -119,11 +122,11 @@ describe("runProcess: environment", () => {
     expect(r.stdout).toBe("bar,undefined");
   });
 
-  it("defaults to process.env", async () => {
+  it("uses the helper's explicit policy without inheriting unknown variables", async () => {
     vi.stubEnv("MC_PROCESS_TEST_VAR", "inherited");
     try {
       const r = await runNode(`process.stdout.write(process.env.MC_PROCESS_TEST_VAR ?? "missing")`);
-      expect(r.stdout).toBe("inherited");
+      expect(r.stdout).toBe("missing");
     } finally {
       vi.unstubAllEnvs();
     }
@@ -300,14 +303,14 @@ describe("runProcess: teeStdoutTo", () => {
 
 describe("runProcess: spawn errors (never rejects)", () => {
   it("reports a missing command", async () => {
-    const r = await runProcess({ command: "mc-definitely-missing-binary", args: [], cwd: dir, timeoutMs: 5_000 });
+    const r = await runProcess({ env: controllerGitEnv(), command: "mc-definitely-missing-binary", args: [], cwd: dir, timeoutMs: 5_000 });
     expect(r).toMatchObject({ exitCode: null, signal: null, timedOut: false, aborted: false, stdout: "", stderr: "" });
     expect(r.spawnError).toBe("ENOENT: mc-definitely-missing-binary not found");
   });
 
   it("reports a missing working directory", async () => {
     const missing = join(dir, "does-not-exist");
-    const r = await runProcess({ command: NODE, args: ["-e", ""], cwd: missing, timeoutMs: 5_000 });
+    const r = await runProcess({ env: controllerGitEnv(), command: NODE, args: ["-e", ""], cwd: missing, timeoutMs: 5_000 });
     expect(r.spawnError).toBe(`ENOENT: working directory ${missing} does not exist`);
   });
 
@@ -315,12 +318,12 @@ describe("runProcess: spawn errors (never rejects)", () => {
     const script = join(dir, "not-executable.sh");
     writeFileSync(script, "#!/bin/sh\necho hi\n");
     chmodSync(script, 0o644);
-    const r = await runProcess({ command: script, args: [], cwd: dir, timeoutMs: 5_000 });
+    const r = await runProcess({ env: controllerGitEnv(), command: script, args: [], cwd: dir, timeoutMs: 5_000 });
     expect(r.spawnError).toMatch(/^EACCES: /);
   });
 
   it("reports arguments the OS cannot accept instead of throwing", async () => {
-    const r = await runProcess({ command: NODE, args: ["bad\0arg"], cwd: dir, timeoutMs: 5_000 });
+    const r = await runProcess({ env: controllerGitEnv(), command: NODE, args: ["bad\0arg"], cwd: dir, timeoutMs: 5_000 });
     expect(r.spawnError).toBeDefined();
     expect(r.exitCode).toBeNull();
   });
@@ -437,58 +440,33 @@ describe("runProcess: timeout and abort kill the whole tree", () => {
   }, 20_000);
 });
 
-describe("scrubEnv", () => {
-  const SCRUBBED = [
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "CLAUDE_CODE_USE_BEDROCK",
-    "CLAUDE_CODE_USE_VERTEX",
-    "CLAUDE_CODE_USE_FOUNDRY",
-    "OPENAI_API_KEY",
-    "OPENAI_BASE_URL",
-    "CODEX_API_KEY",
-    "CLAUDECODE",
-    "CLAUDE_CODE_ENTRYPOINT",
-    "CLAUDE_CODE_SSE_PORT",
-  ];
-
-  it("removes every API-key and routing variable and keeps the rest", () => {
-    const env: NodeJS.ProcessEnv = { PATH: "/usr/bin", HOME: "/home/u", CLAUDE_CONFIG_DIR: "/c", OTHER: "1" };
-    for (const key of SCRUBBED) env[key] = "secret";
-    const clean = scrubEnv(env);
-    for (const key of SCRUBBED) expect(clean).not.toHaveProperty(key);
-    expect(clean).toEqual({ PATH: "/usr/bin", HOME: "/home/u", CLAUDE_CONFIG_DIR: "/c", OTHER: "1" });
+describe("positive policy replacing scrubEnv", () => {
+  const base = { purpose: "diagnostic" as const, path: ["/usr/bin"], home: "/home/u", tmpDir: "/tmp" };
+  it("removes API/routing and unrelated names", () => {
+    const input = { ...base, ANTHROPIC_API_KEY: "secret", OPENAI_API_KEY: "secret", OTHER: "1" };
+    const clean = buildChildEnv(input);
+    expect(clean).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(clean).not.toHaveProperty("OPENAI_API_KEY");
+    expect(clean).not.toHaveProperty("OTHER");
   });
-
-  it("returns a new object and leaves the input untouched", () => {
-    const env: NodeJS.ProcessEnv = { ANTHROPIC_API_KEY: "k", PATH: "/bin" };
-    const clean = scrubEnv(env);
-    expect(clean).not.toBe(env);
-    expect(env.ANTHROPIC_API_KEY).toBe("k");
+  it("returns a new object and leaves input untouched", () => {
+    const clean = buildChildEnv(base);
     clean.PATH = "/changed";
-    expect(env.PATH).toBe("/bin");
+    expect(base.path).toEqual(["/usr/bin"]);
   });
-
-  it("is case-sensitive", () => {
-    expect(scrubEnv({ anthropic_api_key: "lower", Openai_Api_Key: "mixed" })).toEqual({
-      anthropic_api_key: "lower",
-      Openai_Api_Key: "mixed",
-    });
+  it("omits unknown credential spellings regardless of case", () => {
+    expect(buildChildEnv({ ...base, anthropic_api_key: "lower", Openai_Api_Key: "mixed" } as typeof base)).not.toHaveProperty("anthropic_api_key");
+    expect(buildChildEnv({ ...base, Openai_Api_Key: "mixed" } as typeof base)).not.toHaveProperty("Openai_Api_Key");
   });
-
-  it("defaults to process.env", () => {
+  it("does not copy parent variables or mutate the parent", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "should-go");
-    vi.stubEnv("MC_SCRUB_KEEP", "kept");
+    vi.stubEnv("MC_SCRUB_KEEP", "synthetic-excluded");
     try {
-      const clean = scrubEnv();
-      expect(clean.ANTHROPIC_API_KEY).toBeUndefined();
-      expect(clean.MC_SCRUB_KEEP).toBe("kept");
-      expect(clean.PATH).toBe(process.env.PATH);
+      const clean = buildChildEnv(base);
+      expect(clean).not.toHaveProperty("ANTHROPIC_API_KEY");
+      expect(clean).not.toHaveProperty("MC_SCRUB_KEEP");
       expect(process.env.ANTHROPIC_API_KEY).toBe("should-go");
-    } finally {
-      vi.unstubAllEnvs();
-    }
+    } finally { vi.unstubAllEnvs(); }
   });
 });
 
@@ -527,5 +505,13 @@ describe("killTree", () => {
     killTree(pid, "SIGKILL");
     expect(await exited).toBe("SIGKILL");
     expect(await waitUntilDead(member)).toBe(true);
+  });
+});
+
+describe("explicit process launch environment", () => {
+  it("fails closed instead of inheriting when env is omitted at runtime", async () => {
+    const result = await runProcess({ command: NODE, args: ["-e", "console.log('synthetic-launched')"], cwd: dir, timeoutMs: 5000 } as SpawnSpec);
+    expect(result.spawnError).toContain("env");
+    expect(result.stdout).toBe("");
   });
 });

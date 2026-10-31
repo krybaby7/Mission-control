@@ -153,6 +153,41 @@ async function settle(): Promise<void> {
 // ───────────── Tests ─────────────
 
 describe("RoleExecutor: running a job", () => {
+  it("awaits durable reservation, observation and cleanup around EACH retry before recording usage", async () => {
+    const order: string[] = [];
+    const rr = runners(() => { order.push("runner-claude"); return ok(); }, () => { order.push("runner-codex"); return authFailure(); });
+    const result = await executor(rr).exec(request({
+      lifecycle: {
+        usedJobId: id => id === "build-login-1",
+        reserve: async job => { order.push("reserve-" + job.id); return true; },
+        observe: async (job, _family, outcome) => {
+          order.push("observe-" + outcome);
+          expect(store.readUsage().length).toBe(job.id.endsWith("2") ? 0 : 1);
+        },
+        clean: async job => { order.push("clean-" + job.id); },
+      },
+    }));
+    expect(order).toEqual(["reserve-build-login-2", "runner-codex", "observe-auth", "clean-build-login-2", "reserve-build-login-3", "runner-claude", "observe-ok", "clean-build-login-3"]);
+    expect(result.jobId).toBe("build-login-3");
+  });
+  it("does not start or log a runner when durable reservation fails", async () => {
+    const rr = runners(); const observe = vi.fn(); const clean = vi.fn();
+    await expect(executor(rr).exec(request({ lifecycle: { usedJobId: () => false, reserve: async () => { throw Error("reservation failed"); }, observe, clean } }))).rejects.toThrow("reservation failed");
+    expect(rr.codex.calls).toHaveLength(0);
+    expect(store.readEvents(MISSION)).toEqual([]);
+    expect(observe).not.toHaveBeenCalled(); expect(clean).not.toHaveBeenCalled();
+  });
+  it("never retries or acknowledges cleanup after observation failure", async () => {
+    const rr = runners(ok, authFailure); const clean = vi.fn();
+    await expect(executor(rr).exec(request({ lifecycle: { usedJobId: () => false, reserve: async () => true, observe: async () => { throw Error("observation failed"); }, clean } }))).rejects.toThrow("observation failed");
+    expect(rr.codex.calls).toHaveLength(1); expect(rr.claude.calls).toHaveLength(0);
+    expect(clean).not.toHaveBeenCalled(); expect(store.readUsage()).toEqual([]);
+  });
+  it("an optional retry at its cap skips without a second invocation", async () => {
+    const rr = runners(ok, authFailure); let n = 0;
+    const result = await executor(rr).exec(request({ optional: true, lifecycle: { usedJobId: () => false, reserve: async () => ++n < 2, observe: async () => {}, clean: async () => {} } }));
+    expect(result.skipped).toBe(true); expect(rr.codex.calls).toHaveLength(1); expect(rr.claude.calls).toHaveLength(0);
+  });
   it("runs the requested family and tier and returns what ran", async () => {
     const r = runners();
     const res = await executor(r).exec(request());
@@ -497,9 +532,10 @@ describe("RoleExecutor: waiting for limits", () => {
     expect(r.claude.calls).toEqual([]);
   });
 
-  it("may start a run at the deadline itself", async () => {
+  it("does not start a run at the deadline itself", async () => {
     const r = runners();
-    expect(await executor(r, { deadline: clock.now() }).exec(request())).toMatchObject({ provider: "codex" });
+    await expect(executor(r, { deadline: clock.now() }).exec(request())).rejects.toBeInstanceOf(DeadlineError);
+    expect(r.codex.calls).toHaveLength(0);
   });
 
   it("waits when the wait ends before the deadline", async () => {
@@ -910,4 +946,124 @@ describe("RoleExecutor with MockRunner", () => {
     expect(res.result).toMatchObject({ outcome: "failed", error: expect.stringContaining("invalid structured output") });
     expect(r.codex.calls).toHaveLength(1);
   });
+});
+
+describe("strict allowance admission reconstruction", () => {
+  const readings = () => (["five_hour", "seven_day"] as const).map(window => ({ window, utilization: 0.1, reset: { kind: "supplied" as const, value: clock.now() + HOUR } }));
+  const fresh = (provider: Provider) => quota.recordAllowanceBatch(provider, readings());
+  it("cold strict candidates launch nothing, reserve nothing, and stop without spinning", async () => {
+    config.pacing.unknownAllowance = "stop";
+    const rs = runners(); const reserve = vi.fn(async () => true);
+    await expect(executor(rs).exec(request({ lifecycle: { usedJobId: () => false, reserve, observe: async () => {}, clean: async () => {} } }))).rejects.toMatchObject({ name: "AllowanceUnknownError", providers: ["codex", "claude"] });
+    expect(rs.codex.calls).toHaveLength(0); expect(rs.claude.calls).toHaveLength(0); expect(reserve).not.toHaveBeenCalled();
+  });
+  it("fresh metadata is one query, then one actual reserved invocation", async () => {
+    config.pacing.unknownAllowance = "stop";
+    const rs = runners(); const readAllowance = vi.fn(async () => ({ status: "observed" as const, observations: readings() }));
+    Object.assign(rs.codex, { readAllowance });
+    const reserve = vi.fn(async () => true);
+    const answer = await executor(rs).exec(request({ lifecycle: { usedJobId: () => false, reserve, observe: async () => {}, clean: async () => {} } }));
+    expect(answer.provider).toBe("codex"); expect(readAllowance).toHaveBeenCalledTimes(1); expect(reserve).toHaveBeenCalledTimes(1);
+    expect(quota.allowance("codex").usable).toBe(true);
+  });
+  it("unavailable metadata is attempted only once per provider even with several candidate models", async () => {
+    config.pacing.unknownAllowance = "stop";
+    const rs = runners(); const readAllowance = vi.fn(async () => ({ status: "unavailable" as const }));
+    Object.assign(rs.claude, { readAllowance });
+    await expect(executor(rs).exec(request({ tier: "light" }))).rejects.toMatchObject({ name: "AllowanceUnknownError" });
+    expect(readAllowance).toHaveBeenCalledTimes(1); expect(rs.claude.calls).toHaveLength(0);
+  });
+  it("unknown optional work skips without model usage", async () => {
+    config.pacing.unknownAllowance = "stop";
+    const rs = runners(); expect((await executor(rs).exec(request({ optional: true }))).skipped).toBe(true);
+    expect(rs.codex.calls).toHaveLength(0); expect(rs.claude.calls).toHaveLength(0);
+  });
+  it("fails over only to an eligible known family", async () => {
+    config.pacing.unknownAllowance = "stop"; fresh("claude");
+    const rs = runners(); const answer = await executor(rs).exec(request());
+    expect(answer.provider).toBe("claude"); expect(rs.codex.calls).toHaveLength(0);
+  });
+  it("stop during metadata wins before launch", async () => {
+    config.pacing.unknownAllowance = "stop"; let stop = false;
+    const rs = runners();
+    Object.assign(rs.codex, { readAllowance: async () => { stop = true; return { status: "observed", observations: readings() }; } });
+    await expect(executor(rs, { stopCheck: () => stop }).exec(request())).rejects.toBeInstanceOf(StopRequestedError);
+    expect(rs.codex.calls).toHaveLength(0);
+  });
+  it("deadline during metadata wins before launch and bounds its request", async () => {
+    config.pacing.unknownAllowance = "stop";
+    const rs = runners(); const deadline = clock.now() + 1000;
+    const readAllowance = vi.fn(async (_options?: { timeoutMs?: number }) => { await clock.advance(1001); return { status: "observed" as const, observations: readings() }; });
+    Object.assign(rs.codex, { readAllowance });
+    await expect(executor(rs, { deadline }).exec(request())).rejects.toBeInstanceOf(DeadlineError);
+    expect(readAllowance.mock.calls[0]?.[0]).toMatchObject({ timeoutMs: 1000 });
+    expect(rs.codex.calls).toHaveLength(0);
+  });
+  it("warning mode preserves admission and explicitly disclaims reserve assurance", async () => {
+    config.pacing.unknownAllowance = "warn";
+    const rs = runners(); const warn = vi.fn();
+    await executor(rs, { logger: { ...nullLogger, warn } }).exec(request());
+    expect(rs.codex.calls).toHaveLength(1);
+    expect(warn.mock.calls.some(args => String(args[0]).includes("reserve is not assured"))).toBe(true);
+  });
+  it("policy is fixed for one executor, with a deliberate change applying to the next", async () => {
+    config.pacing.unknownAllowance = "stop"; const rs = runners(); const old = executor(rs);
+    config.pacing.unknownAllowance = "warn";
+    await expect(old.exec(request())).rejects.toMatchObject({ name: "AllowanceUnknownError" });
+    expect((await executor(rs).exec(request())).skipped).toBe(false);
+  });
+  it("known login failures keep auth treatment instead of becoming allowance pauses", async () => {
+    config.pacing.unknownAllowance = "stop"; quota.recordAuthFailure("codex", "login"); quota.recordAuthFailure("claude", "login");
+    await expect(executor(runners()).exec(request())).rejects.toBeInstanceOf(AuthUnavailableError);
+  });
+});
+
+describe("allowance gate ordering", () => {
+  const fresh = (provider: Provider, until = clock.now() + HOUR) => quota.recordAllowanceBatch(provider, ["five_hour", "seven_day"].map(window => ({
+    window, utilization: 0.1, reset: { kind: "supplied" as const, value: until },
+  })));
+  it("cap precheck prevents metadata work before any reservation", async () => {
+    config.pacing.unknownAllowance = "stop";
+    const rs = runners(); const readAllowance = vi.fn(async () => ({ status: "unavailable" as const }));
+    Object.assign(rs.codex, { readAllowance });
+    const reserve = vi.fn(async () => true);
+    const answer = await executor(rs).exec(request({ optional: true, lifecycle: { canStart: () => false, usedJobId: () => false, reserve, observe: async () => {}, clean: async () => {} } }));
+    expect(answer.skipped).toBe(true); expect(readAllowance).not.toHaveBeenCalled(); expect(reserve).not.toHaveBeenCalled();
+  });
+  it("does not admit another provider whose reading ages during metadata", async () => {
+    config.pacing.unknownAllowance = "stop"; fresh("claude");
+    const rs = runners();
+    Object.assign(rs.codex, { readAllowance: async () => { await clock.advance(11 * MIN); return { status: "unavailable" }; } });
+    await expect(executor(rs).exec(request())).rejects.toMatchObject({ name: "AllowanceUnknownError" });
+    expect(rs.claude.calls).toHaveLength(0); expect(rs.codex.calls).toHaveLength(0);
+  });
+  it("a known auth candidate does not hide another unknown non-auth candidate", async () => {
+    config.pacing.unknownAllowance = "stop"; fresh("codex"); quota.recordAuthFailure("codex", "login");
+    await expect(executor(runners()).exec(request())).rejects.toMatchObject({ name: "AllowanceUnknownError", providers: ["claude"] });
+  });
+  it("waits for a known limited candidate, then reassesses its now-stale observation", async () => {
+    config.pacing.unknownAllowance = "stop"; fresh("codex");
+    quota.recordLimit({ provider: "codex", kind: "session", resetsAt: clock.now() + 11 * MIN, raw: "limit" });
+    const rs = runners(); const pending = track(executor(rs).exec(request()));
+    await settle(); expect(pending.done).toBe(false);
+    await clock.advance(11 * MIN + MARGIN); await settle();
+    expect(pending.error).toMatchObject({ name: "AllowanceUnknownError" }); expect(rs.codex.calls).toHaveLength(0);
+  });
+  it("a retry is a new admission decision and cannot reuse stale evidence", async () => {
+    config.pacing.unknownAllowance = "stop"; fresh("codex");
+    const rs = runners(undefined, () => ({ result: { outcome: "limited", limit: { provider: "codex", kind: "session", resetsAt: clock.now() + 11 * MIN, raw: "limit" } } }));
+    const pending = track(executor(rs).exec(request())); await settle();
+    await clock.advance(11 * MIN + MARGIN); await settle();
+    expect(pending.error).toMatchObject({ name: "AllowanceUnknownError" }); expect(rs.codex.calls).toHaveLength(1);
+  });
+});
+
+it("rechecks strict freshness at the async selection boundary", async () => {
+  config.pacing.unknownAllowance = "stop";
+  quota.recordAllowanceBatch("codex", ["five_hour", "seven_day"].map(window => ({ window, utilization: 0.1, reset: { kind: "supplied" as const, value: clock.now() + HOUR } })));
+  let checks = 0; const rs = runners(); const reserve = vi.fn(async () => true);
+  await expect(executor(rs, { stopCheck: () => { if (++checks === 3) void clock.advance(11 * MIN); return false; } }).exec(request({
+    lifecycle: { usedJobId: () => false, reserve, observe: async () => {}, clean: async () => {} },
+  }))).rejects.toMatchObject({ name: "AllowanceUnknownError" });
+  expect(rs.codex.calls).toHaveLength(0); expect(reserve).not.toHaveBeenCalled();
 });

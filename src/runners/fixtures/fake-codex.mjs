@@ -12,8 +12,14 @@
 //   FAKE_CODEX_ACCOUNT      account/read: "chatgpt" (default), "apiKey", "amazonBedrock" or "none" (not logged in)
 //   FAKE_CODEX_RATE_LIMITS  account/rateLimits/read's rateLimits snapshot as JSON; unset: an error, as for API keys
 //   FAKE_CODEX_WRITE_FILE   the "write-file" step writes "changed by codex" to this path (relative to the cwd)
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
+
+// Scenario controls are fixture files; they are never worker environment overrides.
+let fixture = {};
+try { fixture = JSON.parse(readFileSync(process.env.CODEX_HOME + "/mc-fixture.json", "utf8")); } catch {}
+if (fixture.FAKE_CODEX_ENV_RECORD) appendFileSync(fixture.FAKE_CODEX_ENV_RECORD, JSON.stringify({ command: process.argv[2], env: process.env, pid: process.pid, homeExists: existsSync(process.env.HOME), tmpExists: existsSync(process.env.TMPDIR) }) + "\n");
+
 
 if (process.argv[2] === "sandbox") sandboxProbe();
 if (process.argv[2] === "app-server") await appServer();
@@ -42,7 +48,7 @@ const args = parseArgs(process.argv.slice(2));
 if (args.error) fail(2, `error: ${args.error}`);
 record();
 
-const message = process.env.FAKE_CODEX_MESSAGE ?? DEFAULT_MESSAGE;
+const message = fixture.FAKE_CODEX_MESSAGE ?? DEFAULT_MESSAGE;
 const STEPS = {
   start: () => {
     emit({ type: "thread.started", thread_id: "thread-123" });
@@ -136,7 +142,7 @@ const STEPS = {
   /** 1.8 s of quiet work (a long command), with no error pending. */
   pause: () => sleep(1_800),
   /** Changes a file in the working directory, as an agent ignoring a read-only brief would. */
-  "write-file": () => writeFileSync(process.env.FAKE_CODEX_WRITE_FILE ?? "codex-was-here.txt", "changed by codex\n"),
+  "write-file": () => writeFileSync(fixture.FAKE_CODEX_WRITE_FILE ?? "codex-was-here.txt", "changed by codex\n"),
   panic: () => {
     process.stderr.write("mcp server listening on 127.0.0.1:40123\n");
     process.stderr.write("thread 'main' panicked at core/src/codex.rs:42: boom\n");
@@ -149,7 +155,7 @@ const STEPS = {
   hang: () => setInterval(() => {}, 1 << 30),
 };
 
-const scenario = process.env.FAKE_CODEX_SCENARIO ?? "start+work+finish";
+const scenario = fixture.FAKE_CODEX_SCENARIO ?? "start+work+finish";
 const steps = scenario.split("+").map((name) => STEPS[name] ?? fail(2, `fake codex: unknown step ${name}`));
 for (const step of steps) step();
 
@@ -175,7 +181,7 @@ function work() {
 /** `codex sandbox -c sandbox_mode="read-only" -- true`: works, or fails as bubblewrap does without user namespaces. */
 function sandboxProbe() {
   logCall(`sandbox ${process.argv.slice(3).join(" ")}`);
-  if (process.env.FAKE_CODEX_SANDBOX === "broken") {
+  if (fixture.FAKE_CODEX_SANDBOX === "broken") {
     process.stderr.write(
       "bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces.\n",
     );
@@ -186,7 +192,7 @@ function sandboxProbe() {
 
 /** JSON-RPC over stdio, one message per line, answering as codex 0.162.0 does; it quits when stdin closes. */
 async function appServer() {
-  const mode = process.env.FAKE_CODEX_APP_SERVER ?? "answer";
+  const mode = fixture.FAKE_CODEX_APP_SERVER ?? "answer";
   if (mode === "missing") {
     process.stderr.write("error: unrecognized subcommand 'app-server'\n");
     process.exit(2);
@@ -194,21 +200,28 @@ async function appServer() {
   for await (const line of createInterface({ input: process.stdin })) {
     const request = JSON.parse(line);
     if (request.method !== undefined) logCall(`app-server ${request.method}`);
-    if (mode === "hang" || request.id === undefined) continue;
+    if (mode === "hang" || request.id === undefined ||
+      (mode === "account-only" && request.method === "account/rateLimits/read")) continue;
     process.stdout.write(`${JSON.stringify({ id: request.id, ...appServerAnswer(request.method) })}\n`);
   }
+  if (mode === "delayed-eof") {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    if (fixture.FAKE_CODEX_ENV_RECORD) appendFileSync(fixture.FAKE_CODEX_ENV_RECORD, JSON.stringify({ phase: "after-eof", homeExists: existsSync(process.env.HOME), tmpExists: existsSync(process.env.TMPDIR) }) + "\n");
+  }
+  if (mode === "ignore-eof") await new Promise(() => { setInterval(() => {}, 1000); });
   process.exit(0);
 }
 
 function appServerAnswer(method) {
   if (method === "initialize") return { result: { userAgent: "fake-codex/0.162.0", platformFamily: "unix" } };
   if (method === "account/read") {
-    const type = process.env.FAKE_CODEX_ACCOUNT ?? "chatgpt";
+    const type = fixture.FAKE_CODEX_ACCOUNT ?? "chatgpt";
+    if (type === "missing") return { result: {} };
     const account = type === "none" ? null : type === "chatgpt" ? { type, email: null, planType: "plus" } : { type };
     return { result: { account, requiresOpenaiAuth: true, workspaceRouting: null } };
   }
   if (method === "account/rateLimits/read") {
-    const limits = process.env.FAKE_CODEX_RATE_LIMITS;
+    const limits = fixture.FAKE_CODEX_RATE_LIMITS;
     if (limits === undefined) return { error: { code: -32600, message: "chatgpt authentication required to read rate limits" } };
     return { result: { ordinaryUsageAllowed: true, rateLimits: JSON.parse(limits), rateLimitsByLimitId: null } };
   }
@@ -216,7 +229,7 @@ function appServerAnswer(method) {
 }
 
 function logCall(text) {
-  if (process.env.FAKE_CODEX_CALLS) appendFileSync(process.env.FAKE_CODEX_CALLS, `${text}\n`);
+  if (fixture.FAKE_CODEX_CALLS) appendFileSync(fixture.FAKE_CODEX_CALLS, `${text}\n`);
 }
 
 function turnFailed(text) {
@@ -247,7 +260,7 @@ function fail(code, text) {
 }
 
 function record() {
-  const path = process.env.FAKE_CODEX_RECORD;
+  const path = fixture.FAKE_CODEX_RECORD;
   if (!path) return;
   const schema = args.schemaFile ? JSON.parse(readFileSync(args.schemaFile, "utf8")) : null;
   const data = { argv: process.argv.slice(2), cwd: process.cwd(), stdin, env: process.env, schema, pid: process.pid };

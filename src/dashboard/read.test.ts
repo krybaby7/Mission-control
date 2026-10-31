@@ -285,6 +285,10 @@ describe("quota.json", () => {
       limits: [{ provider: "codex", kind: "session", until: 1000 }],
       modelBlocks: [{ provider: "claude", model: "claude-opus-5-5", until: 2000 }],
       utilization: [{ provider: "claude", window: "five_hour", utilization: 0.62, resetsAt: 3000 }],
+      observations: [
+        { provider: "claude", window: "five_hour", utilization: 0.62, resetsAt: 3000, resetState: "reported" },
+        { provider: "claude", window: "seven_day", utilization: null, resetsAt: null, receivedAt: null, resetState: "malformed", ambiguous: true },
+      ],
     });
     expect(JSON.stringify(quota)).not.toContain("raw");
     expect(JSON.stringify(quota)).not.toContain("secret");

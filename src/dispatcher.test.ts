@@ -18,6 +18,7 @@ import {
   labelOf,
   MissionHarness,
   review,
+  finalReview,
   specOutput,
   writeFeatureTest,
   writeFile,
@@ -870,7 +871,7 @@ describe("Dispatcher: tests, review and gate C", () => {
       agents: {
         reviewer: (job, call) =>
           call.label === "gate-c" && call.n === 1
-            ? { structured: review([finding("blocker", "greet ignores the app name", "src/greet.mjs"), finding("minor", "tidy the imports")]) }
+            ? { structured: finalReview([finding("blocker", "greet ignores the app name", "src/greet.mjs"), finding("minor", "tidy the imports")]) }
             : byDefault("reviewer")(job, call),
       },
     });
@@ -928,7 +929,7 @@ describe("Dispatcher: tests, review and gate C", () => {
       configure: (c) => (c.limits.maxGateCRounds = 0),
       agents: {
         reviewer: (job, call) =>
-          call.label === "gate-c" ? { structured: review([finding("major", "no input validation", "app.mjs")]) } : byDefault("reviewer")(job, call),
+          call.label === "gate-c" ? { structured: finalReview([finding("major", "no input validation", "app.mjs")]) } : byDefault("reviewer")(job, call),
       },
     });
     const m = await hh.run(hh.createMission("greenfield").id);
@@ -1014,7 +1015,7 @@ describe("Dispatcher: stopping, limits and budget", () => {
     const id = hh.createMission("greenfield").id;
     const stopped = await hh.run(id, { signal: stop.signal });
 
-    expect(stopped).toMatchObject({ status: "stopped", stage: "features", agentRuns: hh.jobs.length - 1 }); // the aborted run is not counted
+    expect(stopped).toMatchObject({ status: "stopped", stage: "features", agentRuns: hh.jobs.length }); // every actual invocation, including the aborted run, counts
     expect(stopped.features[0]).toMatchObject({ status: "building", rung: 0, attempts: [] });
     const m = await hh.run(id);
     expect(m.status).toBe("done");
@@ -1134,7 +1135,7 @@ describe("Dispatcher: stopping, limits and budget", () => {
   it("fails the mission and asks for a login when every provider needs one", async () => {
     const hh = harness({ configure: (c) => (c.failover.enabled = false), agents: { architect: () => ({ outcome: "auth", error: "Please run /login" }) } });
     const m = await hh.run(hh.createMission("greenfield").id);
-    expect(m).toMatchObject({ status: "failed", stage: "spec", agentRuns: 0 });
+    expect(m).toMatchObject({ status: "failed", stage: "spec", agentRuns: 1 }); // the actual auth-refused invocation was reserved
     const decision =
       "Log in again: claude needs a new login. In the Ubuntu window run `mc login-claude`. " +
       `The next \`mc run\` then carries on with this mission by itself; to carry on right away, run \`mc run --mission ${m.id}\`.`;

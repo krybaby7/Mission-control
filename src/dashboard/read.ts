@@ -1,3 +1,4 @@
+import { missionEvidenceView, type MissionEvidenceView } from "../mission-evidence.js";
 // The only module of the dashboard that touches the disk. It reads the Mission Control home and nothing else, never
 // writes, creates, locks or touches anything under it (docs/dashboard-spec.md, 1.1 and 3.2), and hands the rest of the
 // dashboard plain, validated, cleaned data. Parsed files are cached by (inode, size, mtime) in memory only.
@@ -8,7 +9,7 @@
 import { closeSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync, type Stats } from "node:fs";
 import { join, resolve } from "node:path";
 import { MissionStore, planOf } from "../state.js";
-import type { Attempt, CheckedResult, CheckpointKind, CheckpointRecord, Feature, FeatureChecked, Mission, MissionEvent, PendingCheckpoint, PictureWhy, PlanSource } from "../types.js";
+import type { Attempt, CheckedResult, CheckpointKind, CheckpointRecord, Feature, FeatureChecked, Mission, MissionEvent, Provider, PendingCheckpoint, PictureWhy, PlanSource } from "../types.js";
 import {
   CHECKPOINT_LINES_MAX,
   CHECKPOINT_LOG_MAX,
@@ -32,6 +33,7 @@ import {
   TITLE_MAX_CHARS,
   WAIT_MARGIN_MS,
 } from "./constants.js";
+import { legacyAllowanceObservations, restoreObservations, type AllowanceObservation } from "../allowance.js";
 import { tasteMark } from "./modes.js";
 import { clean, cleanId } from "./sanitize.js";
 
@@ -56,6 +58,7 @@ export interface HomeData {
 
 /** `raw` text is dropped inside read.ts and never leaves it. */
 export interface QuotaData {
+  observations?: AllowanceObservation[];
   limits: { provider: string; kind: string; until: number }[];
   modelBlocks: { provider: string; model: string; until: number }[];
   utilization: { provider: string; window: string; utilization: number; resetsAt: number }[];
@@ -90,6 +93,12 @@ export interface DispatchPicks {
   /** null: the file has none (the final check did not complete). */
   finalVerify: { ok: boolean; reviewed: boolean | null; blocking: number | null; judged?: false } | null;
   inflight: { label: string; feature: string | null; at: number | null } | null;
+}
+
+// Derived before cleaning, held out of persisted mission data. A file-supplied cached view is never trusted.
+const evidenceViews=new WeakMap<Mission,MissionEvidenceView>();
+export function recordedEvidence(m:Mission):MissionEvidenceView {
+  return evidenceViews.get(m)??missionEvidenceView(m);
 }
 
 // ───────────────────────────── Small checks ─────────────────────────────
@@ -242,22 +251,23 @@ function readQuota(file: string): { quota: QuotaData | null; mtimeMs: number | n
 /** The valid entries of quota.json; one bad entry never spoils the rest. `raw` provider text is dropped here. */
 function pickQuota(parsed: unknown): QuotaData | null {
   if (!isRecord(parsed)) return null;
-  const out: QuotaData = { limits: [], modelBlocks: [], utilization: [] };
+  const out: QuotaData = { limits: [], modelBlocks: [], utilization: [],
+    observations: Object.hasOwn(parsed, "observations") ? restoreObservations(parsed.observations) : legacyAllowanceObservations(parsed.utilization) };
   if (isRecord(parsed.limits)) {
     for (const [provider, v] of Object.entries(parsed.limits)) {
-      if (isRecord(v) && isString(v.kind) && isTime(v.until)) out.limits.push({ provider: cleanId(provider), kind: cleanId(v.kind), until: v.until });
+      if (cleanId(provider) === provider && isRecord(v) && isString(v.kind) && isTime(v.until)) out.limits.push({ provider: cleanId(provider), kind: cleanId(v.kind), until: v.until });
     }
   }
   if (Array.isArray(parsed.modelBlocks)) {
     for (const v of parsed.modelBlocks) {
-      if (isRecord(v) && isString(v.provider) && isString(v.model) && isTime(v.until)) {
+      if (isRecord(v) && isString(v.provider) && cleanId(v.provider) === v.provider && isString(v.model) && isTime(v.until)) {
         out.modelBlocks.push({ provider: cleanId(v.provider), model: cleanId(v.model), until: v.until });
       }
     }
   }
   if (Array.isArray(parsed.utilization)) {
     for (const v of parsed.utilization) {
-      if (isRecord(v) && isString(v.provider) && isString(v.window) && isNumber(v.utilization) && Math.abs(v.utilization) <= MAX_UTILIZATION && isTime(v.resetsAt)) {
+      if (isRecord(v) && isString(v.provider) && cleanId(v.provider) === v.provider && isString(v.window) && cleanId(v.window) === v.window && isNumber(v.utilization) && Math.abs(v.utilization) <= MAX_UTILIZATION && isTime(v.resetsAt)) {
         out.utilization.push({ provider: cleanId(v.provider), window: cleanId(v.window), utilization: v.utilization, resetsAt: v.resetsAt });
       }
     }
@@ -354,7 +364,7 @@ function cleanMission(m: Mission): Mission | null {
   const checkpoint = cleanCheckpoint(raw.checkpoint);
   const checkpointLog = cleanCheckpointLog(raw.checkpointLog);
   const plan = planFlag(m);
-  return {
+  const cleaned:Mission = {
     id,
     kind: m.kind,
     title: clean(m.title, TITLE_MAX_CHARS) || id,
@@ -390,7 +400,16 @@ function cleanMission(m: Mission): Mission | null {
     ...(plan !== undefined && { plan }),
     // Only ever `false` (docs/modes-spec.md, M4): the owner queued the plan without the stops for their look at features checked by reading.
     ...(raw.ownerStops === false && { ownerStops: false as const }),
+    ...((raw.allowancePolicy === "stop" || raw.allowancePolicy === "warn") && { allowancePolicy: raw.allowancePolicy }),
+    ...(isRecord(raw.pause) && raw.pause.kind === "allowance_unknown" && isString(raw.pause.reason) &&
+      isString(raw.pause.at) && Number.isFinite(Date.parse(raw.pause.at)) && Array.isArray(raw.pause.providers) &&
+      raw.pause.providers.every(p => p === "claude" || p === "codex" || p === "mock") ? {
+        pause: { kind: "allowance_unknown" as const, reason: clean(raw.pause.reason, REASON_MAX_CHARS),
+          at: raw.pause.at, providers: [...raw.pause.providers] as Provider[] },
+      } : {}),
   };
+  evidenceViews.set(cleaned,missionEvidenceView(m));
+  return cleaned;
 }
 
 /**

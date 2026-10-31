@@ -180,13 +180,15 @@ describe("R6-2: a sentence that says there is no record of how a feature was che
   it("drops an item of the list that says it, and keeps the rest", () => {
     const report = render(r6(), { narrative: "The words are counted.", whatYouCanDo: ["Count words.", "Know that the counting has no record of how it was checked."] });
     expect(report).toContain("- Count words.");
-    expect(report).not.toContain("no record");
+    expect(report.slice(0, report.indexOf("\n## "))).not.toContain("no record");
+    expect(sectionText(report,"What you can do now")).not.toContain("no record");
   });
 
   it("falls back to the plain summary when nothing is left of the paragraph", () => {
     const report = render(r6(), { narrative: "The first feature has no record of how it was checked.", whatYouCanDo: ["Count words."] });
     expect(report).toContain("I worked on your request for word-tools: “Word count and notes”.");
-    expect(report).not.toContain("no record");
+    expect(report.slice(0, report.indexOf("\n## "))).not.toContain("no record");
+    expect(sectionText(report,"What you can do now")).not.toContain("no record");
   });
 
   it("keeps a paragraph that has none of these sentences exactly as the AI wrote it, with its line breaks", () => {
@@ -194,11 +196,11 @@ describe("R6-2: a sentence that says there is no record of how a feature was che
     expect(render(r6(), { narrative, whatYouCanDo: ["Count words."] })).toContain(narrative);
   });
 
-  it("does not stand in for the guard on the words of the never-say list: a claim of a test still sends the whole paragraph away", () => {
+  it("retains the never-say guard and replaces checking claims with recorded facts", () => {
     const report = render(r6(), { narrative: `${NO_RECORD_SENTENCE} The tests passed for the notes.`, whatYouCanDo: ["Count words."] });
     expect(report).toContain("I worked on your request for word-tools");
     expect(report).not.toContain("The tests passed for the notes.");
-    expect(report).toContain("was left out");
+    expect(report).toContain("Checking claims in the AI-written summary were replaced with recorded facts.");
   });
 
   it("applies only when the Checked line is there: with no finished feature checked by reading, the sentence is the AI's own and stays", () => {
@@ -381,10 +383,10 @@ describe("R6-1: laterFeatureFiles finds a file that a later feature is planned t
     expect(laterFeatureFiles(earlier, earlier.features[1]!, ["docs/NOTES.md"])).toEqual([]);
   });
 
-  it("finds nothing for a mission with no feature checked by reading, for a feature that is checked by reading, or for a feature the mission does not have", () => {
+  it("finds overlap in an all-tests mission, but none for the final or unknown feature", () => {
     const old = plan();
     old.features = old.features.map((f) => ({ ...f, mode: undefined }));
-    expect(laterFeatureFiles(old, first(old), ["docs/NOTES.md"])).toEqual([]);
+    expect(laterFeatureFiles(old, first(old), ["docs/NOTES.md"])).toEqual([{ file: "docs/NOTES.md", belongsTo: "notes" }]);
     const m = plan();
     expect(laterFeatureFiles(m, m.features[1]!, ["docs/NOTES.md"])).toEqual([]);
     expect(laterFeatureFiles(m, { ...first(m), id: "unknown" }, ["docs/NOTES.md"])).toEqual([]);

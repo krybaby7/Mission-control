@@ -9,12 +9,13 @@
 // folder that points outside it is blocked by the real-path test (spec 2.7). Not tried: a service worker, DNS lookups,
 // WebRTC, a redirect by a meta tag.
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, statSync, mkdtempSync } from "node:fs";
 import { lstat, realpath, unlink, writeFile } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { plainName } from "./checks.js";
 import { slugify } from "./state.js";
+import { cleanupLaunchDir, localLaunchEnv, type ToolPathOptions } from "./util/launch-env.js";
 import type { PictureWhy } from "./types.js";
 
 /** The two widths pictures are taken at: 390 by 844 and 1280 by 800 (spec 7.2). */
@@ -74,6 +75,8 @@ export interface RenderRequest {
 
 /** The answer of a render. Never throws: a failure is a `why`. */
 export interface RenderResult {
+  /** Local launch-setting failure, without supplied values. */
+  detail?: string;
   pages: RenderedPage[];
   /** How many PNG files were written (two for a page drawn at both widths). */
   taken: number;
@@ -293,8 +296,8 @@ async function shoot(browser: PwBrowser, root: string, pageAbs: string, request:
   }
 }
 
-/** The real renderer. `env` and `pageLoadMs` (how long a page may take to load, default 20 seconds) are only for tests. */
-export function playwrightRenderer(options: { env?: Record<string, string | undefined>; pageLoadMs?: number } = {}): Renderer {
+/** `env` selects browser discovery inputs only; child variables use the rendering policy. */
+export function playwrightRenderer(options: ToolPathOptions & { env?: Record<string, string | undefined>; pageLoadMs?: number } = {}): Renderer {
   const env = options.env ?? process.env;
   const loadMs = options.pageLoadMs ?? PAGE_LOAD_MS;
   return {
@@ -317,13 +320,18 @@ export function playwrightRenderer(options: { env?: Record<string, string | unde
         return { pages: [], taken: 0, why: "start_failed" };
       }
       let browser: PwBrowser;
+      let ownedDir: string | undefined;
       try {
+        ownedDir = mkdtempSync(join("/tmp", "mc-render-"));
+        const childEnv = localLaunchEnv({ purpose: "rendering", ownedDir, path: options.path });
         // The second switch keeps the browser from running out of the small shared memory a container gives it by default. The third
         // lets no name or address be looked up: a page that sends the browser to a web address (a script, a form, a link, a refresh
         // tag) made it open a connection to that address before the request was aborted. Pages and files of the project need no lookup.
-        browser = await pw.chromium.launch({ executablePath, args: ["--no-sandbox", "--disable-dev-shm-usage", "--host-resolver-rules=MAP * ~NOTFOUND"], timeout: PAGE_LOAD_MS });
-      } catch {
-        return { pages: [], taken: 0, why: "start_failed" };
+        browser = await pw.chromium.launch({ executablePath, env: childEnv, args: ["--no-sandbox", "--disable-dev-shm-usage", "--host-resolver-rules=MAP * ~NOTFOUND"], timeout: PAGE_LOAD_MS });
+      } catch (err) {
+        cleanupLaunchDir(ownedDir);
+        const detail = err instanceof Error && err.message.startsWith("Invalid child environment setting:") ? err.message : undefined;
+        return { pages: [], taken: 0, why: "start_failed", ...(detail !== undefined && { detail }) };
       }
       const started = Date.now();
       const pages: RenderedPage[] = [];
@@ -368,6 +376,7 @@ export function playwrightRenderer(options: { env?: Record<string, string | unde
         }
       } finally {
         await browser.close().catch(() => undefined);
+        cleanupLaunchDir(ownedDir);
       }
       const answer: RenderResult = { pages, taken };
       if (taken === 0 && pages.length > 0) {

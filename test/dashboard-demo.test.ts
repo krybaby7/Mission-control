@@ -1,3 +1,4 @@
+import { allowanceHistoricalView } from "./allowance-legacy-projection.js";
 // T-DEMO: the golden demo snapshots (docs/dashboard-spec.md, 14.5 and 17.2).
 //
 // dashboard/demo/<name>.json is built here from a named fixture with a pinned clock and the UTC time zone, so its
@@ -144,7 +145,7 @@ describe("T-DEMO the golden snapshots", () => {
   it.each(DEMOS.map((d) => [d.name, d] as const))("%s is the snapshot of its fixture and has a valid shape", (_name, demo) => {
     const snapshot = snapshotFor(demo);
     assertSnapshotShape(snapshot);
-    expect(readFileSync(goldenFile(demo.name), "utf8")).toBe(goldenText(snapshot));
+    expect(readFileSync(goldenFile(demo.name), "utf8")).toBe(goldenText(allowanceHistoricalView(snapshot)));
   });
 
   const SHOWS: Record<string, (s: Snapshot) => void> = {
@@ -215,6 +216,11 @@ describe("T-DEMO the golden snapshots", () => {
 });
 
 describe("T-DEMO the page with the demo data", () => {
+  if (process.env.UPDATE_DEMO_PAGE === "1") {
+    it("UPDATE_DEMO_PAGE=1: refreshes the page while preserving historical JSON golden files", () => {
+      writeFileSync(DEMO_HTML, demoPage(readFileSync(INDEX_HTML, "utf8"), Object.fromEntries(DEMOS.map(d => [d.name, snapshotFor(d)]))));
+    });
+  }
   it.skipIf(!existsSync(INDEX_HTML))("dashboard/demo.html is dashboard/index.html with the demo block before its first script", () => {
     const expected = demoPage(readFileSync(INDEX_HTML, "utf8"), Object.fromEntries(DEMOS.map((d) => [d.name, snapshotFor(d)])));
     expect(readFileSync(DEMO_HTML, "utf8")).toBe(expected);

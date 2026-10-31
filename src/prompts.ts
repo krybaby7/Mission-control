@@ -118,6 +118,7 @@ export function specPrompt(m: Mission, stackDoc: string | null, revise?: { previ
       ...task,
       "Plan between 1 and 25 features with unique kebab-case ids. `deps` may name only ids from this spec, with no cycles.",
       "Answer with JSON matching the output schema.",
+      "Use normal JSON escaping once. Parsed strings are preserved literally: do not double-escape intended newlines or quotation marks; keep intentional backslash text literal.",
     ]),
     stackDoc && section("House stack", [stackDoc]),
     revise && revisionSection(revise),
@@ -373,6 +374,7 @@ export function reviewPrompt(m: Mission, f: Feature, ctx: { diff: string; verify
       `Review the implementation of feature ${code(f.id)}. ${checksPassed(m, f)}`,
       "The change is checked out in your working directory; read the changed files for context, especially if the diff below is truncated.",
       'Answer with JSON: `verdict` ("approve" when there is no blocker or major finding, otherwise "changes") and `findings`.',
+
     ]),
     featureSection(f),
     uiContractSection(m),
@@ -462,6 +464,7 @@ export function makePrompt(m: Mission, f: Feature, ctx: MakeContext): string {
       "If you change anything but documents, pages, images and data files, it also checks that the project's own checks pass.",
     ]),
     modeContractSection(m),
+    otherFeaturesSection(m, f, "maker"),
     fixes.length > 0 && section("Problems to fix", [renderFindings(fixes)]),
     problems.length > 0 &&
       section("The previous attempt failed", [
@@ -567,7 +570,7 @@ function modeLines(f: SpecFeature): string {
 
 // ───────────────────────────── Gate C ─────────────────────────────
 
-export function gateCPrompt(m: Mission, ctx: { diff: string; verifyTail: string; features: Feature[] }): string {
+export function gateCPrompt(m: Mission, ctx: { diff: string; verifyTail: string; features: Feature[]; outstanding?: Array<{ id: string; originFeatureId: string; finding: import("./types.js").Finding }> }): string {
   const verifyFailures = m.baselineBroken ? "new failures in the full verification below" : "anything the full verification below reports as failing";
   const read = ctx.features.some((f) => f.status === "done" && isModeFeature(f));
   return brief(
@@ -578,12 +581,15 @@ export function gateCPrompt(m: Mission, ctx: { diff: string; verifyTail: string;
       read &&
         "Some features here are documents, pages or data files that no test judged. The feature list says how each was checked: by a second AI against the owner's list, or by Mission Control's own checks only. Read them as a reader would. Look for false statements, broken links, pages that cannot be used, and numbers that do not add up.",
       "Blocker and major findings become fix-up work right away, so report only real problems, each with a file and a suggested test. The integrated code is in your working directory; read it as needed, especially if the diff is truncated.",
-      'Answer with JSON: `verdict` ("approve" when there is no blocker or major finding, otherwise "changes") and `findings`.',
+      'Answer with JSON: `verdict` ("approve" when there is no blocker or major finding, otherwise "changes"), `findings`, and `resolutions`.',
+      'For each outstanding ID below, report one outcome: "resolved", "open" or "cannot_judge", with specific evidence from the current integrated files. Do not invent IDs. Omission, duplicate IDs or empty evidence do not close a concern. Include an empty resolutions array when none are listed.',
+
     ]),
     m.spec && section("The app", [m.spec.summary]),
     section("Features", [ctx.features.length > 0 ? ctx.features.map((f) => describeFeatureStatus(m, f)).join("\n\n") : "(none)"]),
     uiContractSection(m),
     baselineSection(m),
+    section("Outstanding findings to assess", [(ctx.outstanding?.length ?? 0) > 0 ? JSON.stringify(ctx.outstanding) : "(none)"]),
     section("Full verification output (end)", [fence(truncateMiddle(ctx.verifyTail, CAPS.outputTail))]),
     section("Diff of the whole mission", [fence(truncateMiddle(ctx.diff, CAPS.diff), "diff")]),
   );
@@ -700,14 +706,9 @@ function uiContractSection(m: Mission): string {
   ]);
 }
 
-/**
- * In a mission that has a feature checked by reading, the lines of the UI contract belong to the whole plan, and one of them may name a file that
- * another feature makes (real run R6: the contract said the notes file and its headings, so the test author of the first feature wrote a test of
- * that file and its engineer made the file; the feature that was meant to make it only rewrote it). The author of the tests and the engineer of a
- * feature checked by tests are told so. A mission with no such feature gets nothing here, and its briefs are the ones they always were.
- */
-function otherFeaturesSection(m: Mission, f: Feature, who: "tests" | "code"): string | false {
-  if (!hasModeFeature(m.features) || isModeFeature(f)) return false;
+/** Scope every multi-feature author, builder and maker. Contract text is shared context, not permission to work ahead. */
+function otherFeaturesSection(m: Mission, f: Feature, who: "tests" | "code" | "maker"): string | false {
+  if (m.features.length < 2) return false;
   const at = m.features.findIndex((x) => x.id === f.id);
   const later = at < 0 ? [] : m.features.slice(at + 1);
   const own = code(f.id);
@@ -715,7 +716,9 @@ function otherFeaturesSection(m: Mission, f: Feature, who: "tests" | "code"): st
     "The UI contract above is for the whole plan. A line of it may describe a file or a name that another feature makes.",
     who === "tests"
       ? `Write tests only for the acceptance criteria of feature ${own}. Never create a file, and never test a file, that only another feature's checks name.`
-      : `Make only what the acceptance criteria of feature ${own} ask for, and what its frozen tests need. Never create a file that only another feature's checks name, even when a line of the contract describes it.`,
+      : who === "maker"
+        ? `Make only what the acceptance criteria of feature ${own} ask for. Never create a file that only another feature's checks name, even when a line of the contract describes it.`
+        : `Make only what the acceptance criteria of feature ${own} ask for, and what its frozen tests need. Never create a file that only another feature's checks name, even when a line of the contract describes it.`,
     later.length > 0 && `The features that come after this one are made by other agents later. Their files are not yours:\n${bullets(later.map(featureTitle))}`,
   ]);
 }

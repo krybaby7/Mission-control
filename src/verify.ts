@@ -1,12 +1,13 @@
 // Verification: run the app's verify commands, fingerprint failures, guard frozen tests, and scan diffs for test cheating.
 import { createHash } from "node:crypto";
-import { closeSync, constants, createWriteStream, fstatSync, openSync, readSync } from "node:fs";
+import { closeSync, constants, createWriteStream, fstatSync, openSync, readSync, mkdtempSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { finished } from "node:stream/promises";
 import type { FrozenFile, Logger, VerifyConfig, VerifyResult } from "./types.js";
 import { ensureDir } from "./util/fs.js";
 import { nullLogger } from "./util/logger.js";
-import { runProcess, scrubEnv, type SpawnResult } from "./util/process.js";
+import { cleanupLaunchDir, localLaunchEnv, type ToolPathOptions } from "./util/launch-env.js";
+import { runProcess, type SpawnResult } from "./util/process.js";
 
 // ───────────────────────────── Running verify commands ─────────────────────────────
 
@@ -16,14 +17,13 @@ const MAX_LINE_CHARS = 4096;
 /** Output is collected line by line through callbacks, so runProcess only needs to keep a small copy. */
 const CAPTURE_BYTES = 64 * 1024;
 
-export interface VerifierOptions {
+
+export interface VerifierOptions extends ToolPathOptions {
   /** Directory for the full `verify-<label>.log` files (created on demand). */
   logsDir: string;
   /** Timeout for one verify command run. */
   timeoutMs: number;
   logger?: Logger;
-  /** Base environment (default process.env); API-key variables are scrubbed. */
-  env?: NodeJS.ProcessEnv;
   /** Aborting it (e.g. on `mc stop` or shutdown) kills a running verify command's whole process group. */
   signal?: AbortSignal;
 }
@@ -63,6 +63,7 @@ export class Verifier {
   /** Never rejects: a missing command, a failed spawn or an unwritable log all end in a result. */
   private async run(cwd: string, command: string | undefined, label: string | undefined): Promise<VerifyResult> {
     const log = this.openLog(label);
+    let ownedDir: string | undefined;
     try {
       log.write(`$ ${command ?? ""}\n# cwd: ${cwd}\n# started: ${new Date().toISOString()}\n\n`);
       const tail = new LastLines(TAIL_LINES);
@@ -74,6 +75,11 @@ export class Verifier {
       };
 
       // An empty command would "pass" without checking anything.
+      let env: Record<string, string> | undefined;
+      if (isCommand(command)) {
+        ownedDir = mkdtempSync(join("/tmp", "mc-verify-"));
+        env = localLaunchEnv({ purpose: "verification", ownedDir, path: this.opts.path });
+      }
       const spawned = isCommand(command)
         ? await runProcess({
             command: "bash",
@@ -81,7 +87,7 @@ export class Verifier {
             // "exit 0" would pass every check) and no diff, scan or reviewer looks. PATH comes from our env.
             args: ["--noprofile", "--norc", "-c", command],
             cwd,
-            env: { ...scrubEnv(this.opts.env ?? process.env), CI: "1", FORCE_COLOR: "0" },
+            env: env!,
             timeoutMs: this.opts.timeoutMs,
             signal: this.opts.signal,
             onStdoutLine: onLine,
@@ -116,7 +122,12 @@ export class Verifier {
         logFile: log.file,
       });
       return result;
+    } catch (err) {
+      const message = "[mc] error: " + (err instanceof Error ? err.message : "could not prepare verification environment");
+      log.write(message + "\n");
+      return { ok: false, exitCode: null, timedOut: false, durationMs: 0, outputTail: message, signature: failureSignature(message), logFile: log.file };
     } finally {
+      cleanupLaunchDir(ownedDir);
       await log.close();
     }
   }

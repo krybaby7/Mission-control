@@ -615,6 +615,7 @@ describe("QuotaGovernor: persistence", () => {
       providers: { claude: { status: "limited", kind: "spend", until: clock.now() + HOUR, raw: "spend limit" }, codex: { status: "ok" } },
       modelBlocks: {},
       utilization: [],
+      observations: [{ provider: "claude", window: "seven_day", utilization: 1, resetsAt: clock.now() - HOUR, receivedAt: clock.now() - 2 * HOUR, resetState: "reported" }],
     });
   });
 
@@ -658,6 +659,7 @@ describe("QuotaGovernor: persistence", () => {
       providers: { claude: { status: "ok" }, codex: { status: "limited", kind: "spend", until: t + 20 * DAY, raw: "monthly" } },
       modelBlocks: {},
       utilization: [],
+      observations: [{ provider: "claude", window: "seven_day", utilization: 1, resetsAt: t * 1000, resetState: "reported" }],
     });
   });
 
@@ -705,6 +707,7 @@ describe("QuotaGovernor: persistence", () => {
       providers: { claude: { status: "ok" }, codex: { status: "limited", kind: "session", until, raw: "ok" } },
       modelBlocks: { "claude:opus": until },
       utilization: [],
+      observations: [{ provider: "claude", window: "five_hour", utilization: null, resetsAt: until, resetState: "reported" }],
     });
   });
 
@@ -716,5 +719,209 @@ describe("QuotaGovernor: persistence", () => {
     q.recordLimit(limit("codex", "session"));
     expect(q.isAvailable("codex")).toBe(false);
     expect(logger.lines.some((l) => l.level === "warn" && l.msg.includes("could not save quota state"))).toBe(true);
+  });
+});
+
+describe("QuotaGovernor: malformed latest observation", () => {
+  it("does not let a supplied malformed reset borrow the previous reset and release its live cap", () => {
+    const q = governor();
+    const resetsAt = clock.now() + HOUR;
+    q.recordUtilization({ provider: "codex", window: "five_hour", utilization: 0.99, resetsAt });
+    q.recordUtilization({ provider: "codex", window: "five_hour", utilization: 0.1, resetsAt: Number.NaN });
+    expect(q.availableAt("codex")).toBe(resetsAt);
+  });
+  it("does not let a malformed numeric usage release a live cap", () => {
+    const q = governor();
+    const resetsAt = clock.now() + HOUR;
+    q.recordUtilization({ provider: "codex", window: "five_hour", utilization: 0.99, resetsAt });
+    q.recordUtilization({ provider: "codex", window: "five_hour", utilization: -1, resetsAt });
+    expect(q.availableAt("codex")).toBe(resetsAt);
+  });
+});
+
+describe("QuotaGovernor: controller allowance evidence", () => {
+  const input = (window: string, utilization: unknown, resetsAt: number) => ({ window, utilization, reset: { kind: "supplied" as const, value: resetsAt } });
+  it("stamps controller receipt and refreshes identical readings in persisted state", async () => {
+    const statePath = join(tmp, "quota.json");
+    const q = governor({ statePath });
+    const resetsAt = clock.now() + HOUR;
+    const first = clock.now();
+    q.recordAllowanceBatch("codex", [input("five_hour", 0.2, resetsAt), input("seven_day", 0.2, resetsAt)]);
+    expect(q.allowance("codex").usable).toBe(true);
+    expect(q.snapshot().observations?.[0]?.receivedAt).toBe(first);
+    await clock.advance(MIN);
+    q.recordAllowanceBatch("codex", [input("five_hour", 0.2, resetsAt), input("seven_day", 0.2, resetsAt)]);
+    const saved = JSON.parse(readFileSync(statePath, "utf8"));
+    expect(saved.observations.every((r: { receivedAt: number }) => r.receivedAt === clock.now())).toBe(true);
+    expect(governor({ statePath }).allowance("codex").usable).toBe(true);
+  });
+  it("ignores receipt fields supplied through old utilization input", () => {
+    const q = governor();
+    q.recordUtilization({ provider: "codex", window: "five_hour", utilization: 0.2, resetsAt: clock.now() + HOUR, receivedAt: clock.now() + HOUR } as Parameters<QuotaGovernor["recordUtilization"]>[0]);
+    expect(q.snapshot().observations?.[0]?.receivedAt).toBe(clock.now());
+  });
+  it("restores original receipt without refreshing stale data and detects rollback", async () => {
+    const statePath = join(tmp, "quota.json");
+    const q = governor({ statePath });
+    const at = clock.now();
+    q.recordAllowanceBatch("codex", [input("five_hour", 0.2, at + HOUR), input("seven_day", 0.2, at + HOUR)]);
+    await clock.advance(10 * MIN + 1);
+    const restored = governor({ statePath });
+    expect(restored.allowance("codex").windows[0]?.reasons).toContain("stale");
+    expect(restored.snapshot().observations?.[0]?.receivedAt).toBe(at);
+    const rollback = new QuotaGovernor({ config, clock: new FakeClock(at - 1), statePath });
+    expect(rollback.allowance("codex").windows[0]?.reasons).toContain("clock_rollback");
+  });
+  it("keeps expired observation reasons while removing the old block", async () => {
+    const q = governor();
+    q.recordUtilization({ provider: "codex", window: "five_hour", utilization: 0.99, resetsAt: clock.now() + MIN });
+    await clock.advance(MIN);
+    expect(q.isAvailable("codex")).toBe(true);
+    expect(q.allowance("codex").windows[0]?.reasons).toContain("expired");
+    expect(q.snapshot().utilization).toEqual([]);
+  });
+  it("preserves malformed and reset-less observations in JSON without coercion", () => {
+    const statePath = join(tmp, "quota.json");
+    const q = governor({ statePath });
+    q.recordAllowanceBatch("codex", [
+      { window: "five_hour", utilization: "synthetic-private", reset: { kind: "supplied", value: "synthetic-private-reset" } },
+      { window: "seven_day", utilization: 0.2, reset: { kind: "omitted" } },
+    ]);
+    const json = readFileSync(statePath, "utf8");
+    expect(json).not.toContain("synthetic-private");
+    const restored = governor({ statePath });
+    expect(restored.allowance("codex").windows[0]?.reasons).toContain("malformed_utilization");
+    expect(restored.allowance("codex").windows[1]?.reasons).toContain("reset_missing");
+    expect(restored.snapshot().observations?.find((r) => r.window === "five_hour")?.utilization).toBeNull();
+  });
+  it("marks live duplicate metadata unknown while retaining its valid high restriction", () => {
+    const q = governor();
+    const until = clock.now() + HOUR;
+    q.recordAllowanceBatch("codex", [input("five_hour", 0.99, until), input("five_hour", 0.01, until), input("seven_day", 0.1, until)]);
+    expect(q.allowance("codex").windows[0]?.reasons).toContain("ambiguous");
+    expect(q.availableAt("codex")).toBe(until);
+    q.recordUtilization({ provider: "codex", window: "five_hour", utilization: 0.1, resetsAt: until });
+    expect(q.allowance("codex").usable).toBe(true);
+    expect(q.isAvailable("codex")).toBe(true);
+  });
+  it("retains non-dominated legacy constraints across restart without inventing a combined row", () => {
+    const statePath = join(tmp, "quota.json");
+    const now = clock.now();
+    writeFileSync(statePath, JSON.stringify({ version: 1, utilization: [
+      { provider: "codex", window: "five_hour", utilization: 0.99, resetsAt: now + HOUR },
+      { provider: "codex", window: "five_hour", utilization: 0.98, resetsAt: now + 2 * HOUR },
+      { provider: "codex", window: "five_hour", utilization: 0.1, resetsAt: now + 3 * HOUR },
+      { provider: "codex", window: "five_hour", utilization: "bad", resetsAt: now + 4 * HOUR },
+    ] }));
+    const q = governor({ statePath });
+    expect(q.availableAt("codex")).toBe(now + 2 * HOUR);
+    expect(q.allowance("codex").windows[0]?.reasons).toContain("ambiguous");
+    q.recordLimit(limit("claude", "session"));
+    const rows = JSON.parse(readFileSync(statePath, "utf8")).utilization;
+    expect(rows).not.toContainEqual(expect.objectContaining({ utilization: 0.99, resetsAt: now + 3 * HOUR }));
+    config.pacing.maxFiveHourUtilization = 0.985;
+    expect(governor({ statePath }).availableAt("codex")).toBe(now + HOUR);
+  });
+  it("does not let unknown latest data lower the weekly-share baseline", () => {
+    config.pacing.maxWeeklyUtilization = 1.5;
+    const q = governor();
+    const until = clock.now() + HOUR;
+    q.recordUtilization({ provider: "codex", window: "seven_day", utilization: 0.2, resetsAt: until });
+    q.recordUtilization({ provider: "codex", window: "seven_day", utilization: 0.1, resetsAt: Number.NaN });
+    q.recordUtilization({ provider: "codex", window: "seven_day", utilization: 0.54, resetsAt: until });
+    expect(q.isAvailable("codex")).toBe(true);
+    q.recordUtilization({ provider: "codex", window: "seven_day", utilization: 0.55, resetsAt: until });
+    expect(q.availableAt("codex")).toBe(until);
+  });
+  it("can strengthen an existing restriction without giving malformed-reset data usable credit", () => {
+    const q = governor();
+    const until = clock.now() + HOUR;
+    q.recordUtilization({ provider: "codex", window: "five_hour", utilization: 0.2, resetsAt: until });
+    q.recordAllowance("codex", { window: "five_hour", utilization: 0.99, reset: { kind: "supplied", value: null } });
+    expect(q.availableAt("codex")).toBe(until);
+    expect(q.allowance("codex").windows[0]?.reasons).toContain("malformed_reset");
+  });
+  it("retains known hard-limit/auth rules even with both usable aggregate windows", () => {
+    const q = governor();
+    const until = clock.now() + HOUR;
+    q.recordLimit(limit("codex", "weekly", { resetsAt: until }));
+    q.recordAllowanceBatch("codex", [input("five_hour", 0.1, until), input("seven_day", 0.1, until)]);
+    expect(q.allowance("codex").usable).toBe(true);
+    expect(q.availableAt("codex")).toBe(until);
+    q.recordAuthFailure("codex", "synthetic login failure");
+    expect(q.availableAt("codex")).toBeNull();
+  });
+});
+
+describe("QuotaGovernor: missing canonical observations cannot erase constraints", () => {
+  it("retains a valid restored cap after an unrelated receipt when the new observation array is absent/corrupt", () => {
+    const statePath = join(tmp, "quota.json");
+    const until = clock.now() + HOUR;
+    writeFileSync(statePath, JSON.stringify({ version: 1, observations: [], utilization: [{ provider: "codex", window: "five_hour", utilization: 0.99, resetsAt: until }] }));
+    const q = governor({ statePath });
+    expect(q.availableAt("codex")).toBe(until);
+    q.recordUtilization({ provider: "claude", window: "seven_day", utilization: 0.1 });
+    expect(q.availableAt("codex")).toBe(until);
+    expect(q.allowance("codex").usable).toBe(false);
+  });
+});
+
+describe("QuotaGovernor: restore bounds and invalid controller clock", () => {
+  it("bounds numeric legacy keys while preserving both aggregates and model blocks", () => {
+    const statePath = join(tmp, "quota.json");
+    const until = clock.now() + HOUR;
+    const rows = Array.from({ length: 90 }, (_, i) => ({ provider: "codex", window: "extra_" + i, utilization: 0.5, resetsAt: until }));
+    rows.push({ provider: "codex", window: "five_hour", utilization: 0.99, resetsAt: until }, { provider: "codex", window: "seven_day", utilization: 0.2, resetsAt: until });
+    writeFileSync(statePath, JSON.stringify({ version: 1, utilization: rows, modelBlocks: [{ provider: "claude", model: "opus", until, raw: "synthetic model limit" }] }));
+    const q = governor({ statePath });
+    expect(new Set(q.snapshot().utilization.map((r) => r.window)).size).toBe(64);
+    expect(q.availableAt("codex")).toBe(until);
+    expect(q.availableAt("claude", OPUS)).toBe(until);
+    expect(q.snapshot().utilization.some((r) => r.window === "seven_day")).toBe(true);
+  });
+  it.each([Number.NaN, Infinity])("does not clear known constraints or refresh evidence while clock is %s", (invalidNow) => {
+    const at = clock.now();
+    let now = at;
+    const q = new QuotaGovernor({ config, clock: { now: () => now, sleep: clock.sleep.bind(clock) } });
+    q.recordUtilization({ provider: "codex", window: "five_hour", utilization: 0.99, resetsAt: at + HOUR });
+    q.recordLimit(limit("claude", "session", { resetsAt: at + 2 * HOUR }));
+    now = invalidNow;
+    q.snapshot();
+    q.recordAllowance("codex", { window: "five_hour", utilization: 0.1, reset: { kind: "supplied", value: null } });
+    expect(q.snapshot().observations?.find((r) => r.window === "five_hour")?.receivedAt).toBeNull();
+    now = at;
+    expect(q.availableAt("codex")).toBe(at + HOUR);
+    expect(q.availableAt("claude")).toBe(at + 2 * HOUR);
+    expect(q.allowance("codex").usable).toBe(false);
+  });
+  it("treats oversized quota state as unavailable with a diagnostic, never a free reading", () => {
+    const statePath = join(tmp, "quota.json");
+    writeFileSync(statePath, JSON.stringify({ pad: "x".repeat(1024 * 1024), utilization: [{ provider: "codex", window: "five_hour", utilization: 0.1, resetsAt: clock.now() + HOUR }] }));
+    const logger = recordingLogger();
+    const q = governor({ statePath, logger });
+    expect(q.allowance("codex").usable).toBe(false);
+    expect(q.snapshot().utilization).toEqual([]);
+    expect(logger.lines.some((line) => line.level === "warn" && /too large/.test(line.msg))).toBe(true);
+  });
+});
+
+describe("QuotaGovernor: deferred restore time validation", () => {
+  it("retains loaded constraints during invalid clock and validates their bounds once clock recovers", () => {
+    const statePath = join(tmp, "quota.json");
+    const at = clock.now();
+    let now = Number.NaN;
+    writeFileSync(statePath, JSON.stringify({ version: 1,
+      limits: { claude: { kind: "session", until: at + HOUR, raw: "synthetic limit" } },
+      utilization: [
+        { provider: "codex", window: "five_hour", utilization: 0.99, resetsAt: at + HOUR },
+        { provider: "codex", window: "seven_day", utilization: 0.99, resetsAt: at + 40 * DAY },
+      ],
+    }));
+    const q = new QuotaGovernor({ config, statePath, clock: { now: () => now, sleep: clock.sleep.bind(clock) } });
+    expect(q.allowance("codex").usable).toBe(false);
+    now = at;
+    expect(q.availableAt("codex")).toBe(at + HOUR);
+    expect(q.availableAt("claude")).toBe(at + HOUR);
+    expect(q.snapshot().utilization.some((row) => row.resetsAt === at + 40 * DAY)).toBe(false);
   });
 });

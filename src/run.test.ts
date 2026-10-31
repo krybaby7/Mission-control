@@ -10,6 +10,7 @@ import { MissionStore } from "./state.js";
 import type { AgentJob, Config, Mission, MissionStatus, RoleOverride } from "./types.js";
 import { FakeClock } from "./util/clock.js";
 import { nullLogger } from "./util/logger.js";
+import { controllerGitEnv } from "./util/launch-env.js";
 import { runProcess } from "./util/process.js";
 
 const MIN = 60_000;
@@ -411,7 +412,7 @@ describe("runNight", () => {
     // Started the way runners start an agent (its own process group), and deaf to SIGTERM.
     const ready = join(root, "ready");
     const script = `process.on("SIGTERM", () => {}); require("fs").writeFileSync(${JSON.stringify(ready)}, ""); setInterval(() => {}, 1000);`;
-    const agent = runProcess({ command: process.execPath, args: ["-e", script], cwd: root, timeoutMs: 30_000 });
+    const agent = runProcess({ env: controllerGitEnv({ isolatedConfig: true }), command: process.execPath, args: ["-e", script], cwd: root, timeoutMs: 30_000 });
     await vi.waitFor(() => expect(existsSync(ready)).toBe(true));
 
     const handler = process.listeners("SIGTERM").find((l) => !before.has(l));
@@ -555,4 +556,18 @@ describe("runNight", () => {
     expect(readFileSync(join(home, "missions", broken.id, "report.md"), "utf8")).toContain("# Broken app");
     expect(notifications().some((n) => n.title === "Broken app: failed" && n.priority === "4")).toBe(true);
   });
+});
+
+it("strict unknown allowance pauses each mission once and records the invocation policy without an owner approval", async () => {
+  const m = queue("Unknown allowance");
+  const config = testConfig(); config.pacing.unknownAllowance = "stop";
+  const r = runners(noPlan);
+  const result = await runNight({ config, logger: nullLogger, runners: r });
+  expect(result.missions).toHaveLength(1);
+  expect(result.missions[0]).toMatchObject({ id: m.id, status: "stopped", stage: "spec", agentRuns: 0, allowancePolicy: "stop", pause: { kind: "allowance_unknown" } });
+  expect(allCalls(r)).toHaveLength(0);
+  expect(result.waitingForCheck).toEqual([]); expect(result.waitingForYou).toEqual([]);
+  const summary = readFileSync(result.summaryPath, "utf8");
+  expect(summary).toContain("Allowance policy for this run: stop.");
+  expect(summary).toContain("Paused: allowance could not be confirmed");
 });

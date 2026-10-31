@@ -1,24 +1,24 @@
 // Claude Code runner: drives `claude -p` with stream-json output and maps its event stream to a RunResult.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
+import { validAllowanceIdentity, validAllowanceTime, validAllowanceUsage, type AllowanceInput } from "../allowance.js";
 import { detectLimitText, limitKindFromClaudeType } from "../limits.js";
 import { validateOutput } from "../schemas.js";
 import type { AgentJob, AgentRunner, LimitInfo, Logger, RunEvent, RunOptions, RunResult, Usage } from "../types.js";
 import { nullLogger } from "../util/logger.js";
 import { parseJsonLine } from "../util/ndjson.js";
-import { runProcess, scrubEnv, type SpawnResult } from "../util/process.js";
+import { cleanupLaunchDir, providerLaunchEnv, validateTempRoot, type ProviderLaunchOptions } from "../util/launch-env.js";
+import { runProcess, type SpawnResult } from "../util/process.js";
 import { stripAnsi, tailLines } from "../verify.js";
 
-export interface ClaudeRunnerOptions {
+
+export interface ClaudeRunnerOptions extends ProviderLaunchOptions {
   /** Executable to run. Default "claude". */
   command?: string;
   logger?: Logger;
   /** Permission mode for workspace-write jobs. */
   writeMode: "bypassPermissions" | "acceptEdits" | "auto";
-  /** Base environment (scrubbed of API keys before use). Default process.env. */
-  env?: NodeJS.ProcessEnv;
-  /** Where the per-run system prompt file is written. Default os.tmpdir(). */
+  /** Where the per-run system prompt file is written. Default /tmp. */
   tmpDir?: string;
   /** How long claude may stay silent after printing its result before it is stopped. Default 30 s. */
   exitGraceMs?: number;
@@ -84,7 +84,7 @@ export class ClaudeRunner implements AgentRunner {
   private readonly command: string;
   private readonly logger: Logger;
   private readonly writeMode: ClaudeRunnerOptions["writeMode"];
-  private readonly env: NodeJS.ProcessEnv | undefined;
+  private readonly launch: ProviderLaunchOptions;
   private readonly tmpDir: string;
   private readonly exitGraceMs: number;
 
@@ -92,8 +92,8 @@ export class ClaudeRunner implements AgentRunner {
     this.command = opts.command ?? "claude";
     this.logger = opts.logger ?? nullLogger;
     this.writeMode = opts.writeMode;
-    this.env = opts.env;
-    this.tmpDir = opts.tmpDir ?? tmpdir();
+    this.launch = { path: opts.path, configHome: opts.configHome };
+    this.tmpDir = opts.tmpDir ?? "/tmp";
     this.exitGraceMs = opts.exitGraceMs ?? DEFAULT_EXIT_GRACE_MS;
   }
 
@@ -131,14 +131,16 @@ export class ClaudeRunner implements AgentRunner {
   async run(job: AgentJob, opts: RunOptions = {}): Promise<RunResult> {
     let prompt: { dir: string; file: string };
     try {
+      validateTempRoot(this.tmpDir);
       prompt = writeSystemPrompt(this.tmpDir, job.systemPrompt);
     } catch (err) {
       return setupFailure(`could not write the system prompt file: ${String(err)}`);
     }
     try {
+      const env = providerLaunchEnv({ purpose: "worker", provider: "claude", ownedDir: prompt.dir, ...this.launch });
       const emit = safeEmitter(opts.onEvent, this.logger);
       const stream = new ClaudeStream(emit);
-      const proc = await this.spawn(job, prompt.file, stream, opts.signal);
+      const proc = await this.spawn(job, prompt.file, stream, opts.signal, env);
       const result = buildResult(job, stream, proc, Date.now());
       // Reported once the outcome is known, so the event carries a reset time read from the result text.
       if (result.limit) emit({ type: "limit", info: result.limit });
@@ -148,8 +150,10 @@ export class ClaudeRunner implements AgentRunner {
         ...(result.error !== undefined && { error: result.error }),
       });
       return result;
+    } catch (err) {
+      return setupFailure(err instanceof Error ? err.message : "could not prepare child environment");
     } finally {
-      rmSync(prompt.dir, { recursive: true, force: true });
+      cleanupLaunchDir(prompt.dir);
     }
   }
 
@@ -158,7 +162,7 @@ export class ClaudeRunner implements AgentRunner {
    * the exit grace after its result: print mode keeps waiting on background shells and child processes, and the
    * result already stands. A new turn after the result (a background shell woke the model) holds the timer off.
    */
-  private async spawn(job: AgentJob, promptFile: string, stream: ClaudeStream, callerSignal: AbortSignal | undefined): Promise<SpawnResult> {
+  private async spawn(job: AgentJob, promptFile: string, stream: ClaudeStream, callerSignal: AbortSignal | undefined, env: NodeJS.ProcessEnv): Promise<SpawnResult> {
     const ourStop = new AbortController();
     const stop = (reason: string): void => {
       if (ourStop.signal.aborted) return;
@@ -171,7 +175,7 @@ export class ClaudeRunner implements AgentRunner {
         command: this.command,
         args: this.buildArgs(job, promptFile),
         cwd: job.cwd,
-        env: scrubEnv(this.env ?? process.env),
+        env,
         stdin: job.prompt,
         timeoutMs: job.limits.timeoutMs,
         signal: callerSignal === undefined ? ourStop.signal : AbortSignal.any([callerSignal, ourStop.signal]),
@@ -208,7 +212,7 @@ function writeSystemPrompt(tmpDir: string, text: string): { dir: string; file: s
   try {
     writeFileSync(file, text, { mode: 0o600 });
   } catch (err) {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupLaunchDir(dir);
     throw err;
   }
   return { dir, file };
@@ -346,15 +350,20 @@ class ClaudeStream {
   /** One event per unified window, plus the top-level window when no unified entry already covers it. */
   private emitUtilization(info: Json): void {
     const windows = asRecord(info.unifiedWindows) ?? {};
-    for (const [window, data] of Object.entries(windows)) this.emitWindow(window, asRecord(data));
+    for (const [window, data] of Object.entries(windows)) this.emitWindow(window, data);
     const topWindow = asString(info.rateLimitType);
     if (topWindow !== undefined && !Object.hasOwn(windows, topWindow)) this.emitWindow(topWindow, info);
   }
 
-  private emitWindow(window: string, data: Json | undefined): void {
-    const utilization = asNumber(data?.utilization);
-    if (utilization === undefined) return;
-    const resetsAt = secondsToMs(data?.resetsAt);
+  private emitWindow(window: string, data: unknown): void {
+    const observation = claudeAllowanceInput(window, data);
+    if (!observation) return;
+    const { utilization, reset } = observation;
+    const resetsAt = reset.kind === "supplied" && validAllowanceTime(reset.value) ? reset.value : undefined;
+    if (!validAllowanceUsage(utilization) || (reset.kind === "supplied" && resetsAt === undefined)) {
+      this.emit({ type: "allowance", observations: [observation] });
+      return;
+    }
     this.emit({
       type: "utilization",
       info: { provider: "claude", window, utilization, ...(resetsAt !== undefined && { resetsAt }) },
@@ -446,6 +455,20 @@ function asString(value: unknown): string | undefined {
 
 function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** Preserve own malformed fields as null markers before any event is retained. */
+export function claudeAllowanceInput(window: string, value: unknown): AllowanceInput | undefined {
+  if (!validAllowanceIdentity("claude", window)) return undefined;
+  const data = asRecord(value);
+  if (!data) return { window, utilization: null, reset: { kind: "omitted" } };
+  const convertedReset = secondsToMs(data.resetsAt);
+  return {
+    window, utilization: validAllowanceUsage(data.utilization) ? data.utilization : null,
+    reset: Object.hasOwn(data, "resetsAt")
+      ? { kind: "supplied", value: validAllowanceTime(convertedReset) ? convertedReset : null }
+      : { kind: "omitted" },
+  };
 }
 
 function secondsToMs(value: unknown): number | undefined {

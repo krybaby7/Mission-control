@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { isScalar, parseDocument } from "yaml";
 import type { Config, Effort, Family, FamilyChoice, ModelRef, Profile, Role, RoleOverride, Rung, Tier } from "./types.js";
 import { expandHome } from "./util/fs.js";
+import { resolveHelpers } from "./helpers.js";
 
 type ClaudeWriteMode = Config["permissions"]["claudeWriteMode"];
 type CodexWriteSandbox = Config["permissions"]["codexWriteSandbox"];
@@ -47,6 +48,7 @@ export function defaultConfig(): Config {
       light.model,
     ],
     defaultProfile: "mixed",
+    helpers: resolveHelpers(undefined),
     profiles: {
       claude: singleFamilyProfile("claude"),
       codex: singleFamilyProfile("codex"),
@@ -184,6 +186,13 @@ allowedModels:
 # The profile used when you don't pick one with --profile.
 defaultProfile: mixed
 
+# Optional helpers. These settings are saved with each newly queued mission.
+# Existing and resumed missions keep their saved choice. Missing settings mean true.
+helpers:
+  contextPack: true
+  failureDigest: true
+  reportProse: true
+
 profiles:
   # Everything runs on Claude.
   claude:
@@ -267,6 +276,7 @@ failover:
 # usage reaches these levels (0.97 = 97%), or once one run has used this much
 # of its weekly limit (0.35 = 35% per run; 1 = no per-run limit).
 pacing:
+  unknownAllowance: stop       # stop before a model job when current allowance is unknown
   maxFiveHourUtilization: 0.97   # of the 5-hour window
   maxWeeklyUtilization: 0.85     # of the weekly window
   maxWeeklySharePerNight: 0.35   # of the weekly window, per run
@@ -334,6 +344,13 @@ function envHome(): string | undefined {
 export function loadConfig(path?: string): Config {
   const file = resolve(expandHome(path ?? configPath()));
   const settings = readSettingsFile(file);
+  // Validate before deep merging: explicit nulls and unknown keys must not disappear.
+  try { resolveHelpers(settings.helpers); }
+  catch (err) { throw new ConfigProblemsError(file, [(err as Error).message]); }
+  if (isPlainObject(settings.pacing) && Object.hasOwn(settings.pacing, "unknownAllowance") &&
+      settings.pacing.unknownAllowance !== "stop" && settings.pacing.unknownAllowance !== "warn") {
+    throw new ConfigProblemsError(file, ['pacing.unknownAllowance must be "stop" or "warn"']);
+  }
   const merged = mergeSettings(defaultConfig(), settings) as Config;
   const problems = validateConfig(merged);
   if (problems.length > 0) throw new ConfigProblemsError(file, problems);
@@ -456,6 +473,8 @@ export function validateConfig(c: Config): string[] {
   checkGit(check, root.git);
   checkPermissions(check, root.permissions);
   checkCli(check, root.cli);
+  try { resolveHelpers(root.helpers); }
+  catch (err) { check.add((err as Error).message); }
   return check.problems;
 }
 
@@ -677,12 +696,14 @@ function checkSwitches(check: Checker, root: Record<string, unknown>): void {
   const failover = check.section("failover", root.failover, ["enabled"]);
   if (failover) check.bool("failover.enabled", failover.enabled);
   const thresholds = ["maxFiveHourUtilization", "maxWeeklyUtilization"];
-  const pacing = check.section("pacing", root.pacing, [...thresholds, "maxWeeklySharePerNight"]);
+  const pacing = check.section("pacing", root.pacing, [...thresholds, "maxWeeklySharePerNight", "unknownAllowance"]);
   for (const name of pacing ? thresholds : []) {
     const v = pacing?.[name];
     const ok = typeof v === "number" && v > 0 && v <= 1.5;
     check.require(`pacing.${name}`, v, ok, "a number above 0 and at most 1.5 (for example 0.9 means 90%)");
   }
+  const policy = pacing?.unknownAllowance;
+  if (policy !== undefined) check.require("pacing.unknownAllowance", policy, policy === "stop" || policy === "warn", '"stop" or "warn"');
   const share = pacing?.maxWeeklySharePerNight;
   if (share !== undefined) {
     const ok = typeof share === "number" && share > 0 && share <= 1;

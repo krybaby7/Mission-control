@@ -4,6 +4,10 @@
 // stream-json scenario named by $FAKE_CLAUDE_SCENARIO.
 import { readFileSync, writeFileSync } from "node:fs";
 
+// Scenario controls are fixture files; they are never worker environment overrides.
+let fixture = {};
+try { fixture = JSON.parse(readFileSync(process.env.CLAUDE_CONFIG_DIR + "/mc-fixture.json", "utf8")); } catch {}
+
 const SESSION = "sess-fake-1";
 const args = process.argv.slice(2);
 
@@ -284,8 +288,8 @@ const scenarios = {
   },
   "api-error"() {
     // Shaped like CLI 2.1.296 once it gives up on the API: a synthetic assistant message, then an is_error result.
-    const message = process.env.FAKE_CLAUDE_API_ERROR ?? "API Error: 500 Internal server error";
-    const status = process.env.FAKE_CLAUDE_API_STATUS ? Number(process.env.FAKE_CLAUDE_API_STATUS) : null;
+    const message = fixture.FAKE_CLAUDE_API_ERROR ?? "API Error: 500 Internal server error";
+    const status = fixture.FAKE_CLAUDE_API_STATUS ? Number(fixture.FAKE_CLAUDE_API_STATUS) : null;
     line(init);
     line(assistant(text(message)));
     line(errorResult({ api_error_status: status, terminal_reason: "api_error", result: message }));
@@ -306,7 +310,7 @@ const scenarios = {
   },
   /** The login bills an API key ($FAKE_CLAUDE_KEY_SOURCE, as the init event names it); the CLI would go on. */
   "api-key"() {
-    line({ ...init, apiKeySource: process.env.FAKE_CLAUDE_KEY_SOURCE ?? "ANTHROPIC_API_KEY" });
+    line({ ...init, apiKeySource: fixture.FAKE_CLAUDE_KEY_SOURCE ?? "ANTHROPIC_API_KEY" });
     line(assistant(text("Working on it.")));
     keepRunning();
   },
@@ -336,7 +340,7 @@ const scenarios = {
 
 const stdin = await readStdin();
 const promptFile = flag("--append-system-prompt-file");
-if (process.env.FAKE_CLAUDE_RECORD) {
+if (fixture.FAKE_CLAUDE_RECORD) {
   const record = {
     argv: args,
     stdin,
@@ -346,12 +350,12 @@ if (process.env.FAKE_CLAUDE_RECORD) {
     systemPromptFile: promptFile ?? null,
     systemPrompt: promptFile ? readFileSync(promptFile, "utf8") : null,
   };
-  writeFileSync(process.env.FAKE_CLAUDE_RECORD, JSON.stringify(record));
+  writeFileSync(fixture.FAKE_CLAUDE_RECORD, JSON.stringify(record));
 }
-const play = scenarios[process.env.FAKE_CLAUDE_SCENARIO ?? "success"];
+const play = scenarios[fixture.FAKE_CLAUDE_SCENARIO ?? "success"];
 if (play) {
   play();
 } else {
-  err(`fake-claude: unknown scenario ${process.env.FAKE_CLAUDE_SCENARIO}`);
+  err(`fake-claude: unknown scenario ${fixture.FAKE_CLAUDE_SCENARIO}`);
   process.exitCode = 64;
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 // Dispatcher: drives one mission through its stages (onboard → spec → gate A → init → features → gate C → finalize).
 // Every step works from the persisted Mission and saves after each state change, so a stopped or crashed run
 // resumes where it left off. Prompt context and progress that are not part of the Mission (last failure output, the last
@@ -48,9 +49,19 @@ import {
   trimLog,
 } from "./checkpoint.js";
 import { resolveFamily } from "./config.js";
-import { AuthUnavailableError, DeadlineError, type ExecResult, ProvidersFailingError, type RoleExecutor, StopRequestedError } from "./executor.js";
+import { AllowanceUnknownError, AuthUnavailableError, DeadlineError, type ExecResult, ProvidersFailingError, type RoleExecutor, StopRequestedError } from "./executor.js";
+import { assessFindings, currentOpenFindings, findingId, rediscoverFindings, retainFindings, type FindingAssessmentContext } from "./finding-resolution.js";
 import type { Git } from "./git.js";
+import { cleanInvocation, InvocationPersistenceError, journalOf, observeInvocation, recoverInvocations, reserveInvocation, settleRecovery, type InvocationScope, type InvocationStage } from "./invocations.js";
+import type { WorkSubject, WorkEvidence, WorkScope } from "./provenance.js";
+import { appendApplicationSnapshot, appendReviewEvidence, frozenSetId, pendingWrites } from "./retained-work.js";
+import { RetainedController, atomicMissionEvidence, type WorkRestackIntent } from "./retained-controller.js";
+import { beginApplicationMerge, finishApplicationMerge, initializeApplicationLedger, recordApplicationScaffold, readApplicationLedger } from "./application-ledger.js";
+import { captureCommittedTree, captureWorktree, type WorkCapture } from "./work-capture.js";
+import { captureReviewSubject } from "./review-capture.js";
 import { alsoMadeSentences, laterFeatureFiles } from "./later-files.js";
+import { reconcileSuppliedPlan } from "./plan-integrity.js";
+import { isDeepStrictEqual } from "node:util";
 import type { Notifier } from "./notify.js";
 import { checkChangeLines, checkChanges, checkChangeSummary, describePlan, reviewLines } from "./plan.js";
 import {
@@ -112,6 +123,7 @@ import type {
   Provider,
   ReportProseOutput,
   ReviewOutput,
+  FinalReviewOutput,
   Role,
   RoleOverride,
   RubricOutput,
@@ -127,7 +139,9 @@ import type {
 } from "./types.js";
 import { cleanAiText } from "./util/ai-text.js";
 import { expandHome, readJsonOr, sha256, writeJsonAtomic } from "./util/fs.js";
+import { controllerGitEnv } from "./util/launch-env.js";
 import { runProcess } from "./util/process.js";
+import { missionHelpers } from "./helpers.js";
 import { reapOrphans } from "./util/reap.js";
 import { checkFrozen, hashFiles, isTestPath, scanAntiCheat, type Verifier } from "./verify.js";
 
@@ -424,11 +438,13 @@ function isMissionLevel(err: unknown): boolean {
     err instanceof CheckpointParked ||
     err instanceof StopRequestedError ||
     err instanceof DeadlineError ||
+    err instanceof AllowanceUnknownError ||
     err instanceof AuthUnavailableError ||
     err instanceof ProvidersFailingError ||
     err instanceof BudgetExhaustedError ||
     err instanceof MissionFailedError ||
     err instanceof DiskSpaceError
+    || err instanceof InvocationPersistenceError
   );
 }
 
@@ -437,6 +453,8 @@ function isStop(err: unknown): err is StopRequestedError | DeadlineError {
 }
 
 interface AgentCall {
+  /** Explicit evidence context; an unannotated controller call grants no provenance credit. */
+  evidence?: { scope: InvocationScope; stage: InvocationStage; baseSubject?: WorkSubject };
   role: Role;
   label: string;
   /** The feature the run works on, if any: set aside when runs on it keep taking Mission Control down. */
@@ -456,7 +474,13 @@ interface AgentCall {
   readDirs?: string[];
 }
 
+interface ReviewCapture { jobId: string; before: WorkCapture; after?: WorkCapture; }
+type ControlledExecResult = ExecResult & { reviewCapture?: ReviewCapture };
 interface AgentAnswer<T> {
+  /** Only the final actual invocation's own before/after observations; never an earlier fallback attempt's. */
+  reviewCapture?: ReviewCapture;
+  /** Exact final invocation, never reconstructed from a label. */
+  jobId?: string;
   /** The validated structured answer; null unless the run ended "ok". */
   out: T | null;
   result: RunResult;
@@ -567,6 +591,8 @@ class MissionRun {
 
   private async begin(): Promise<void> {
     const { m } = this;
+    journalOf(m, this.scratch.interruptionCounts());
+    missionHelpers(m); // refuse damaged saved settings before starting any job
     const { config } = this.deps;
     if (!config.profiles[m.profile]) {
       const available = Object.keys(config.profiles).join(", ");
@@ -583,7 +609,10 @@ class MissionRun {
       if (m.stage === "init") this.scratch.updateUnit(INIT_UNIT, { attempts: 0 });
       this.clearFailure(true);
     }
+    await this.refreshIntegrationFindings();
+    m.allowancePolicy = this.deps.executor.allowancePolicy;
     const resumed = m.status !== "queued";
+    if(!resumed && m.agentRuns===0 && journalOf(m).legacyAgentRuns===0 && !Object.hasOwn(m,"workEvidenceVersion")) m.workEvidenceVersion=1;
     m.status = "running";
     this.event(resumed ? "mission.resume" : "mission.start", { stage: m.stage });
     this.save();
@@ -609,25 +638,117 @@ class MissionRun {
    */
   private async recoverInterruptedRun(): Promise<void> {
     const marker = this.scratch.inflight();
-    if (!marker) return;
-    this.scratch.setInflight(undefined);
-    const count = this.scratch.recordInterruption(marker.label);
-    this.m.agentRuns++;
-    this.event("run.interrupted", { ...marker, count });
-    this.noteOnce(`Mission Control stopped unexpectedly while "${marker.label}" was running (it started at ${marker.at}); that step was tried again.`);
-    if (count < MAX_INTERRUPTIONS || marker.optional) return; // a helper's run: the step goes on without it soon enough
-    const why = `Mission Control stopped unexpectedly ${count} times while working on it (a crash, the computer restarting, or a command that took it down)`;
-    const f = marker.feature === undefined ? undefined : this.feature(marker.feature);
-    if (f) {
-      this.scratch.clearInterruptions(marker.label);
-      if (!FINISHED.has(f.status)) await this.blockFeature(f, why);
-      return;
+    const notices = recoverInvocations(this.m, marker, this.scratch.interruptionCounts(),
+      new Date(this.deps.clock.now()).toISOString(), () => this.save());
+    this.syncRecoveryScratch(true);
+    await this.resumeWorkRestore();
+    await this.resumeRetainedWriters();
+    await this.resumeWorkRestack();
+    for (const notice of notices) {
+      if (notice.fresh) this.event("run.interrupted", { ...notice });
+      const entry = notice.jobId === undefined ? undefined : this.m.invocations?.entries.find(e => e.jobId === notice.jobId);
+      const started = entry?.reservedAt ?? notice.legacyMarker?.at ?? notice.at;
+      this.noteOnce(`Mission Control stopped unexpectedly while "${notice.label}" was running (it started at ${started}); that step was tried again.`);
+      const resetCount = notice.count >= MAX_INTERRUPTIONS && !notice.optional;
+      if (resetCount) {
+        const why = `Mission Control stopped unexpectedly ${notice.count} times while working on it (a crash, the computer restarting, or a command that took it down)`;
+        const f = notice.feature === undefined ? undefined : this.feature(notice.feature);
+        if (f) {
+          if (!FINISHED.has(f.status)) await this.blockFeature(f, why);
+        } else {
+          await this.fail(`${why}, at the step "${notice.label}".`,
+            `${why}, at the step "${notice.label}". Check that the computer stays on, then run: \`${this.resumeCommand()}\``);
+        }
+      }
+      settleRecovery(this.m, notice.key, resetCount, () => this.save());
+      this.syncRecoveryScratch(false);
+      if (this.m.status === "failed") return;
     }
-    this.scratch.clearInterruptions(marker.label);
-    throw new MissionFailedError(
-      `${why}, at the step "${marker.label}".`,
-      `${why}, at the step "${marker.label}". Check that the computer stays on and that Docker Desktop keeps running, then run: \`${this.resumeCommand()}\``,
-    );
+  }
+
+  /** Complete a recorded controller restoration with a fresh operation, before any next model job. */
+  private async resumeWorkRestore():Promise<void> {
+    if(!Object.hasOwn(this.m,"workRestore"))return;
+    try {
+      const intent=this.m.workRestore,ctl=this.retainedController();
+      if(!intent || !ctl.prepareRestore(intent.scope,intent.checkpointId,intent.paths))
+        throw new InvocationPersistenceError("Saved retained-work restoration could not be validated.");
+      const valid=pendingWrites(this.m.workTracking,journalOf(this.m),intent.scope);
+      if(!valid.ok)throw new InvocationPersistenceError();
+      const tracked=valid.state.scopes.find(s=>isDeepStrictEqual(s.scope,intent.scope));
+      if(!tracked)throw new InvocationPersistenceError();
+      const wt=tracked.capture.root;
+      await this.reap();
+      if(intent.paths===undefined)await this.deps.git.resetHard(wt,intent.head);
+      else await this.deps.git.restorePaths(wt,intent.head,intent.paths);
+      const after=await captureWorktree(wt,intent.scope);
+      const committed=intent.paths===undefined?await captureCommittedTree(wt,intent.scope,intent.head):undefined;
+      if(!ctl.restore(after,committed,true))throw new InvocationPersistenceError("Saved work restoration remains uncertain.");
+    } catch(cause) {
+      throw cause instanceof InvocationPersistenceError?cause:new InvocationPersistenceError("Saved work restoration could not finish.",{cause});
+    }
+  }
+
+  /** Recovery leaves actual identity and ordinary cleanup unknown; a fresh reaped capture permits later writers. */
+  private async resumeRetainedWriters():Promise<void> {
+    if(!Object.hasOwn(this.m,"workTracking"))return;
+    const scopes=Array.isArray(this.m.workTracking?.scopes)?this.m.workTracking.scopes:undefined;
+    if(!scopes){atomicMissionEvidence(this.m,()=>this.save(),()=>{this.m.provenanceUncertain=true;});return;}
+    for(const candidate of scopes) {
+      const valid=pendingWrites(this.m.workTracking,journalOf(this.m),candidate?.scope);
+      if(!valid.ok){atomicMissionEvidence(this.m,()=>this.save(),()=>{this.m.provenanceUncertain=true;});return;}
+      const tracked=valid.state.scopes.find(s=>isDeepStrictEqual(s.scope,candidate.scope))!;
+      for(const intent of tracked.intents.filter(i=>!i.recovery && (i.phase==="active" || journalOf(this.m).entries.some(e=>e.jobId===i.jobId && e.cleanedAt===undefined && e.restoration===undefined)))) {
+        const notice=journalOf(this.m).recoveries.find(r=>r.jobId===intent.jobId);
+        const scope=tracked.scope;
+        const wt=scope.kind==="feature"?this.m.features.find(f=>f.id===scope.featureId)?.worktree:this.m.integrationWorktree;
+        if(!notice || !wt || wt!==tracked.capture.root)throw new InvocationPersistenceError("Interrupted writing work has no bound recovery location.");
+        await this.reap();await this.guardGitSettings();
+        const after=await captureWorktree(wt,tracked.scope);
+        const globs=this.m.verify?.testGlobs??[];
+        const testPaths=unique([...tracked.capture.files,...after.files].map(f=>f.path)).filter(p=>isTestPath(p,globs));
+        if(!this.retainedController().recover(intent.jobId,notice.key,after,testPaths))
+          throw new InvocationPersistenceError("Interrupted writing work remains unobserved.");
+      }
+    }
+  }
+
+  /** Replay the exact controller composition from saved source commits; no model call can run in this gap. */
+  private async resumeWorkRestack():Promise<void> {
+    if(!Object.hasOwn(this.m,"workRestack"))return;
+    const intent=this.m.workRestack,ctl=this.retainedController();
+    if(!intent||!ctl.prepareRestack(intent))throw new InvocationPersistenceError("Saved test rewrite could not be validated.");
+    const f=need(this.feature(intent.scope.featureId),"the test rewrite feature"),wt=need(f.worktree,"the test rewrite worktree");
+    try {
+      await this.reap();
+      await this.deps.git.resetHard(wt,intent.oldTestsCommit);
+      await this.deps.git.restorePaths(wt,intent.rewriteCommit,intent.testPaths);
+      await this.deps.git.commitAll(wt,"test("+f.id+"): acceptance tests");
+      const tests=await captureWorktree(wt,intent.scope);
+      const testsCommitted=tests.head?await captureCommittedTree(wt,intent.scope,tests.head):tests;
+      if(!tests.complete||!isDeepStrictEqual(tests,testsCommitted))throw new InvocationPersistenceError("The rewritten tests could not be captured.");
+      await this.recordGuard(f,wt,intent.frozenMembers);
+      await this.deps.git.restorePaths(wt,intent.rewriteCommit,intent.carriedPaths);
+      await this.deps.git.commitAll(wt,"wip("+f.id+"): earlier attempt, kept for the rewritten tests");
+      const final=await captureWorktree(wt,intent.scope);
+      const finalCommitted=final.head?await captureCommittedTree(wt,intent.scope,final.head):final;
+      // The authoritative restack intent survives if either scratch acknowledgement or final adoption fails.
+      this.scratch.updateUnit(f.id,{pendingDiagnosis:undefined});
+      if(!ctl.finishRestack(tests,testsCommitted,final,finalCommitted,true))throw new InvocationPersistenceError("The rewritten work remains unconfirmed.");
+      this.event("tests.frozen",{feature:f.id,files:f.frozenTests.map(t=>t.path),commit:f.testsCommit});
+    } catch(cause) {
+      throw cause instanceof InvocationPersistenceError?cause:new InvocationPersistenceError("The saved test rewrite could not finish.",{cause});
+    }
+  }
+
+  private syncRecoveryScratch(clearMarker: boolean): void {
+    try {
+      this.scratch.syncInterruptions(journalOf(this.m).interruptionCounts);
+      if (clearMarker) this.scratch.setInflight(undefined);
+    } catch (cause) {
+      if (cause instanceof InvocationPersistenceError) throw cause;
+      throw new InvocationPersistenceError(undefined, { cause });
+    }
   }
 
   /** The command that runs this mission again. */
@@ -678,6 +799,21 @@ class MissionRun {
   }
 
   private async end(err: unknown): Promise<void> {
+    if (err instanceof InvocationPersistenceError) {
+      // Never turn a persistence failure into a failed feature or launch another helper.
+      this.m.status = "stopped";
+      if (!this.m.notes.includes(err.message)) this.m.notes.push(err.message);
+      try { this.save(); } catch { this.deps.logger.error("Mission paused: invocation history could not be saved."); }
+      try { this.event("mission.stopped", { stage: this.m.stage, reason: err.message }); } catch { /* preserve original failure */ }
+      try { await this.writeReport(null); } catch { /* persistence may still be unavailable */ }
+      return;
+    }
+    if (err instanceof AllowanceUnknownError) {
+      this.m.allowancePolicy = this.deps.executor.allowancePolicy;
+      this.m.pause = { kind: "allowance_unknown", providers: [...err.providers], reason: err.message,
+        at: new Date(this.deps.clock.now()).toISOString() };
+      return this.stop(err.message);
+    }
     if (err instanceof CheckpointParked) return this.park(err);
     if (isStop(err)) return this.stop(err.message);
     if (err instanceof DiskSpaceError) return this.pauseForDisk(err.message);
@@ -734,12 +870,12 @@ class MissionRun {
 
   /**
    * The AI command lines kept failing for reasons outside the work (a crash, a hang, an outage, limits that never
-   * cleared): nothing was counted against the mission, so it is stopped and the next run carries on where it stopped.
+   * cleared): the feature is not blamed, but actual invocations still count toward the mission safety cap.
    * The note names the real error; the notification says what to check.
    */
   private async pauseForFailingAgents(err: ProvidersFailingError): Promise<void> {
     const note =
-      `Paused because ${err.message}. This was not a problem with the work, so nothing was counted against it. ` +
+      `Paused because ${err.message}. This was not recorded as a failed feature attempt. The AI invocations still count toward the mission safety cap. ` +
       "Check that the computer is online and run `mc doctor --live`; the next `mc run` carries on where this stopped.";
     this.noteOnce(note);
     await this.stop(err.message);
@@ -852,43 +988,131 @@ class MissionRun {
    */
   private async run<T>(call: AgentCall): Promise<AgentAnswer<T> | null> {
     this.checkStop();
+    journalOf(this.m);
     const cap = this.deps.config.limits.maxAgentRunsPerMission;
     if (this.m.agentRuns >= cap) {
       if (call.optional) return null;
       throw new BudgetExhaustedError(`Stopped early: this mission used its safety cap of ${cap} agent runs.`);
     }
     await this.reap();
-    this.scratch.setInflight({
-      label: call.label,
-      ...(call.feature !== undefined && { feature: call.feature }),
-      ...(call.optional && { optional: true }),
-      at: new Date(this.deps.clock.now()).toISOString(),
-    });
-    let exec: ExecResult;
+    let exec: ControlledExecResult;
     try {
       exec = await this.exec(call);
-    } finally {
-      this.scratch.setInflight(undefined);
-      await this.reap();
-      if (call.access === "workspace-write") await this.guardGitSettings();
+    } catch (error) {
+      // Physical cleanup is still attempted, but failed observation cannot be acknowledged.
+      try {
+        await this.reap();
+        if (call.access === "workspace-write") await this.guardGitSettings();
+      } catch { /* keep the original error and durable pending entry */ }
+      throw error;
     }
-    if (exec.skipped || !exec.result || !exec.provider || !exec.model) return null;
-    this.m.agentRuns++;
-    this.save();
+    if (exec.skipped || !exec.result || !exec.provider || !exec.model || !exec.family) return null;
     const { result } = exec;
     return {
       out: result.outcome === "ok" ? (result.structured as T) : null,
-      result,
-      provider: exec.provider,
-      model: exec.model,
-      family: exec.family ?? call.assignment.family,
+      result, provider: exec.provider, model: exec.model, family: exec.family, jobId: exec.jobId, reviewCapture: exec.reviewCapture,
     };
   }
 
-  private async exec(call: AgentCall): Promise<ExecResult> {
+  private async exec(call: AgentCall): Promise<ControlledExecResult> {
+    if(Object.hasOwn(this.m,"workRestore")||Object.hasOwn(this.m,"workRestack"))
+      throw new InvocationPersistenceError("A saved work restoration must finish before another AI job.");
     const { family, tier, effort } = call.assignment;
+    let persistenceFailed = false;
+    let reviewCapture: ReviewCapture | undefined;
+    let writerCapture: WorkCapture | undefined;
+    const usedIds = new Set(journalOf(this.m).entries.map(e => e.jobId));
     try {
-      return await this.deps.executor.exec({
+      const execution = await this.deps.executor.exec({
+        lifecycle: {
+          canStart: () => {
+            this.checkStop();
+            if (this.m.agentRuns < this.deps.config.limits.maxAgentRunsPerMission) return true;
+            if (call.optional) return false;
+            throw new BudgetExhaustedError(`Stopped early: this mission used its safety cap of ${this.deps.config.limits.maxAgentRunsPerMission} agent runs.`);
+          },
+          usedJobId: id => usedIds.has(id),
+          reserve: async (job, actualFamily) => {
+            this.checkStop();
+            const evidence = call.evidence;
+            const allowanceWasUsable = this.deps.quota.allowance(job.provider).usable;
+            if (call.access === "read-only" && evidence && (evidence.stage === "review" || evidence.stage === "final_review") &&
+                (evidence.scope.kind === "feature" || evidence.scope.kind === "application") &&
+                evidence.baseSubject && "commit" in evidence.baseSubject) {
+              reviewCapture = { jobId: job.id, before: await captureReviewSubject(call.cwd, evidence.scope, evidence.baseSubject.commit) };
+            }
+            writerCapture = call.access==="workspace-write" && evidence && evidence.scope.kind!=="controller" && evidence.scope.kind!=="plan"
+              ? await captureWorktree(call.cwd,evidence.scope) : undefined;
+            this.checkStop(); // capture is awaited: stop/deadline still wins before reservation
+            // A capture can outlive an allowance receipt. This is the same admission decision:
+            // re-read its age, without another metadata query or restamping cached observations.
+            if (this.deps.executor.allowancePolicy === "stop" && !this.deps.quota.allowance(job.provider).usable) {
+              if (call.optional) return false;
+              throw new AllowanceUnknownError([job.provider], "allowance became unavailable before reservation");
+            }
+            if (this.deps.executor.allowancePolicy === "warn" && allowanceWasUsable && !this.deps.quota.allowance(job.provider).usable) {
+              this.deps.logger.warn("Allowance could not be confirmed; the reserve is not assured.", { provider: job.provider, policy: "warn" });
+            }
+            const reservedAt = new Date(this.deps.clock.now()).toISOString();
+            const priorPause = this.m.pause;
+            let reserved: boolean;
+            try {
+              if (this.m.pause?.kind === "allowance_unknown") delete this.m.pause;
+              const reservation = {
+                jobId: job.id, label: call.label, role: job.role, access: job.access,
+                ...(call.feature !== undefined && { feature: call.feature }), ...(call.optional && { optional: true as const }),
+                ...(call.evidence ?? { scope: { kind: "controller" as const }, stage: "other" as const }),
+                ...(writerCapture?.head && {baseSubject: writerCapture.scope.kind==="feature"
+                  ? {kind:"feature_commit" as const,featureId:writerCapture.scope.featureId,commit:writerCapture.head}
+                  : {kind:"application_commit" as const,commit:writerCapture.head}}),
+                reservedAt, candidate: { provider: job.provider, model: job.model, family: actualFamily },
+              };
+              reserved = writerCapture
+                ? this.retainedController().reserve(reservation,this.deps.config.limits.maxAgentRunsPerMission,writerCapture,
+                    call.feature===undefined?[]:this.feature(call.feature)?.frozenTests.map(t=>t.path)??[])
+                : reserveInvocation(this.m,reservation,this.deps.config.limits.maxAgentRunsPerMission,()=>this.save());
+            } catch (error) {
+              if (priorPause !== undefined) this.m.pause = priorPause;
+              throw error;
+            }
+            if (!reserved) {
+              if (priorPause !== undefined) this.m.pause = priorPause;
+              if (call.optional) return false;
+              throw new BudgetExhaustedError(`Stopped early: this mission used its safety cap of ${this.deps.config.limits.maxAgentRunsPerMission} agent runs.`);
+            }
+            usedIds.add(job.id);
+            try {
+              this.scratch.setInflight({ jobId: job.id, label: call.label, ...(call.feature !== undefined && { feature: call.feature }),
+                ...(call.optional && { optional: true }), at: reservedAt });
+            } catch (cause) { throw new InvocationPersistenceError(undefined, { cause }); }
+            return true;
+          },
+          observe: async (job, actualFamily, outcome) => {
+            observeInvocation(this.m, job.id, { provider: job.provider, model: job.model, family: actualFamily }, outcome,
+              new Date(this.deps.clock.now()).toISOString(), () => this.save());
+          },
+          clean: async job => {
+            try {
+              await this.reap();
+              if (call.access === "workspace-write") await this.guardGitSettings();
+              const subject = call.evidence?.baseSubject;
+              const scope = call.evidence?.scope;
+              if (reviewCapture?.jobId === job.id && scope && scope.kind !== "controller" && subject && "commit" in subject) {
+                reviewCapture.after = await captureReviewSubject(call.cwd, scope, subject.commit);
+              }
+              if(writerCapture) {
+                const after=await captureWorktree(call.cwd,writerCapture.scope);
+                const globs=this.m.verify?.testGlobs??[];
+                const testPaths=unique([...writerCapture.files,...after.files].map(f=>f.path)).filter(p=>isTestPath(p,globs));
+                this.retainedController().clean(job.id,after,testPaths);
+              } else cleanInvocation(this.m, job.id, new Date(this.deps.clock.now()).toISOString(), () => this.save());
+              this.scratch.setInflight(undefined);
+            } catch (cause) {
+              if (cause instanceof InvocationPersistenceError) throw cause;
+              throw new InvocationPersistenceError(undefined, { cause });
+            }
+          },
+        },
         missionId: this.m.id,
         role: call.role,
         label: call.label,
@@ -906,12 +1130,109 @@ class MissionRun {
         ...(call.readDirs && call.readDirs.length > 0 && { readDirs: call.readDirs }),
         maxTurns: call.maxTurns ?? this.deps.config.limits.otherMaxTurns,
       });
+      return { ...execution, ...(reviewCapture && { reviewCapture }) };
+    } catch (error) {
+      persistenceFailed = error instanceof InvocationPersistenceError;
+      throw error;
     } finally {
-      if (this.m.status === "waiting") {
+      if (this.m.status === "waiting" && !persistenceFailed) {
         this.m.status = "running";
         this.save();
       }
     }
+  }
+
+  private retainedController():RetainedController { return new RetainedController(this.m,()=>this.save(),()=>new Date(this.deps.clock.now()).toISOString()); }
+  private async ensureRetainedScope(wt:string,scope:WorkScope,freshBoundary:boolean):Promise<void> {
+    const journal=journalOf(this.m), known=pendingWrites(this.m.workTracking,journal,scope);
+    if(known.ok && (scope.kind!=="application" || Object.hasOwn(this.m,"applicationLedger")))return;
+    const capture=await captureWorktree(wt,scope), committed=capture.head?await captureCommittedTree(wt,scope,capture.head):capture;
+    const fresh=freshBoundary && this.m.workEvidenceVersion===1 && journal.legacyAgentRuns===0 &&
+      (scope.kind!=="application" || capture.head===this.m.baseSha && !journal.entries.some(e=>e.access==="workspace-write") &&
+        this.m.features.every(f=>f.status==="pending" && f.attempts.length===0 && !f.passingCommit && !f.commit));
+    this.retainedController().initialize(capture,committed,fresh);
+    if(scope.kind==="application" && !Object.hasOwn(this.m,"applicationLedger") && fresh) {
+      const ledger=initializeApplicationLedger({capture,committed,beforeMissionWrites:true,noRetainedAiWriters:true});
+      atomicMissionEvidence(this.m,()=>this.save(),()=>{if(ledger.ok)this.m.applicationLedger=ledger.ledger;else this.m.provenanceUncertain=true;});
+    }
+  }
+  private async checkpointWork(wt:string,f?:Feature,frozen?:Feature["frozenTests"],accept?:()=>void,expectedHead?:string):Promise<boolean> {
+    const scope:WorkScope=f?{kind:"feature",featureId:f.id}:{kind:"application"};
+    const capture=await captureWorktree(wt,scope);
+    const committed=capture.head?await captureCommittedTree(wt,scope,capture.head):capture;
+    if(expectedHead!==undefined && (capture.head!==expectedHead || committed.head!==expectedHead))
+      throw new InvocationPersistenceError("The work changed while its accepted checkpoint was being recorded.");
+    const members=frozen===undefined?undefined:[...frozen].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+    const subject:WorkSubject=f && members?{kind:"frozen_tests",featureId:f.id,testSetId:frozenSetId(members)}:
+      f?{kind:"feature_commit",featureId:f.id,commit:capture.head??""}:{kind:"application_commit",commit:capture.head??""};
+    let ancestor=false;
+    const ledger=!f?readApplicationLedger(this.m.applicationLedger):undefined;
+    if(ledger?.ok && capture.head)ancestor=await this.deps.git.isAncestor(wt,ledger.ledger.baseline.commit,capture.head);
+    return this.retainedController().adopt(capture,committed,subject,members,()=>{
+      if(!f && ledger?.ok && !Object.hasOwn(this.m,"provenanceUncertain")) {
+        const tracked=this.m.workTracking?.scopes.find(s=>s.scope.kind==="application");
+        const cp=tracked?.checkpoints.find(c=>c.id===tracked.baseCheckpointId);
+        const retainedAi=!tracked || tracked.liveWriterIds.length!==0 || !tracked.complete;
+        const next=recordApplicationScaffold(ledger.ledger,{capture,committed,beforeHead:ledger.ledger.head,
+          snapshotRevision:cp?.selection.revision??null,hasRetainedAiWork:retainedAi,baselineIsAncestor:ancestor});
+        if(next.ok)this.m.applicationLedger=next.ledger;else this.m.provenanceUncertain=true;
+      }
+      accept?.();
+    });
+  }
+  private async restoreFeatureWork(f:Feature,wt:string,ref:string,paths?:string[]):Promise<void> {
+    const scope={kind:"feature",featureId:f.id} as const, ctl=this.retainedController();
+    const head=await this.deps.git.headSha(wt,ref), cp=ctl.checkpoint(scope,head);
+    if(cp) {
+      if(!ctl.prepareRestore(scope,cp.id,paths))throw new InvocationPersistenceError("A retained-work restore intent could not be validated.");
+    } else {
+      if(Object.hasOwn(this.m,"workRestore"))throw new InvocationPersistenceError("An earlier retained-work restoration is unresolved.");
+      atomicMissionEvidence(this.m,()=>this.save(),()=>{f.provenanceUncertain=true;});
+    }
+    await this.reap();
+    if(paths===undefined)await this.deps.git.resetHard(wt,head);else await this.deps.git.restorePaths(wt,head,paths);
+    if(cp) {
+      const after=await captureWorktree(wt,scope), committed=paths===undefined?await captureCommittedTree(wt,scope,head):undefined;
+      if(!ctl.restore(after,committed,true))throw new InvocationPersistenceError("Work restoration remains uncertain.");
+    }
+  }
+  private statusRecorded(f:Feature,from:FeatureStatus):void {
+    this.deps.logger.info(this.m.id+": feature "+f.id+" "+from+" → "+f.status,{missionId:this.m.id});
+    this.event("feature.status",{feature:f.id,from,to:f.status});
+  }
+
+  /** Only actual observed, cleaned invocations can enter this audit. Save failures cannot leak a completed entry. */
+  private recordReview(subject: WorkSubject, answer: AgentAnswer<unknown>, validAnswer: boolean, feature?: Feature): boolean {
+    const target = feature ?? this.m;
+    const scope: WorkScope = subject.kind === "plan" ? { kind: "plan" } : subject.kind === "application_commit"
+      ? { kind: "application" } : { kind: "feature", featureId: subject.featureId };
+    const stage: WorkEvidence["stage"] = subject.kind === "plan" ? "plan_review" : subject.kind === "application_commit" ? "final_review" : "review";
+    const job = answer.jobId === undefined ? undefined : journalOf(this.m).entries.find(e => e.jobId === answer.jobId);
+    if (!job?.observation || !job.cleanedAt || job.access !== "read-only" || !isDeepStrictEqual(job.scope, scope) ||
+        job.stage !== stage || !isDeepStrictEqual(job.baseSubject, subject)) return false;
+    const actual = job.observation.actual;
+    const observationMatchesAnswer = actual.provider === answer.provider && actual.model === answer.model && actual.family === answer.family;
+    const capture = answer.reviewCapture;
+    const exactCapture = subject.kind === "plan" || (subject.kind !== "frozen_tests" && capture?.jobId === job.jobId &&
+      capture.before.complete && capture.after?.complete === true && capture.before.head === subject.commit && capture.after.head === subject.commit &&
+      isDeepStrictEqual(capture.before, capture.after));
+    const usable = validAnswer && answer.out !== null && answer.result.readonlyMutation === undefined &&
+      job.observation.outcome === "ok" && observationMatchesAnswer && exactCapture;
+    const entry: WorkEvidence = { jobId: job.jobId, scope, stage, actual, outcome: usable ? "completed" : "incomplete",
+      at: job.observation.at, subject };
+    const result = appendReviewEvidence(target.provenance, entry);
+    const before = { provenance: target.provenance, has: Object.hasOwn(target, "provenance"),
+      uncertain: target.provenanceUncertain, hasUncertain: Object.hasOwn(target, "provenanceUncertain") };
+    try {
+      if (result.ok) target.provenance = result.provenance;
+      else target.provenanceUncertain = true; // keep original damaged/oversized bytes
+      this.save();
+    } catch (cause) {
+      if (before.has) target.provenance = before.provenance; else delete target.provenance;
+      if (before.hasUncertain) target.provenanceUncertain = before.uncertain; else delete target.provenanceUncertain;
+      throw new InvocationPersistenceError("Mission paused: actual review evidence could not be saved.", { cause });
+    }
+    return usable;
   }
 
   /** A required agent run (never skipped). */
@@ -991,6 +1312,7 @@ class MissionRun {
     const { m } = this;
     if (m.integrationWorktree && isCheckout(m.integrationWorktree)) {
       await this.keepOnBranch(m.integrationWorktree, m.integrationBranch);
+      await this.ensureRetainedScope(m.integrationWorktree,{kind:"application"},true);
       return m.integrationWorktree;
     }
     const base = need(m.baseSha, "the mission's base commit");
@@ -998,6 +1320,7 @@ class MissionRun {
     await this.deps.git.addWorktree(m.repoPath, path, m.integrationBranch, base); // creates the branch at base if needed
     m.integrationWorktree = path;
     this.save();
+    await this.ensureRetainedScope(path,{kind:"application"},true);
     return path;
   }
 
@@ -1068,6 +1391,7 @@ class MissionRun {
   /** Tracked and untracked (not ignored) files, for briefs; empty when git cannot list them. */
   private async repoFiles(cwd: string): Promise<string[]> {
     const r = await runProcess({
+      env: controllerGitEnv(),
       command: "git",
       // No fsmonitor or hooks: agents can write the repository's config (see Git's BASE_ARGS).
       args: ["-c", "core.quotepath=off", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
@@ -1303,6 +1627,8 @@ class MissionRun {
   private async specStage(): Promise<void> {
     const plan = planOf(this.m);
     if (plan) {
+      const invalid = validateSpec(plan.spec);
+      if (invalid.length) throw new MissionFailedError("The supplied plan is not usable.", invalid.join(" "));
       // A plan written outside the team (mc plan queue): the team's planner is not asked. Safe to repeat after a stop,
       // since adoptSpec replaces the features and none has started.
       this.adoptSpec(structuredClone(plan.spec));
@@ -1343,7 +1669,7 @@ class MissionRun {
       });
       problems = answer.out ? validateSpec(answer.out) : [runFailure(answer.result)];
       answered ||= answer.out !== null;
-      // A list that came back as one line with the text `\n` in it is made a list again (R3-4); a plan written well is returned as it is.
+      // JSON has already been parsed. Literal escape text and actual line breaks stay distinct.
       if (answer.out && problems.length === 0) return { spec: normalizeSpecText(answer.out), problems, answered };
     }
     return { spec: null, problems, answered };
@@ -1373,7 +1699,12 @@ class MissionRun {
 
   private async gateA(): Promise<void> {
     const spec = need(this.m.spec, "the spec");
+    const supplied = planOf(this.m);
+    const invalid = supplied ? validateSpec(supplied.spec) : [];
+    if (invalid.length) throw new MissionFailedError("The supplied plan is not usable.", invalid.join(" "));
+    const subject = { kind: "plan", planHash: sha256(JSON.stringify(spec)) } as const;
     const answer = await this.agent<GateOutput>({
+      evidence: { scope: { kind: "plan" }, stage: "plan_review", baseSubject: subject },
       role: "reviewer",
       label: "gate-a",
       assignment: this.assign("reviewer", this.roleFamily("architect")),
@@ -1383,7 +1714,8 @@ class MissionRun {
       access: "read-only",
       noTools: true,
     });
-    if (!answer.out) {
+    const usable = this.recordReview(subject, answer, !!answer.out && subject.planHash === sha256(JSON.stringify(this.m.spec)));
+    if (!answer.out || !usable) {
       this.noteOnce("The plan review did not finish, so the plan was used as written.");
       this.setPlanReview("unfinished", []);
     } else if (answer.out.verdict === "revise" && answer.out.issues.length > 0) {
@@ -1395,7 +1727,20 @@ class MissionRun {
   }
 
   private async reviseSpec(previous: SpecOutput, issues: string[]): Promise<void> {
-    const { spec } = await this.writeSpec(1, { previous, issues });
+    const { spec, problems } = await this.writeSpec(1, { previous, issues });
+    const supplied = planOf(this.m);
+    if (supplied) {
+      const invalid = validateSpec(supplied.spec);
+      if (invalid.length) throw new MissionFailedError("The supplied plan is not usable.", invalid.join(" "));
+      const result = reconcileSuppliedPlan(supplied.spec, previous, spec ?? undefined, problems);
+      const assembledProblems = validateSpec(result.spec);
+      if (assembledProblems.length) throw new MissionFailedError("The reconciled plan is not usable.", assembledProblems.join(" "));
+      // An earlier applied revision may remain effective after a later rejected attempt.
+      const stillRevised = !isDeepStrictEqual(result.spec, supplied.spec);
+      this.m.plan = { ...supplied, review: { outcome: result.applied || stillRevised ? "revised" : "not_applied", issues, latestRevision: result.latestRevision, rejectedChanges: result.rejectedChanges } };
+      this.adoptSpec(result.spec);
+      return;
+    }
     // The planner's answer has no field for a mode: they come back by feature id, and a revision that loses one is refused.
     const carried = spec ? carryModes(previous, spec) : undefined;
     if (carried?.ok) {
@@ -1439,7 +1784,9 @@ class MissionRun {
       this.scratch.updateUnit(INIT_UNIT, { attempts: n + 1, lastFailure: { outputTail: failure } });
     }
     await this.deps.git.commitAll(wt, "chore: scaffold app");
-    this.setStage("features");
+    const from=this.m.stage;
+    await this.checkpointWork(wt,undefined,undefined,()=>{this.m.stage="features";});
+    this.event("stage",{from,to:"features"});
   }
 
   /** The app folder: <workspaceRoot>/<slug>, or -2, -3… when that is taken by something else. */
@@ -1468,6 +1815,7 @@ class MissionRun {
   private async initAttempt(wt: string, rung: BuildRung, n: number): Promise<string | null> {
     const last = this.scratch.unit(INIT_UNIT).lastFailure;
     const answer = await this.agent<InitOutput>({
+      evidence: { scope: { kind: "application" as const }, stage: "build" },
       role: "engineer",
       label: "init",
       assignment: this.rungAssignment(rung),
@@ -1579,6 +1927,7 @@ class MissionRun {
 
   private async startUnit(f: Feature): Promise<void> {
     const wt = await this.ensureUnitWorktree(f);
+    await this.ensureRetainedScope(wt,{kind:"feature",featureId:f.id},true);
     f.testsCommit = await this.deps.git.headSha(wt);
     if (!isModeFeature(f)) return this.setStatus(f, "testing");
     // A feature that is checked by reading has no test author and no frozen tests: the guard of the project's own tests and
@@ -1598,11 +1947,10 @@ class MissionRun {
     if (files.length > 0) {
       await git.commitAll(wt, `test(${f.id}): acceptance tests`);
     } else {
-      await git.resetHard(wt, base); // drops test files that earlier rounds left behind
+      await this.restoreFeatureWork(f,wt,base); // exact prior checkpoint, including interrupted authors
       if (!this.m.baselineBroken) this.noteOnce(`No acceptance tests were written for “${f.title}”, so only the full verification checked it.`);
     }
-    await this.freezeTests(f, wt, files);
-    this.setStatus(f, "building");
+    await this.freezeTests(f, wt, files, "building");
   }
 
   /**
@@ -1635,12 +1983,12 @@ class MissionRun {
    * Freezes `files` and makes HEAD the tests commit: where a diagnosis resets to and the anti-cheat scan starts. Also
    * records what else the engineer must leave alone (see recordGuard).
    */
-  private async freezeTests(f: Feature, wt: string, files: string[]): Promise<void> {
-    f.frozenTests = await hashFiles(wt, files);
-    f.testsCommit = await this.deps.git.headSha(wt);
-    await this.recordGuard(f, wt);
-    this.event("tests.frozen", { feature: f.id, files: f.frozenTests.map((t) => t.path), commit: f.testsCommit });
-    this.save();
+  private async freezeTests(f:Feature,wt:string,files:string[],nextStatus?:FeatureStatus):Promise<void> {
+    const members=await hashFiles(wt,files),head=await this.deps.git.headSha(wt),from=f.status;
+    await this.recordGuard(f,wt,members);
+    await this.checkpointWork(wt,f,members,()=>{f.frozenTests=members;f.testsCommit=head;if(nextStatus)f.status=nextStatus;},head);
+    this.event("tests.frozen",{feature:f.id,files:f.frozenTests.map(t=>t.path),commit:f.testsCommit});
+    if(nextStatus)this.statusRecorded(f,from);
   }
 
   /**
@@ -1649,9 +1997,9 @@ class MissionRun {
    * verify commands run (scripts/mc-test.mjs, a checks script), the test runners' configs, and the package.json
    * scripts the verify commands call. All of it is hashed here, at the tests commit, and put back by checkUnit.
    */
-  private async recordGuard(f: Feature, wt: string): Promise<void> {
+  private async recordGuard(f: Feature, wt: string, frozen=f.frozenTests): Promise<void> {
     const vc = this.requireVerify();
-    const own = new Set(f.frozenTests.map((t) => t.path));
+    const own = new Set(frozen.map((t) => t.path));
     const files = await this.repoFiles(wt);
     const scripts = protectedScripts(readPackageScripts(wt), verifyCommands(vc));
     const harness = harnessFiles(files, [...verifyCommands(vc), ...Object.values(scripts)]).filter((p) => !isTestPath(p, vc.testGlobs));
@@ -1681,31 +2029,44 @@ class MissionRun {
    */
   private async amendTests(f: Feature, reason: string): Promise<void> {
     const { git } = this.deps;
-    const wt = need(f.worktree, "the unit worktree");
-    const oldTests = need(f.testsCommit, "the tests commit");
-    await git.resetHard(wt, "HEAD"); // the attempt as committed, without leftovers of its verification
-    const attempt = await git.headSha(wt);
-    const attemptChanged = await git.changedFiles(wt, oldTests);
-    const files = await this.writeTests(f, wt, attempt, reason);
-    if (files.length === 0) {
-      await git.resetHard(wt, attempt);
-      this.noteOnce(`The rewritten tests for “${f.title}” could not be used, so its earlier tests stayed in place.`);
-      return;
+    const wt = need(f.worktree, "the unit worktree"),oldTests=need(f.testsCommit,"the tests commit");
+    await this.restoreFeatureWork(f,wt,"HEAD");
+    const attempt=await git.headSha(wt),attemptChanged=await git.changedFiles(wt,oldTests);
+    const scope={kind:"feature",featureId:f.id} as const;
+    const prior=pendingWrites(this.m.workTracking,journalOf(this.m),scope);
+    const oldSet=frozenSetId([...f.frozenTests].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0));
+    const oldCp=prior.ok?prior.state.scopes.find(s=>isDeepStrictEqual(s.scope,scope))?.checkpoints.filter(c=>c.capture.head===oldTests&&
+      c.selection.subject.kind==="frozen_tests"&&c.selection.subject.testSetId===oldSet).at(-1):undefined;
+    const files=await this.writeTests(f,wt,attempt,reason);
+    if(files.length===0){
+      await this.restoreFeatureWork(f,wt,attempt);
+      this.noteOnce("The rewritten tests for “"+f.title+"” could not be used, so its earlier tests stayed in place.");return;
     }
-    const authored = await git.changedFiles(wt, attempt);
-    await git.commitAll(wt, `test(${f.id}): rewritten tests`);
-    const rewrite = await git.headSha(wt);
-    // A file both changed stays with the attempt, where a weakening in it is still scanned, unless it is one of the tests.
-    const testPaths = unique([...files, ...f.frozenTests.map((t) => t.path), ...authored.filter((p) => !attemptChanged.includes(p))]);
-    const carried = unique([...attemptChanged, ...authored]).filter((p) => !testPaths.includes(p));
-    await git.resetHard(wt, oldTests);
-    await git.restorePaths(wt, rewrite, testPaths);
-    await git.commitAll(wt, `test(${f.id}): acceptance tests`);
-    // The earlier tests the rewrite kept stay frozen too, or the engineer could change them freely from now on.
-    const kept = f.frozenTests.map((t) => t.path).filter((p) => existsSync(join(wt, p)));
-    await this.freezeTests(f, wt, unique([...files, ...kept]));
-    await git.restorePaths(wt, rewrite, carried);
-    await git.commitAll(wt, `wip(${f.id}): earlier attempt, kept for the rewritten tests`);
+    const authored=await git.changedFiles(wt,attempt);
+    await git.commitAll(wt,"test("+f.id+"): rewritten tests");
+    const rewrite=await git.headSha(wt);
+    const kept=f.frozenTests.map(t=>t.path).filter(p=>existsSync(join(wt,p)));
+    const frozenMembers=(await hashFiles(wt,unique([...files,...kept]))).sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+    await this.checkpointWork(wt,f,frozenMembers,undefined,rewrite);
+    const capture=await captureWorktree(wt,scope),committed=await captureCommittedTree(wt,scope,rewrite);
+    if(!capture.complete||!isDeepStrictEqual(capture,committed))throw new InvocationPersistenceError("The test rewrite could not be captured before rearranging it.");
+    const valid=pendingWrites(this.m.workTracking,journalOf(this.m),scope);
+    const tracking=valid.ok?valid.state.scopes.find(s=>isDeepStrictEqual(s.scope,scope)):undefined;
+    const rewriteCp=tracking?.checkpoints.find(c=>c.id===tracking.baseCheckpointId);
+    const category=new Set(unique([...files,...f.frozenTests.map(t=>t.path),...authored.filter(p=>!attemptChanged.includes(p))]));
+    let changed:string[];
+    if(oldCp){
+      const old=new Map(oldCp.capture.files.map(row=>[row.path,row])),after=new Map(capture.files.map(row=>[row.path,row]));
+      changed=unique([...old.keys(),...after.keys()]).filter(p=>!isDeepStrictEqual(old.get(p),after.get(p)));
+    } else changed=await git.changedFiles(wt,oldTests);
+    const known=!!oldCp&&!!rewriteCp&&rewriteCp.selection.subject.kind==="frozen_tests"&&rewriteCp.capture.head===rewrite;
+    if(!known)atomicMissionEvidence(this.m,()=>this.save(),()=>{f.provenanceUncertain=true;});
+    const intent:WorkRestackIntent={scope,oldTestsCommit:oldTests,rewriteCommit:rewrite,rewriteCapture:capture,
+      ...(known&&{oldTestsCheckpointId:oldCp!.id,rewriteCheckpointId:rewriteCp!.id}),
+      testPaths:changed.filter(p=>category.has(p)).sort(),carriedPaths:changed.filter(p=>!category.has(p)).sort(),
+      frozenMembers,at:new Date(this.deps.clock.now()).toISOString()};
+    if(!this.retainedController().prepareRestack(intent))throw new InvocationPersistenceError("The test rewrite intent could not be saved.");
+    await this.resumeWorkRestack();
   }
 
   /** One test-author run; returns the test files it listed that it really changed (or kept from the frozen set). */
@@ -1716,6 +2077,7 @@ class MissionRun {
     ctx: { amendReason: string | undefined; vacuous: boolean; previousTestFiles: string[] },
   ): Promise<string[]> {
     const answer = await this.agent<TestAuthorOutput>({
+      evidence: { scope: { kind: "feature" as const, featureId: f.id }, stage: "test_author" },
       role: "test_author",
       label: `test-${f.id}`,
       feature: f.id,
@@ -1733,7 +2095,7 @@ class MissionRun {
     const theirs = new Set(this.doneFrozenPaths(f));
     const touchedTheirs = changed.filter((p) => theirs.has(p));
     if (touchedTheirs.length > 0) {
-      await this.deps.git.restorePaths(wt, base, touchedTheirs);
+      await this.restoreFeatureWork(f,wt,base,touchedTheirs);
       this.event("tests.stray", { feature: f.id, files: touchedTheirs });
       this.noteOnce(`The test author for “${f.title}” also changed the tests of features already finished (${listFiles(touchedTheirs)}); those changes were undone.`);
     }
@@ -1744,7 +2106,7 @@ class MissionRun {
 
   private async revertNonTestChanges(f: Feature, wt: string, base: string, stray: string[]): Promise<void> {
     if (stray.length === 0) return;
-    await this.deps.git.restorePaths(wt, base, stray);
+    await this.restoreFeatureWork(f,wt,base,stray);
     this.event("tests.stray", { feature: f.id, files: stray });
     this.noteOnce(`The test author for “${f.title}” also changed files outside the test folders (${listFiles(stray)}); those changes were undone.`);
   }
@@ -1803,9 +2165,10 @@ class MissionRun {
     const wt = need(f.worktree, "the unit worktree");
     const firstBuild = !f.attempts.some((a) => a.action === "build");
     const fileList = await this.repoFiles(wt);
-    const contextPack = firstBuild ? await this.scout<ContextPackOutput>(`context-${f.id}`, contextPackPrompt(this.m, f, fileList), SCHEMAS.contextPack, wt) : null;
+    const contextPack = firstBuild && missionHelpers(this.m).contextPack ? await this.scout<ContextPackOutput>(`context-${f.id}`, contextPackPrompt(this.m, f, fileList), SCHEMAS.contextPack, wt) : null;
     const assignment = this.rungAssignment(rung);
     const answer = await this.agent<BuildOutput>({
+      evidence: { scope: { kind: "feature" as const, featureId: f.id }, stage: "build" },
       role: "engineer",
       label: `build-${f.id}`,
       feature: f.id,
@@ -1819,6 +2182,7 @@ class MissionRun {
     await this.keepOnBranch(wt, need(f.branch, "the unit branch"));
     const n = f.attempts.filter((a) => a.action === "build").length + 1;
     await this.deps.git.commitAll(wt, `wip(${f.id}): attempt ${n}`);
+    await this.checkpointWork(wt,f);
     const check = await this.checkUnit(f, `a${n}`);
     if (check.pass) return this.passBuild(f, answer, assignment, check);
     await this.failBuild(f, answer, assignment, check);
@@ -1845,11 +2209,12 @@ class MissionRun {
     const guard = this.loadGuard(f) ?? this.legacyGuard(f);
     const { modified, missing } = await checkFrozen(wt, [...f.frozenTests, ...guard.tests, ...guard.files]);
     const files = [...modified, ...missing];
-    if (files.length > 0) await this.deps.git.restorePaths(wt, testsCommit, files);
-    const scripts = restoreScripts(wt, guard.scripts);
+    if (files.length > 0) await this.restoreFeatureWork(f,wt,testsCommit,files);
+    const scripts = restoreScripts(wt, guard.scripts,()=>atomicMissionEvidence(this.m,()=>this.save(),()=>{f.provenanceUncertain=true;}));
     const touched = [...files, ...scripts.map((name) => `package.json (scripts.${name})`)];
     if (touched.length === 0) return [];
     await this.deps.git.commitAll(wt, "revert frozen test edits");
+    await this.checkpointWork(wt,f);
     this.event("frozen.reverted", { feature: f.id, files: touched });
     return touched;
   }
@@ -1894,10 +2259,10 @@ class MissionRun {
       outcome: "pass",
       summary: passSummary(answer, check),
     });
-    f.passingCommit = await this.deps.git.headSha(need(f.worktree, "the unit worktree"));
-    f.builtBy = answer.family;
+    const wt=need(f.worktree,"the unit worktree"),head=await this.deps.git.headSha(wt),from=f.status;
     this.scratch.updateUnit(f.id, { passTail: check.verify.outputTail, lastFailure: undefined });
-    this.setStatus(f, "reviewing");
+    await this.checkpointWork(wt,f,undefined,()=>{f.passingCommit=head;f.builtBy=answer.family;f.status="reviewing";},head);
+    this.statusRecorded(f,from);
   }
 
   /**
@@ -1927,7 +2292,7 @@ class MissionRun {
     f.rung = dispute ? (diagnoseAt !== undefined ? diagnoseAt + 1 : diagnosisRung) : nextRung(ladder, f.rung, repeated);
     this.save();
 
-    if (check.verify.outputTail) {
+    if (check.verify.outputTail && missionHelpers(this.m).failureDigest) {
       const prompt = failureDigestPrompt(check.verify.outputTail);
       const digest = await this.scout<FailureDigestOutput>(`digest-${f.id}`, prompt, SCHEMAS.failureDigest, need(f.worktree, "the unit worktree"));
       if (digest) this.scratch.updateUnit(f.id, { lastFailure: { ...lastFailure, digest } });
@@ -1973,7 +2338,7 @@ class MissionRun {
     switch (out.action) {
       case "retry_with_hint":
         f.hint = out.hint;
-        await git.resetHard(wt, testsCommit); // the next rung starts fresh from the tests
+        await this.restoreFeatureWork(f,wt,testsCommit); // the next rung starts fresh from the tests
         this.save();
         return;
       case "amend_tests":
@@ -1992,7 +2357,7 @@ class MissionRun {
 
   private async reviewStep(f: Feature): Promise<void> {
     const wt = await this.ensureUnitWorktree(f);
-    await this.deps.git.resetHard(wt, need(f.passingCommit, "the passing commit")); // drops a fix interrupted mid-way
+    await this.restoreFeatureWork(f,wt,need(f.passingCommit,"the passing commit")); // drops a fix interrupted mid-way
     for (;;) {
       // The work the owner is about to look at was reviewed once already; a resume must not ask the reviewer again.
       if (!this.reviewSettled(f)) {
@@ -2038,12 +2403,12 @@ class MissionRun {
   }
 
   /**
-   * A feature checked by tests, in a mission that also has a feature checked by reading: the files it made that a later feature is planned to
+   * Any feature in a multi-feature mission: the files it made that a later feature is planned to
    * make (real run R6). Recorded on the feature, so the report and the look can say it; nothing is undone or refused. Text only: the plan's words
    * are compared with the file names git lists and are never used as a path. When git cannot say, nothing is recorded.
    */
   private async noteLaterFeatureFiles(f: Feature, wt: string): Promise<void> {
-    if (isModeFeature(f) || !hasModeFeature(this.m.features)) return;
+    if (this.m.features.length < 2) return;
     let found: AlsoMade[] = [];
     try {
       found = laterFeatureFiles(this.m, f, (await this.deps.git.changedFilesByKind(wt, this.m.integrationBranch)).added);
@@ -2082,7 +2447,9 @@ class MissionRun {
   }
 
   private async review(f: Feature, wt: string): Promise<Finding[] | null> {
+    const subject = { kind: "feature_commit", featureId: f.id, commit: f.passingCommit ?? await this.deps.git.headSha(wt) } as const;
     const answer = await this.agent<ReviewOutput>({
+      evidence: { scope: { kind: "feature", featureId: f.id }, stage: "review", baseSubject: subject },
       role: "reviewer",
       label: `review-${f.id}`,
       feature: f.id,
@@ -2095,17 +2462,92 @@ class MissionRun {
       schema: SCHEMAS.review,
       access: "read-only",
     });
-    return answer.out?.findings ?? null;
+    const usable = this.recordReview(subject, answer, !!answer.out, f);
+    if (!usable && answer.out) this.keepOpen(f, answer.out.findings);
+    return usable ? answer.out?.findings ?? null : null;
+  }
+
+  /** Save all finding projections with their audit in one transaction. */
+  private findingTransaction(update: () => void): void {
+    const before = this.m.features.map(f => ({ f, present: Object.hasOwn(f, "findingHistory"), history: f.findingHistory, open: f.openFindings, uncertain: f.findingHistoryUncertain, hasUncertain: Object.hasOwn(f, "findingHistoryUncertain") }));
+    const notes = [...this.m.notes];
+    try {
+      update();
+      if (before.some(b => !isDeepStrictEqual(b.history, b.f.findingHistory) || !isDeepStrictEqual(b.open, b.f.openFindings) || b.uncertain !== b.f.findingHistoryUncertain) || !isDeepStrictEqual(notes, this.m.notes)) this.save();
+    } catch (cause) {
+      for (const b of before) {
+        const priorIds = new Set(b.open.map(finding => findingId(b.f.id, finding)));
+        const newlyOpen = b.f.openFindings.filter(finding => !priorIds.has(findingId(b.f.id, finding)));
+        if (b.present) b.f.findingHistory = b.history; else delete b.f.findingHistory;
+        b.f.openFindings = b.open;
+        if (b.hasUncertain) b.f.findingHistoryUncertain = b.uncertain; else delete b.f.findingHistoryUncertain;
+        // A best-effort stop save must not resurrect an old closure after a failed reopening save.
+        if (newlyOpen.length) { b.f.openFindings = [...b.open, ...newlyOpen]; b.f.findingHistoryUncertain = true; }
+      }
+      this.m.notes = notes;
+      throw new InvocationPersistenceError("Mission paused: finding history and open concerns could not be saved together.", { cause });
+    }
+  }
+
+  private uncertainFindings(f: Feature): void {
+    f.findingHistoryUncertain = true;
+    const note = `The finding history for “${f.title}” could not be interpreted. Its retained concerns stay open; no resolution is assumed.`;
+    if (!this.m.notes.includes(note)) this.m.notes.push(note);
   }
 
   private keepOpen(f: Feature, findings: Finding[]): void {
-    const known = new Set(f.openFindings.map(findingKey));
-    for (const finding of findings) {
-      if (known.has(findingKey(finding))) continue;
-      known.add(findingKey(finding));
-      f.openFindings.push(finding);
-    }
-    this.save();
+    if (findings.length === 0) return;
+    this.findingTransaction(() => {
+      const known = new Set(f.openFindings.map(x => findingId(f.id, x)));
+      f.openFindings = [...f.openFindings];
+      for (const finding of findings) {
+        const id = findingId(f.id, finding);
+        if (known.has(id)) continue;
+        known.add(id); f.openFindings.push(finding);
+      }
+      if (f.findingHistoryUncertain !== undefined) { this.uncertainFindings(f); return; }
+      // Seed old open rows first. Only the fresh findings below can reopen a past resolution.
+      const seeded = retainFindings(f.findingHistory, f.id, f.openFindings);
+      const retained = seeded && rediscoverFindings(seeded, f.id, findings, new Date(this.deps.clock.now()).toISOString());
+      if (retained) f.findingHistory = retained;
+      else this.uncertainFindings(f); // preserve damaged raw history and all newly reported concerns
+    });
+  }
+
+  private refreshFindings(head: string, review?: { answer: AgentAnswer<FinalReviewOutput>; context: FindingAssessmentContext },persist=true): void {
+    const edit=() => {
+      for (const f of this.m.features) {
+        if (f.findingHistoryUncertain !== undefined) { this.uncertainFindings(f); continue; }
+        if (f.findingHistory === undefined && f.openFindings.length === 0) continue;
+        let history = retainFindings(f.findingHistory, f.id, f.openFindings);
+        if (!history) { this.uncertainFindings(f); continue; }
+        if (review?.answer.out) {
+          const known = new Set(history.records.map(row => row.id));
+          const reported = review.answer.out.findings.filter(finding => known.has(findingId(f.id, finding)));
+          const repeated = new Set(reported.map(finding => findingId(f.id, finding)));
+          const rediscovered = rediscoverFindings(history, f.id, reported, review.context.at);
+          if (!rediscovered) {
+            const retained = new Map(f.openFindings.map(finding => [findingId(f.id, finding), finding]));
+            for (const finding of reported) retained.set(findingId(f.id, finding), finding);
+            f.openFindings = [...retained.values()]; this.uncertainFindings(f); continue;
+          }
+          history = rediscovered;
+          // Keep every raw ID for duplicate counting; contradictory known findings supply no usable resolution.
+          const responses = review.answer.out.resolutions.map(row => repeated.has(row.id) ? { id: row.id } : row);
+          const assessed = assessFindings(history, f.id, responses, review.context);
+          if (assessed) history = assessed;
+          else this.uncertainFindings(f);
+        }
+        const open = currentOpenFindings(history, f.id, head);
+        if (!open) { this.uncertainFindings(f); continue; }
+        f.findingHistory = history; f.openFindings = open.map(row => row.finding);
+      }
+    };
+    if(persist)this.findingTransaction(edit);else edit();
+  }
+
+  private async refreshIntegrationFindings(): Promise<void> {
+    if (await this.hasIntegrationBranch()) this.refreshFindings(await this.deps.git.headSha(this.m.repoPath, this.m.integrationBranch));
   }
 
   /** A fix round by the engineer that passed; true when it is green again (new passingCommit), else rolled back. */
@@ -2113,6 +2555,7 @@ class MissionRun {
     if (isModeFeature(f)) return this.fixDeliverable(f, wt, findings);
     const assignment = this.passingAssignment(f);
     const answer = await this.agent<BuildOutput>({
+      evidence: { scope: { kind: "feature" as const, featureId: f.id }, stage: "fix" },
       role: "engineer",
       label: `fix-${f.id}`,
       feature: f.id,
@@ -2126,6 +2569,7 @@ class MissionRun {
     await this.keepOnBranch(wt, need(f.branch, "the unit branch"));
     const round = f.reviewRounds + 1;
     await this.deps.git.commitAll(wt, `fix(${f.id}): review round ${round}`);
+    await this.checkpointWork(wt,f);
     const check = await this.checkUnit(f, `fix${round}`);
     const signature = check.verify.signature || undefined;
     this.recordAttempt(f, {
@@ -2135,10 +2579,11 @@ class MissionRun {
       summary: check.pass ? passSummary(answer, check) : failureSummary(answer.result, check),
     });
     if (!check.pass) {
-      await this.deps.git.resetHard(wt, need(f.passingCommit, "the passing commit"));
+      await this.restoreFeatureWork(f,wt,need(f.passingCommit,"the passing commit"));
       return false;
     }
-    f.passingCommit = await this.deps.git.headSha(wt);
+    const head=await this.deps.git.headSha(wt);
+    await this.checkpointWork(wt,f,undefined,()=>{f.passingCommit=head;},head);
     this.scratch.updateUnit(f.id, { passTail: check.verify.outputTail });
     this.save();
     return true;
@@ -2172,10 +2617,11 @@ class MissionRun {
     const wt = need(f.worktree, "the unit worktree");
     const firstBuild = !f.attempts.some((a) => a.action === "build");
     const fileList = await this.repoFiles(wt);
-    const contextPack = firstBuild ? await this.scout<ContextPackOutput>(`context-${f.id}`, contextPackPrompt(this.m, f, fileList), SCHEMAS.contextPack, wt) : null;
+    const contextPack = firstBuild && missionHelpers(this.m).contextPack ? await this.scout<ContextPackOutput>(`context-${f.id}`, contextPackPrompt(this.m, f, fileList), SCHEMAS.contextPack, wt) : null;
     const assignment = this.rungAssignment(rung);
     const last = this.scratch.unit(f.id).lastFailure;
     const answer = await this.agent<BuildOutput>({
+      evidence: { scope: { kind: "feature" as const, featureId: f.id }, stage: "build" },
       role: "engineer",
       label: `build-${f.id}`,
       feature: f.id,
@@ -2190,6 +2636,7 @@ class MissionRun {
     await this.keepOnBranch(wt, need(f.branch, "the unit branch"));
     const n = f.attempts.filter((a) => a.action === "build").length + 1;
     await this.deps.git.commitAll(wt, `wip(${f.id}): attempt ${n}`);
+    await this.checkpointWork(wt,f);
     const check = await this.checkDeliverable(f, `a${n}`);
     if (check.pass) return this.passMake(f, answer, assignment, check);
     await this.failMake(f, answer, assignment, check);
@@ -2203,11 +2650,11 @@ class MissionRun {
       summary: `${answer.out?.summary || "Mission Control's own checks passed"}${putBack}`,
     });
     const wt = need(f.worktree, "the unit worktree");
-    f.passingCommit = await this.deps.git.headSha(wt);
-    f.builtBy = answer.family;
-    this.lastChecks.set(f.id, { commit: f.passingCommit, result: check });
+    const head=await this.deps.git.headSha(wt),from=f.status;
+    this.lastChecks.set(f.id, { commit: head, result: check });
     this.scratch.updateUnit(f.id, { lastFailure: undefined });
-    this.setStatus(f, "reviewing");
+    await this.checkpointWork(wt,f,undefined,()=>{f.passingCommit=head;f.builtBy=answer.family;f.status="reviewing";},head);
+    this.statusRecorded(f,from);
   }
 
   /** Records the failure, keeps the problems for the next brief and moves to the next rung. No digest and no diagnosis: the problems are already plain words. */
@@ -2369,7 +2816,7 @@ class MissionRun {
       } catch {
         result = { pages: [], taken: 0, why: "start_failed" };
       }
-      this.event("pictures.taken", { feature: f.id, taken: result.taken, ...(result.taken === 0 && result.why !== undefined && { why: result.why }) });
+      this.event("pictures.taken", { feature: f.id, taken: result.taken, ...(result.taken === 0 && result.why !== undefined && { why: result.why }), ...(result.detail && { detail: cleanAiText(result.detail, 300) }) });
     }
     const drawn = new Map<string, RenderedPage>(result.pages.map((page) => [page.path, page]));
     const outcomes: RuleOutcome[] = [];
@@ -2491,6 +2938,7 @@ class MissionRun {
    * in `f.checked` (spec 8.3). null: the check did not finish (its answer was unusable twice, or it did not run).
    */
   private async rubricCheck(f: Feature, wt: string): Promise<Extract<RubricJudgement, { ok: true }> | null> {
+    const subject = { kind: "feature_commit", featureId: f.id, commit: f.passingCommit ?? await this.deps.git.headSha(wt) } as const;
     const check = await this.checkedFiles(f, wt);
     const pictures = [...check.pictures.pages, ...check.pictures.images];
     const { assignment, offered } = this.checkerFor(f, pictures.length > 0);
@@ -2507,6 +2955,7 @@ class MissionRun {
     let problem: string | undefined;
     for (let attempt = 1; attempt <= 2; attempt++) {
       const answer = await this.agent<RubricOutput>({
+        evidence: { scope: { kind: "feature", featureId: f.id }, stage: "review", baseSubject: subject },
         role: "reviewer",
         label: `review-${f.id}`,
         feature: f.id,
@@ -2519,6 +2968,7 @@ class MissionRun {
         ...(offered && check.pictures.pages.length > 0 && { readDirs: [this.picturesDir()] }),
       });
       if (!answer.out) {
+        this.recordReview(subject, answer, false, f);
         problem = runFailure(answer.result);
         continue;
       }
@@ -2537,8 +2987,15 @@ class MissionRun {
         pictures: offered ? pictures.map((p) => p.path) : [],
       });
       if (!judged.ok) {
+        this.recordReview(subject, answer, false, f);
         problem = judged.problem;
         continue;
+      }
+      if (!this.recordReview(subject, answer, true, f)) {
+        this.keepOpen(f, [...judged.findings, ...judged.minorFindings]);
+        // Provenance uncertainty alone must not buy another AI review.
+        problem = "The review did not provide usable evidence for the unchanged committed result.";
+        break;
       }
       this.recordChecked(f, check, { judged, reviewer: answer.family, offered });
       return judged;
@@ -2583,6 +3040,7 @@ class MissionRun {
   private async fixDeliverable(f: Feature, wt: string, findings: Finding[]): Promise<boolean> {
     const assignment = this.passingAssignment(f);
     const answer = await this.agent<BuildOutput>({
+      evidence: { scope: { kind: "feature" as const, featureId: f.id }, stage: "fix" },
       role: "engineer",
       label: `fix-${f.id}`,
       feature: f.id,
@@ -2597,6 +3055,7 @@ class MissionRun {
     await this.keepOnBranch(wt, need(f.branch, "the unit branch"));
     const round = f.reviewRounds + 1;
     await this.deps.git.commitAll(wt, `fix(${f.id}): review round ${round}`);
+    await this.checkpointWork(wt,f);
     const check = await this.checkDeliverable(f, `fix${round}`);
     this.recordAttempt(f, {
       ...attemptRun(f.rung, "fix", answer, assignment),
@@ -2604,13 +3063,14 @@ class MissionRun {
       summary: check.pass ? answer.out?.summary || "Mission Control's own checks passed" : [...(answer.result.outcome !== "ok" ? [`the agent run ended "${answer.result.outcome}"`] : []), ...check.problems].join("; "),
     });
     if (!check.pass) {
-      await this.deps.git.resetHard(wt, need(f.passingCommit, "the passing commit"));
+      await this.restoreFeatureWork(f,wt,need(f.passingCommit,"the passing commit"));
       // The pictures of the fix that was rolled back are on disk under the names of the work that stays: draw them again.
       if (check.pictures.expected) await this.restorePictures(f, wt);
       return false;
     }
-    f.passingCommit = await this.deps.git.headSha(wt);
-    this.lastChecks.set(f.id, { commit: f.passingCommit, result: check });
+    const head=await this.deps.git.headSha(wt);
+    await this.checkpointWork(wt,f,undefined,()=>{f.passingCommit=head;},head);
+    this.lastChecks.set(f.id, { commit: head, result: check });
     this.save();
     return true;
   }
@@ -2624,20 +3084,88 @@ class MissionRun {
   private async merge(f: Feature): Promise<void> {
     const { git } = this.deps;
     const target = await this.ensureIntegrationWorktree();
-    if (!(await git.isClean(target))) await git.resetHard(target, "HEAD"); // leftovers of an earlier verify run
+    if (!(await git.isClean(target))) {
+      atomicMissionEvidence(this.m,()=>this.save(),()=>{this.m.provenanceUncertain=true;});
+      await this.reap();await git.resetHard(target,"HEAD");
+    }
     const source = f.passingCommit ?? need(f.branch, "the unit branch");
-    const result = await git.merge(target, source, `feat(${f.id}): ${f.title}`);
+    const passingCommit=await git.headSha(target,source);
+    const scope={kind:"application"} as const;
+    const before=await captureWorktree(target,scope);
+    const beforeCommitted=before.head?await captureCommittedTree(target,scope,before.head):before;
+    const cp=this.retainedController().checkpoint({kind:"feature",featureId:f.id},passingCommit);
+    const selection=cp?.selection.subject.kind==="feature_commit"?cp.selection:cp?.writesSelection;
+    const selectedWrite=selection?.subject.kind==="feature_commit"&&selection.subject.featureId===f.id&&selection.subject.commit===passingCommit
+      ? (Array.isArray(f.provenance?.retained)?f.provenance.retained.find(row=>row?.kind==="writes"&&isDeepStrictEqual(row.subject,selection.subject)&&(row.revision??null)===selection.revision):undefined):undefined;
+    const snapshotRevision=selectedWrite?selection!.revision:null;
+    const prior=readApplicationLedger(this.m.applicationLedger);
+    // A persisted earlier operation is not this receipt. Even a successful new no-op cannot close that save gap.
+    const started=prior.ok&&!prior.ledger.pendingMerge&&!!selectedWrite?beginApplicationMerge(prior.ledger,{capture:before,committed:beforeCommitted,
+      attemptId:randomUUID(),featureId:f.id,passingCommit,snapshotRevision}):undefined;
+    atomicMissionEvidence(this.m,()=>this.save(),()=>{
+      if(started?.ok)this.m.applicationLedger=started.ledger;
+      else this.m.provenanceUncertain=true;
+    });
+    const result = await git.merge(target, passingCommit, `feat(${f.id}): ${f.title}`);
     if (!result.ok) {
+      atomicMissionEvidence(this.m,()=>this.save(),()=>{this.m.provenanceUncertain=true;});
       return this.blockFeature(f, result.conflict ? "its changes conflicted with work merged earlier (merge conflict)" : `merging it failed: ${result.error}`);
     }
-    if (!(await git.isAncestor(target, source, "HEAD"))) {
+    if (!(await git.isAncestor(target, passingCommit, "HEAD"))) {
+      atomicMissionEvidence(this.m,()=>this.save(),()=>{this.m.provenanceUncertain=true;});
       return this.blockFeature(f, "its checked work did not end up in the mission branch when it was merged");
     }
-    f.commit = result.sha;
+    const exact=!!before.head&&await git.confirmMergeReceipt(target,before.head,passingCommit,result.sha);
+    const after=await captureWorktree(target,scope),committed=await captureCommittedTree(target,scope,result.sha);
+    const finished=started?.ok&&exact?finishApplicationMerge(started.ledger,{capture:after,committed,receipt:{
+      attemptId:started.ledger.pendingMerge!.attemptId,beforeHead:before.head!,passingCommit,returnedHead:result.sha,observedHead:after.head??"",
+      successful:true,sourceIsAncestor:await git.isAncestor(target,passingCommit,result.sha),
+      previousHeadIsAncestor:await git.isAncestor(target,before.head!,result.sha)}}):undefined;
+    const from=f.status;
+    const reopened=new Map<string,Finding[]>();
+    try { atomicMissionEvidence(this.m,()=>this.save(),()=>{
+      if(after.head&&/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(after.head))this.refreshFindings(after.head,undefined,false);
+      else for(const feature of this.m.features) {
+        const history=retainFindings(feature.findingHistory,feature.id,feature.openFindings);
+        if(history)feature.openFindings=history.records.map(row=>row.finding);
+        this.uncertainFindings(feature);
+      }
+      for(const feature of this.m.features)reopened.set(feature.id,[...feature.openFindings]);
+      if(finished?.ok && !Object.hasOwn(this.m,"provenanceUncertain")) {
+        const ledger=finished.ledger,tracked=Array.isArray(this.m.workTracking?.scopes)?this.m.workTracking.scopes.find(s=>s?.scope?.kind==="application"):undefined;
+        const scaffold=Array.isArray(this.m.provenance?.retained)?this.m.provenance.retained.find(row=>row?.kind==="writes"&&row.subject?.kind==="application_commit"&&
+          row.subject.commit===ledger.scaffold.commit&&(row.revision??null)===ledger.scaffold.snapshotRevision):undefined;
+        const appPending=pendingWrites(this.m.workTracking,journalOf(this.m),scope);
+        const featureCoverage=ledger.features.every(ref=>{
+          const feature=this.m.features.find(row=>row.id===ref.featureId);
+          if(!feature || Object.hasOwn(feature,"provenanceUncertain"))return false;
+          const pending=pendingWrites(this.m.workTracking,journalOf(this.m),{kind:"feature",featureId:ref.featureId});
+          const row=Array.isArray(feature.provenance?.retained)?feature.provenance.retained.find(row=>row?.kind==="writes"&&row.subject?.kind==="feature_commit"&&
+            row.subject.commit===ref.passingCommit&&(row.revision??null)===ref.snapshotRevision):undefined;
+          return pending.ok&&pending.complete&&row?.complete===true;
+        });
+        const published=appendApplicationSnapshot(this.m.provenance,{kind:"writes",subject:{kind:"application_commit",commit:ledger.head},
+          complete:featureCoverage&&appPending.ok&&appPending.complete&&tracked?.capture?.head===ledger.scaffold.commit&&
+            !Object.hasOwn(this.m,"provenanceUncertain")&&(!ledger.scaffold.hasRetainedAiWork||scaffold?.complete===true),
+          jobIds:scaffold?.jobIds??[],baseline:ledger.baseline,featureRefs:ledger.features});
+        this.m.applicationLedger=ledger;
+        if(published.ok)this.m.provenance=published.provenance;else this.m.provenanceUncertain=true;
+      } else this.m.provenanceUncertain=true;
+      f.commit=result.sha;f.status="done";
+
+    }); } catch(error) {
+      // Git already changed. A failed durable projection must not revive an older closed concern in the stop save.
+      for(const feature of this.m.features) {
+        const prior=new Set(feature.openFindings.map(row=>findingId(feature.id,row)));
+        const newlyOpen=(reopened.get(feature.id)??[]).filter(row=>!prior.has(findingId(feature.id,row)));
+        if(newlyOpen.length){feature.openFindings=[...feature.openFindings,...newlyOpen];feature.findingHistoryUncertain=true;}
+      }
+      throw error;
+    }
     this.event("merge", { feature: f.id, commit: result.sha });
     await this.removeUnitWorktree(f);
-    f.branch = undefined;
-    this.setStatus(f, "done");
+    f.branch = undefined;this.save();
+    this.statusRecorded(f,from);
   }
 
   // ───────────── Stage: gate C ─────────────
@@ -2646,6 +3174,10 @@ class MissionRun {
     const { m } = this;
     if (!m.features.some((f) => f.status === "done")) return this.setStage("finalize");
     const wt = await this.ensureIntegrationWorktree();
+    const head = await this.deps.git.headSha(wt);
+    const initialCapture = await captureCommittedTree(wt, { kind: "application" }, head);
+    const initiallyClean = await this.deps.git.isClean(wt);
+    this.refreshFindings(head);
     const full = await this.installAndVerify(wt, "gate-c");
     // Failures of a baseline that was already red are not the mission's to fix; the finished features' own
     // acceptance tests, run together on the merged result, are what must pass then.
@@ -2658,10 +3190,25 @@ class MissionRun {
       regression && !regression.ok
         ? `The finished features' acceptance tests, run together on the merged result, FAILED:\n${regression.outputTail}\n\nThe project's own full check (already failing before this mission):\n${full.outputTail}`
         : full.outputTail;
-    const findings = await this.finalReview(wt, tail);
+    const verifiedCapture = await captureCommittedTree(wt, { kind: "application" }, head);
+    const verifiedSubject = initialCapture.complete && verifiedCapture.complete && isDeepStrictEqual(initialCapture, verifiedCapture) && initiallyClean && await this.deps.git.isClean(wt) && await this.deps.git.headSha(wt) === head;
+    const answer = await this.finalReview(wt, tail, head);
+    const afterHead = await this.deps.git.headSha(wt);
+    const clean = await this.deps.git.isClean(wt);
+    const unchanged = verifiedSubject && afterHead === head;
+    const usable = this.recordReview({ kind: "application_commit", commit: head }, answer,
+      answer.out !== null && answer.result.readonlyMutation === undefined && clean && unchanged && !!answer.jobId);
+    const findings = answer.out?.findings ?? null; // New concerns stay visible even if this review cannot confer credit.
+    if (!usable) this.noteOnce("The final review did not provide usable evidence for the unchanged integrated result.");
+    this.refreshFindings(afterHead, { answer, context: {
+      currentCommit: afterHead, reviewedCommit: head, completed: usable, clean, unchanged,
+      jobId: answer.jobId ?? "", actual: { provider: answer.provider, model: answer.model, family: answer.family },
+      at: new Date(this.deps.clock.now()).toISOString(),
+      verification: { commit: head, passed: verifiedSubject && (m.baselineBroken ? regression?.ok === true : full.ok) },
+    } });
     const blocking = (findings ?? []).filter(isBlocking);
-    // Only once the review ran: a mission stopped before it (by the run cap) must not count as checked.
-    this.scratch.setFinalVerify({ ok, head: await this.deps.git.headSha(wt), reviewed: findings !== null, blocking: blocking.length, ...(nothingJudged && { judged: false as const }) });
+    // Verification belongs to its original subject, never whatever HEAD a reviewer leaves behind.
+    this.scratch.setFinalVerify({ ok: ok && clean && unchanged, head, reviewed: usable, blocking: blocking.length, ...(nothingJudged && { judged: false as const }) });
     const verifyRed = !ok;
     for (const finding of (findings ?? []).filter((x) => !isBlocking(x))) this.noteFinding(finding);
     if ((blocking.length > 0 || verifyRed) && m.gateCRounds < this.deps.config.limits.maxGateCRounds) {
@@ -2689,10 +3236,11 @@ class MissionRun {
   }
 
   /** The reviewer at frontier tier, from the family that did NOT build most of the done features. */
-  private async finalReview(wt: string, verifyTail: string): Promise<Finding[] | null> {
+  private async finalReview(wt: string, verifyTail: string, head: string): Promise<AgentAnswer<FinalReviewOutput>> {
     const builder = majorityBuilder(this.m.features);
     const reviewer = this.assign("reviewer", builder);
-    const answer = await this.agent<ReviewOutput>({
+    const answer = await this.agent<FinalReviewOutput>({
+      evidence: { scope: { kind: "application" }, stage: "final_review", baseSubject: { kind: "application_commit", commit: head } },
       role: "reviewer",
       label: "gate-c",
       assignment: { ...reviewer, tier: roleOverride(this.m, "reviewer").tier ?? "frontier" },
@@ -2701,12 +3249,14 @@ class MissionRun {
         diff: await this.promptDiff(wt, need(this.m.baseSha, "the mission's base commit")),
         verifyTail,
         features: this.m.features,
+        outstanding: this.m.features.flatMap(f => (f.findingHistoryUncertain !== undefined ? [] : currentOpenFindings(f.findingHistory, f.id, head) ?? [])
+          .map(row => ({ id: row.id, originFeatureId: row.originFeatureId, finding: row.finding }))),
       }),
-      schema: SCHEMAS.review,
+      schema: SCHEMAS.finalReview,
       access: "read-only",
     });
     if (!answer.out) this.noteOnce("The final review did not finish.");
-    return answer.out?.findings ?? null;
+    return answer;
   }
 
   /**
@@ -2789,6 +3339,7 @@ class MissionRun {
    * but "Done" tells the owner everything is fine, so open serious findings make it partly done, with a decision.
    */
   private async settleStatus(): Promise<void> {
+    await this.refreshIntegrationFindings();
     const { m } = this;
     if (m.status === "failed" || m.status === "stopped" || m.status === "partial") return;
     const allDone = m.features.length > 0 && m.features.every((f) => f.status === "done");
@@ -2814,6 +3365,7 @@ class MissionRun {
   /** Why the reviews keep the mission from "done", in plain words; empty when nothing serious is open. */
   private openReviewConcerns(): string[] {
     const concerns: string[] = [];
+    if (this.m.features.some(f => f.findingHistoryUncertain !== undefined || (f.findingHistory !== undefined && !retainFindings(f.findingHistory, f.id, [])))) concerns.push("some saved finding history could not be interpreted");
     const final = this.scratch.finalVerify();
     if (final?.reviewed === false) concerns.push("the final review of the whole app did not finish, so nobody reviewed it as a whole");
     else if ((final?.blocking ?? 0) > 0) concerns.push(`the final review found ${plural(final?.blocking ?? 0, "serious problem")} that ${final?.blocking === 1 ? "was" : "were"} not fixed`);
@@ -2842,6 +3394,7 @@ class MissionRun {
   }
 
   private async reportProse(): Promise<ReportProseOutput | null> {
+    if (!missionHelpers(this.m).reportProse) return null;
     const facts = buildReportFacts(this.m, this.deps.store.readUsage());
     try {
       return await this.scout<ReportProseOutput>("report-prose", reportProsePrompt(this.m, facts), SCHEMAS.reportProse, this.missionDir());
@@ -3059,6 +3612,7 @@ class MissionRun {
         };
       }
       case "final": {
+        await this.refreshIntegrationFindings();
         const done = m.features.filter((x) => x.status === "done").length;
         const byReading = m.features.filter((x) => x.status === "done" && isModeFeature(x));
         const stuck = m.features.filter((x) => x.status === "blocked");
@@ -3107,6 +3661,7 @@ class MissionRun {
     const lines: string[] = [];
     if (failed) lines.push("Your change could not be made, so this is the earlier version.");
     lines.push(`“${title}” is built. No tests were written for it. ${unfinished ? "The second AI's check did not finish." : "A second AI checked it against your list."}`);
+    lines.push(...alsoMadeSentences(m, feature));
     // The second showing after a send-back: the owner's note again, and what was and was not done about it (real run R4: the note was only in a table far below).
     if (note !== undefined && !failed) lines.push(...afterSendBackLines(note));
     if (c !== undefined && !unfinished) {
@@ -3345,6 +3900,7 @@ interface Guard {
 
 /** An agent run in progress (see MissionRun.run): still there on the next start means Mission Control died during it. */
 interface InflightRun {
+  jobId?: string;
   label: string;
   feature?: string;
   optional?: boolean;
@@ -3434,12 +3990,21 @@ class Scratch {
 
   inflight(): InflightRun | undefined {
     const marker = this.data.inflight;
-    return isRecord(marker) && typeof marker.label === "string" ? marker : undefined;
+    return marker; // the authoritative recovery validator rejects a present damaged marker
   }
 
   setInflight(marker: InflightRun | undefined): void {
     if (marker === undefined && this.data.inflight === undefined) return;
     this.data.inflight = marker;
+    this.write();
+  }
+
+  interruptionCounts(): Record<string, number> {
+    return this.data.interruptions ?? {};
+  }
+
+  syncInterruptions(counts: Record<string, number>): void {
+    this.data.interruptions = { ...counts };
     this.write();
   }
 
@@ -3588,8 +4153,7 @@ function addedLines(diff: string): string[] {
 
 /** A read-only git command in a worktree: no hooks, no filters that run programs, no fsmonitor. Stdout is cut at 12 MB (the checks read at most 1 MB of a file). */
 async function gitRead(cwd: string, args: string[]): Promise<{ ok: boolean; stdout: string }> {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX"]) delete env[name];
+  const env = controllerGitEnv();
   const r = await runProcess({
     command: "git",
     args: ["-c", "core.quotepath=off", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "--literal-pathspecs", ...args],
@@ -3918,7 +4482,7 @@ function readPackageJson(wt: string): { text: string; json: Record<string, unkno
 }
 
 /** Puts the protected package.json scripts back as they were; returns the names it had to restore. */
-function restoreScripts(wt: string, saved: Record<string, string>): string[] {
+function restoreScripts(wt: string, saved: Record<string, string>, beforeWrite:()=>void): string[] {
   const names = Object.keys(saved);
   if (names.length === 0) return [];
   const pkg = readPackageJson(wt);
@@ -3926,6 +4490,7 @@ function restoreScripts(wt: string, saved: Record<string, string>): string[] {
   const scripts: Record<string, unknown> = isRecord(pkg.json.scripts) ? { ...pkg.json.scripts } : {};
   const changed = names.filter((n) => scripts[n] !== saved[n]);
   if (changed.length === 0) return [];
+  beforeWrite(); // durable uncertainty before the first controller mutation, including a failed write
   for (const n of changed) scripts[n] = saved[n];
   const indent = /^[ \t]+(?=")/m.exec(pkg.text)?.[0] ?? "  ";
   writeFileSync(join(wt, "package.json"), `${JSON.stringify({ ...pkg.json, scripts }, null, indent)}${pkg.text.endsWith("\n") ? "\n" : ""}`);
@@ -4044,7 +4609,7 @@ async function gitConfigEntries(file: string): Promise<string[] | null> {
     command: "git",
     args: ["config", "--file", file, "--no-includes", "--null", "--list"],
     cwd: dirname(file),
-    env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" },
+    env: controllerGitEnv({ isolatedConfig: true }),
     timeoutMs: REPO_FILES_TIMEOUT_MS,
   });
   if (r.exitCode !== 0) return null;

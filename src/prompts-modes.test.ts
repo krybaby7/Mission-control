@@ -19,7 +19,14 @@ describe("the prompts of a mission with no mode feature", () => {
   });
 
   it.each(Object.keys(now))("%s is exactly the text of the end of wave 1", (name) => {
-    expect(now[name]).toBe(readFileSync(join(GOLDEN_DIR, `${name}.txt`), "utf8"));
+    const historical = readFileSync(join(GOLDEN_DIR, `${name}.txt`), "utf8");
+    let expected = name.startsWith("spec") ? historical.replace("Answer with JSON matching the output schema.", "Answer with JSON matching the output schema.\n\nUse normal JSON escaping once. Parsed strings are preserved literally: do not double-escape intended newlines or quotation marks; keep intentional backslash text literal.") : historical;
+    if (name.startsWith("gateC")) {
+      expected = expected.replace('Answer with JSON: `verdict` ("approve" when there is no blocker or major finding, otherwise "changes") and `findings`.',
+        'Answer with JSON: `verdict` ("approve" when there is no blocker or major finding, otherwise "changes"), `findings`, and `resolutions`.\n\nFor each outstanding ID below, report one outcome: "resolved", "open" or "cannot_judge", with specific evidence from the current integrated files. Do not invent IDs. Omission, duplicate IDs or empty evidence do not close a concern. Include an empty resolutions array when none are listed.');
+      expected = expected.replace("## Full verification output (end)", "## Outstanding findings to assess\n\n(none)\n\n## Full verification output (end)");
+    }
+    expect(now[name]).toBe(expected); // Only the specified planner/final-review additions; all historical fixture bytes stay intact.
   });
 });
 

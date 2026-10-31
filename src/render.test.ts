@@ -442,3 +442,33 @@ describe.skipIf(chromium === undefined || !haveTool)("a real render with the loc
     expect(out.why).toBe("too_slow");
   }, 90_000);
 });
+
+describe("browser positive launch policy", () => {
+  it("passes a controlled environment to Playwright without provider or injection settings", async () => {
+    vi.resetModules();
+    let launch: Record<string, unknown> | undefined;
+    vi.doMock("playwright-core", () => ({ chromium: { launch: async (options: Record<string, unknown>) => { launch = options; throw new Error("synthetic browser cannot start"); } } }));
+    vi.stubEnv("MC_UNRELATED_SECRET", "synthetic-secret");
+    vi.stubEnv("NODE_OPTIONS", "--require=/tmp/synthetic-missing");
+    vi.stubEnv("CODEX_HOME", "/tmp/synthetic-config");
+    try {
+      const { playwrightRenderer: fresh } = await import("./render.js");
+      const dir = temp();
+      const fake = put(dir, "fake-chrome");
+      put(dir, "index.html", "<title>fixture</title>");
+      const result = await fresh({ env: { MC_CHROMIUM: fake } }).render({ worktree: dir, outDir: join(dir, "out"), featureId: "f", pages: [{ path: "index.html", n: 1 }] });
+      expect(result.why).toBe("start_failed");
+      expect(launch?.env).toBeDefined();
+      const env = launch!.env as Record<string, string>;
+      expect(env).not.toHaveProperty("MC_UNRELATED_SECRET");
+      expect(env).not.toHaveProperty("NODE_OPTIONS");
+      expect(env).not.toHaveProperty("CODEX_HOME");
+      expect(env.HOME).not.toBe(process.env.HOME);
+      expect(existsSync(env.HOME!)).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.doUnmock("playwright-core");
+      vi.resetModules();
+    }
+  });
+});

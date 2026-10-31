@@ -4,7 +4,6 @@
 //
 // Text only. The words of the plan are compared with the names of files that git reports; they are never used as a path, never opened and
 // never run. Nothing here reads a file.
-import { hasModeFeature, isModeFeature } from "./checked-by.js";
 import { shown } from "./checkpoint.js";
 import type { AlsoMade, Feature, Mission } from "./types.js";
 
@@ -37,8 +36,7 @@ function checksOf(f: Pick<Feature, "acceptance">): string {
 
 /**
  * The files among `added` (the files that feature `f` made new in its branch, as git lists them) that belong to a later feature of `m`.
- * Empty for a mission that has no feature checked by reading, and for a feature that is checked by reading itself: for the old way nothing
- * changes. A file belongs to the first later feature that has not started and whose checks name it, in one of two ways:
+ * Empty for a single-feature mission. A file belongs to the first later feature that has not started and whose checks name it, in one of two ways:
  *
  * - the check holds the whole path (`docs/NOTES.md`); or
  * - a line of the plan's contract holds the whole path, and the check holds the file's own name (`NOTES.md`). The contract is for the whole plan,
@@ -47,8 +45,8 @@ function checksOf(f: Pick<Feature, "acceptance">): string {
  * A file that the words of `f` itself name (its title, its story or its checks) is never counted: `f` was asked to make it.
  */
 export function laterFeatureFiles(m: Pick<Mission, "features" | "spec">, f: Pick<Feature, "id" | "title" | "story" | "acceptance" | "mode">, added: readonly string[]): AlsoMade[] {
-  if (!hasModeFeature(m.features) || isModeFeature(f)) return [];
   const features = Array.isArray(m.features) ? m.features : [];
+  if (features.length < 2) return [];
   const at = features.findIndex((x) => x.id === f.id);
   if (at < 0) return [];
   const later = features.slice(at + 1).filter((x) => x.status === "pending");

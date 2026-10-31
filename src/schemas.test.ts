@@ -92,6 +92,10 @@ const samples: { [K in SchemaName]: { valid: unknown; broken: unknown } } = {
     } satisfies ReviewOutput,
     broken: { verdict: "changes", findings: [{ severity: "critical", file: null, description: "x", suggestedTest: null }] },
   },
+  finalReview: {
+    valid: { verdict: "approve", findings: [], resolutions: [{ id: "a".repeat(64), outcome: "cannot_judge", evidence: "No current evidence." }] },
+    broken: { verdict: "approve", findings: [] },
+  },
   diagnosis: {
     valid: { action: "retry_with_hint", hint: "The list re-renders before the insert commits; await the action.", reason: "" } satisfies DiagnosisOutput,
     broken: { action: "retry", hint: "x", reason: "" },
@@ -127,7 +131,7 @@ const names = Object.keys(SCHEMAS) as SchemaName[];
 describe("SCHEMAS", () => {
   it("covers every structured output", () => {
     expect(names.sort()).toEqual(
-      ["build", "contextPack", "diagnosis", "failureDigest", "gate", "init", "onboard", "reportProse", "review", "rubric", "spec", "testAuthor"].sort(),
+      ["build", "contextPack", "diagnosis", "failureDigest", "finalReview", "gate", "init", "onboard", "reportProse", "review", "rubric", "spec", "testAuthor"].sort(),
     );
   });
 
@@ -154,7 +158,7 @@ describe("SCHEMAS", () => {
     const before = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "plans", "golden", "schemas-wave1.json"), "utf8")) as Record<string, unknown>;
     expect(Object.keys(before)).not.toContain("rubric");
     for (const [name, schema] of Object.entries(before)) expect(JSON.stringify(SCHEMAS[name as SchemaName]), name).toBe(JSON.stringify(schema));
-    expect(Object.keys(SCHEMAS)).toEqual([...Object.keys(before), "rubric"]);
+    expect(Object.keys(SCHEMAS).filter(name => name !== "finalReview")).toEqual([...Object.keys(before), "rubric"]);
   });
 
   it("the rubric answer needs the basis of every judgement, a whole number for each check, and only the three results", () => {
@@ -349,17 +353,13 @@ describe("normalizeSpecText (R3-4 of the real runs)", () => {
   const real = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "modes", "real-r3", "revised-contract.txt"), "utf8");
   const withContract = (uiContract: string): SpecOutput => ({ ...spec, uiContract });
 
-  it("the real contract is a list again: a line break for each backslash-n, and plain quotation marks", () => {
+  it("preserves the historical R3 contract literally, including every escape", () => {
     expect(real).not.toContain("\n");
     expect(real.split("\\n")).toHaveLength(10);
     const fixed = normalizeSpecText(withContract(real)).uiContract;
-    const lines = fixed.split("\n");
-    expect(lines).toHaveLength(10);
-    expect(lines[0]).toBe("- The page is the file site/index.html (a static file opened directly; no server route).");
-    expect(lines[3]).toBe('- Benefits container: data-testid="benefits"');
-    expect(lines[5]).toBe('- Get started button: data-testid="get-started", visible text exactly "Get started" (a <button> or an <a> styled as a button)');
-    expect(lines[6]).toBe('- Viewport meta tag: <meta name="viewport" content="width=device-width, initial-scale=1">');
-    expect(fixed).not.toMatch(/\\[n"]/u);
+    expect(fixed).toBe(real);
+    expect(fixed.split("\n")).toHaveLength(1);
+    expect(fixed).toMatch(/\\[n"]/u);
   });
 
   it("works on every string of the plan, and leaves the rest of it as it was", () => {
@@ -371,9 +371,9 @@ describe("normalizeSpecText (R3-4 of the real runs)", () => {
       features: [{ ...spec.features[0]!, title: "Track", story: 'Say \\"hello\\" and \\"bye\\"', acceptance: ['Shows \\"a\\" and \\"b\\"', "fine"] }, spec.features[1]!],
     };
     const fixed = normalizeSpecText(messy);
-    expect(fixed.summary).toBe("First.\nSecond.\nThird.");
-    expect(fixed.assumptions).toEqual(["One.\nTwo.\nThree.", "Plain."]);
-    expect(fixed.features[0]).toMatchObject({ id: "track-habit", title: "Track", story: 'Say "hello" and "bye"', acceptance: ['Shows "a" and "b"', "fine"], kind: "standard", deps: [] });
+    expect(fixed.summary).toBe(messy.summary);
+    expect(fixed.assumptions).toEqual(messy.assumptions);
+    expect(fixed.features[0]).toEqual(messy.features[0]);
     expect(fixed.features[1]).toEqual(spec.features[1]);
     expect(fixed.appName).toBe("Habit Tracker");
   });
@@ -401,16 +401,15 @@ describe("normalizeSpecText (R3-4 of the real runs)", () => {
     }
   });
 
-  it("a title, a story or a check is one line by nature: it may talk about backslash-n on purpose, so only the summary, the assumptions and the contract become lines", () => {
+  it("preserves literal backslash-n in titles, stories, checks and summaries alike", () => {
     const talk = "lines('a\\nb\\nc') returns three items, split on \\n";
     const fixed = normalizeSpecText({ ...spec, summary: "A.\\nB.\\nC.", features: [{ ...spec.features[0]!, title: talk, story: talk, acceptance: [talk] }, spec.features[1]!] });
-    expect(fixed.summary).toBe("A.\nB.\nC.");
+    expect(fixed.summary).toBe("A.\\nB.\\nC.");
     expect(fixed.features[0]).toMatchObject({ title: talk, story: talk, acceptance: [talk] });
     expect(normalizeSpecText({ ...spec, appName: talk }).appName).toBe(talk);
   });
 
-  it("a string with two backslash-n and no real line break is changed even if it is short, and quotes are changed when every one is escaped", () => {
-    expect(normalizeSpecText(withContract("a\\nb\\nc")).uiContract).toBe("a\nb\nc");
-    expect(normalizeSpecText(withContract('data-testid=\\"x\\" and \\"y\\"')).uiContract).toBe('data-testid="x" and "y"');
+  it("preserves repeated escape text as literally as real newlines", () => {
+    for (const text of ["a\\nb\\nc", 'data-testid=\\"x\\" and \\"y\\"', "a\nb\nc"]) expect(normalizeSpecText(withContract(text)).uiContract).toBe(text);
   });
 });

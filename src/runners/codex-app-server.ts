@@ -1,7 +1,9 @@
 // Asks Codex's app server (`codex app-server`, JSON-RPC over stdio) how Codex is logged in and how much of its
 // usage windows is used, the way the Codex app reads them (account/read, account/rateLimits/read; codex 0.162.0).
 import { spawn } from "node:child_process";
-import type { Utilization } from "../types.js";
+import type { AllowanceInput } from "../allowance.js";
+import { validAllowanceTime, validAllowanceUsage } from "../allowance.js";
+import { providerLaunchEnv, type ProviderLaunchOptions } from "../util/launch-env.js";
 import { killTree } from "../util/process.js";
 import { LineSplitter, parseJsonLine } from "../util/ndjson.js";
 
@@ -14,14 +16,17 @@ export interface CodexAccountReading {
   /** The ChatGPT plan ("plus", "pro", …), when known. */
   planType?: string;
   /** account/rateLimits/read as usage windows (five_hour, seven_day, …); empty when unavailable. */
-  utilization: Utilization[];
+  observations: AllowanceInput[];
+  /** All requested answers arrived and the child closed within the deadline. */
+  complete: boolean;
 }
 
 export interface CodexAccountQuery {
   command: string;
-  env: NodeJS.ProcessEnv;
+  launch: ProviderLaunchOptions & { ownedDir: string };
   cwd: string;
   timeoutMs: number;
+  signal?: AbortSignal;
   /** Also ask for the account type (account/read), not only the usage windows. */
   account: boolean;
 }
@@ -43,36 +48,56 @@ type Json = Record<string, unknown>;
  * The session ends as soon as both answers are in; stdin stays open until then, since codex quits on EOF.
  */
 export function readCodexAccount(query: CodexAccountQuery): Promise<CodexAccountReading | undefined> {
+  if (!validMetadataTimeout(query.timeoutMs) || query.signal?.aborted) return Promise.resolve(undefined);
   return new Promise((resolve) => {
     const answers = new Map<number, Json>();
     const expected = query.account ? [ACCOUNT_ID, RATE_LIMITS_ID] : [RATE_LIMITS_ID];
     let settled = false;
+    let finishing = false;
+    let interrupted = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const env = providerLaunchEnv({ purpose: "provider-metadata", provider: "codex", ...query.launch });
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(query.command, ["app-server"], { cwd: query.cwd, env: query.env, stdio: "pipe", detached: true });
+      child = spawn(query.command, ["app-server"], { cwd: query.cwd, env, stdio: "pipe", detached: true });
     } catch {
       resolve(undefined);
       return;
     }
-    const running = (): boolean => child.pid !== undefined && child.exitCode === null && child.signalCode === null;
-    const finish = (): void => {
+    const deliver = (): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      child.stdin?.end(); // codex exits on EOF; one that doesn't is killed shortly after
-      if (running()) {
-        const kill = setTimeout(() => running() && killTree(child.pid ?? 0, "SIGKILL"), EXIT_GRACE_MS);
-        kill.unref();
-        child.once("exit", () => clearTimeout(kill));
-      }
-      resolve(answers.size === 0 ? undefined : reading(answers, query.account));
+      clearTimeout(killTimer);
+      query.signal?.removeEventListener("abort", onAbort);
+      resolve(answers.size === 0 ? undefined : reading(answers, query.account, !interrupted && expected.every((id) => answers.has(id))));
     };
-    const timer = setTimeout(() => {
-      if (running()) killTree(child.pid ?? 0, "SIGKILL"); // it is hung
+    const finish = (): void => {
+      if (finishing || settled) return;
+      finishing = true;
+      child.stdin?.end();
+      if (child.pid === undefined) { deliver(); return; }
+      // Retain the temporary home until close. EOF-ignoring processes and any
+      // descendants holding their pipes are killed before the caller cleans it.
+      killTimer = setTimeout(() => killTree(child.pid ?? 0, "SIGKILL"), EXIT_GRACE_MS);
+      killTimer.unref();
+    };
+    const interrupt = (): void => {
+      interrupted = true;
+      if (child.pid !== undefined) killTree(child.pid, "SIGKILL");
       finish();
-    }, query.timeoutMs);
-    child.on("error", finish);
-    child.on("close", finish);
+    };
+    const onAbort = (): void => interrupt();
+    // The caller's bound covers shutdown too, including an EOF-ignoring child.
+    const timer = setTimeout(interrupt, query.timeoutMs);
+    query.signal?.addEventListener("abort", onAbort, { once: true });
+    if (query.signal?.aborted) onAbort();
+    child.on("error", () => { finish(); if (child.pid === undefined) deliver(); });
+    child.on("close", () => {
+      finish();
+      if (child.pid !== undefined) killTree(child.pid, "SIGKILL");
+      deliver();
+    });
     child.stdin?.on("error", () => {}); // EPIPE when it exits first
     child.stderr?.resume();
     const lines = new LineSplitter();
@@ -96,28 +121,34 @@ export function readCodexAccount(query: CodexAccountQuery): Promise<CodexAccount
   });
 }
 
-function reading(answers: Map<number, Json>, askedAccount: boolean): CodexAccountReading {
-  const out: CodexAccountReading = { utilization: usageWindows(asRecord(answers.get(RATE_LIMITS_ID)?.result)) };
+function reading(answers: Map<number, Json>, askedAccount: boolean, complete: boolean): CodexAccountReading {
+  const out: CodexAccountReading = { observations: usageWindows(asRecord(answers.get(RATE_LIMITS_ID)?.result)), complete };
   const result = asRecord(answers.get(ACCOUNT_ID)?.result);
   if (askedAccount && result && "account" in result) {
     const account = asRecord(result.account);
-    out.accountType = account ? (typeof account.type === "string" ? account.type : "unknown") : null;
+    if (result.account === null) out.accountType = null;
+    else if (account) out.accountType = ["chatgpt", "apiKey", "amazonBedrock"].includes(account.type as string) ? account.type as string : "unknown";
     if (typeof account?.planType === "string") out.planType = account.planType;
   }
   return out;
 }
 
 /** The main bucket's windows: usedPercent is 0-100, resetsAt unix seconds, the window length in minutes. */
-function usageWindows(result: Json | undefined): Utilization[] {
+function usageWindows(result: Json | undefined): AllowanceInput[] {
   const snapshot = asRecord(result?.rateLimits);
-  const windows: Utilization[] = [];
+  const windows: AllowanceInput[] = [];
   for (const raw of [snapshot?.primary, snapshot?.secondary]) {
     const w = asRecord(raw);
     const used = w?.usedPercent;
     const window = windowName(w?.windowDurationMins);
-    if (typeof used !== "number" || !Number.isFinite(used) || window === undefined) continue;
-    const resetsAt = typeof w?.resetsAt === "number" && Number.isFinite(w.resetsAt) ? w.resetsAt * 1000 : undefined;
-    windows.push({ provider: "codex", window, utilization: used / 100, ...(resetsAt !== undefined && { resetsAt }) });
+    if (!w || window === undefined) continue;
+    const convertedReset = typeof w.resetsAt === "number" ? w.resetsAt * 1000 : null;
+    windows.push({
+      window, utilization: validAllowanceUsage(used) ? used / 100 : null,
+      reset: Object.hasOwn(w, "resetsAt")
+        ? { kind: "supplied", value: validAllowanceTime(convertedReset) ? convertedReset : null }
+        : { kind: "omitted" },
+    });
   }
   return windows;
 }
@@ -132,4 +163,9 @@ function windowName(minutes: unknown): string | undefined {
 
 function asRecord(value: unknown): Json | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Json) : undefined;
+}
+
+/** Node timers overflow above this range; invalid bounds must start no child. */
+export function validMetadataTimeout(value: number): boolean {
+  return Number.isFinite(value) && value > 0 && value <= 2_147_483_647;
 }

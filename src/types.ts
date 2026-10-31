@@ -1,4 +1,11 @@
+import type { TrackingState } from "./retained-work.js";
+import type { ApplicationLedger } from "./application-ledger.js";
+import type { WorkRestoreIntent, WorkRestackIntent } from "./retained-controller.js";
+import type { Provenance } from "./provenance.js";
+import type { AllowanceInput, AllowanceReadOptions, AllowanceReadResult } from "./allowance.js";
 // Shared contracts for Mission Control.
+import type { FindingHistory } from "./finding-resolution.js";
+import type { InvocationJournal } from "./invocations.js";
 // Every module codes against these types. Change them only through the integrator.
 
 // ───────────────────────────── Providers, models, roles ─────────────────────────────
@@ -107,7 +114,8 @@ export type RunEvent =
   | { type: "progress"; text: string }
   | { type: "usage"; usage: Usage }
   | { type: "limit"; info: LimitInfo }
-  | { type: "utilization"; info: Utilization };
+  | { type: "utilization"; info: Utilization }
+  | { type: "allowance"; observations: AllowanceInput[] };
 
 export type RunOutcome =
   | "ok" // finished; if outputSchema was given, structured is present and valid
@@ -119,6 +127,8 @@ export type RunOutcome =
   | "crashed"; // CLI missing, spawn failure, unparseable stream, non-zero exit without a result
 
 export interface RunResult {
+  /** Readonly work was changed/restored, or its preservation could not be established. Never grants review credit. */
+  readonlyMutation?: "restored" | "unknown";
   outcome: RunOutcome;
   /** Final assistant text (may be empty). */
   text: string;
@@ -144,6 +154,8 @@ export interface RunOptions {
 }
 
 export interface AgentRunner {
+  /** Metadata only; no model invocation, attempt reservation or usage charge. */
+  readAllowance?(opts?: AllowanceReadOptions): Promise<AllowanceReadResult>;
   readonly provider: Provider;
   run(job: AgentJob, opts?: RunOptions): Promise<RunResult>;
 }
@@ -177,6 +189,12 @@ export interface RoleSettings {
   effort: Effort;
 }
 
+export interface HelperSettings {
+  contextPack: boolean;
+  failureDigest: boolean;
+  reportProse: boolean;
+}
+
 export interface Config {
   version: 1;
   /** Directory where new app repositories are created (supports ~). */
@@ -189,6 +207,8 @@ export interface Config {
   /** Guard: every configured model must be in this list (user rule: no Luna). */
   allowedModels: string[];
   defaultProfile: string;
+  /** Optional input; omitted helper keys resolve to true. Saved missions keep their own snapshot. */
+  helpers?: Partial<HelperSettings>;
   profiles: Record<string, Profile>;
   /** Escalation ladders. Index 0 is the first attempt. */
   ladders: { standard: Rung[]; mechanical: Rung[] };
@@ -220,6 +240,8 @@ export interface Config {
     enabled: boolean;
   };
   pacing: {
+    /** Omitted legacy configurations keep warn; new templates explicitly choose stop. */
+    unknownAllowance?: "stop" | "warn";
     /** Don't START new work on a provider whose 5-hour utilization is above this (0..1). */
     maxFiveHourUtilization: number;
     /** Don't START new work on a provider whose 7-day utilization is above this (0..1). */
@@ -358,6 +380,10 @@ export interface FrozenFile {
 }
 
 export interface Feature extends SpecFeature {
+  /** Append-only actual invocation evidence; absence is legacy unknown, never inferred from routing. */
+  provenance?: Provenance;
+  /** A damaged/unappendable audit is retained and cannot confer current identity credit. */
+  provenanceUncertain?: true;
   status: FeatureStatus;
   /** Index into the ladder for the next build attempt. */
   rung: number;
@@ -371,6 +397,10 @@ export interface Feature extends SpecFeature {
   reviewRounds: number;
   /** Non-blocking findings left after review (go to the report). */
   openFindings: Finding[];
+  /** Original concerns and explicit current-subject assessment audit. */
+  findingHistory?: FindingHistory;
+  /** Durable controller barrier after an audit/projection could not safely retain a concern; explicit repair only. */
+  findingHistoryUncertain?: true;
   blockedReason?: string;
   /** Integration commit after merge. */
   commit?: string;
@@ -474,6 +504,23 @@ export interface VerifyResult {
 }
 
 export interface Mission {
+  /** Set only before any invocation of a newly queued zero-run mission. Never inferred on resume. */
+  workEvidenceVersion?: 1;
+  workTracking?: TrackingState;
+  applicationLedger?: ApplicationLedger;
+  /** Controller restoration gap, persisted before Git and cleared with exact fresh restoration evidence. */
+  workRestore?: WorkRestoreIntent;
+  workRestack?: WorkRestackIntent;
+  /** Plan review and application-scoped actual evidence, separate from feature histories. */
+  provenance?: Provenance;
+  provenanceUncertain?: true;
+  /** Policy used by the most recent coordinator invocation, never a permanent mission preference. */
+  allowancePolicy?: "stop" | "warn";
+  pause?: { kind: "allowance_unknown"; providers: Provider[]; reason: string; at: string };
+  /** Durable per-invocation accounting, including internal retries. Absent records keep their legacy count. */
+  invocations?: InvocationJournal;
+  /** Resolved at creation. Absent legacy records retain all helpers enabled. */
+  helpers?: HelperSettings;
   id: string; // e.g. "2026-10-09-habit-tracker"
   kind: MissionKind;
   title: string;
@@ -545,6 +592,9 @@ export interface PlanReview {
   outcome: "approved" | "revised" | "not_applied" | "unfinished";
   /** What the reviewer asked for (empty unless it asked for changes). */
   issues: string[];
+  /** Automatic supplied-plan reconciliation; absent on historical records. */
+  latestRevision?: "applied" | "partly_rejected" | "not_applied";
+  rejectedChanges?: string[];
 }
 
 /** Where the owner looks: before building (plan), before one feature is added (feature), before finishing (final). */
@@ -691,6 +741,10 @@ export interface BuildOutput {
 export interface ReviewOutput {
   verdict: "approve" | "changes";
   findings: Finding[];
+}
+
+export interface FinalReviewOutput extends ReviewOutput {
+  resolutions: Array<{ id: string; outcome: "resolved" | "open" | "cannot_judge"; evidence: string }>;
 }
 
 /** The second AI's answer for a "review" or "owner" feature: a verdict on every written check (SCHEMAS.rubric, docs/modes-spec.md 8.3). The engine checks it and recomputes the verdict. */

@@ -6,6 +6,7 @@ import { describeEvent, followEvents, formatCheck, main, missionTitle } from "./
 import { configTemplateYaml } from "./config.js";
 import { MissionStore } from "./state.js";
 import type { Mission, MissionEvent } from "./types.js";
+import { controllerGitEnv } from "./util/launch-env.js";
 import { runProcess } from "./util/process.js";
 
 let root: string;
@@ -53,7 +54,7 @@ function onlyMission(): Mission {
 }
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
-  const r = await runProcess({ command: "git", args, cwd, timeoutMs: 30_000 });
+  const r = await runProcess({ env: controllerGitEnv({ isolatedConfig: true }), command: "git", args, cwd, timeoutMs: 30_000 });
   if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
   return r.stdout.trim();
 }

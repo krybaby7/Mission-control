@@ -7,7 +7,7 @@
 // where the two used to differ: the engine said the owner had sent it back, and the card said it changed approved work.
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
-import { type AgentHandler, buildOutput, checkerBehavior, finding, MissionHarness, planSource, review, writeFile } from "./fixtures/mission-harness.js";
+import { type AgentHandler, buildOutput, checkerBehavior, finding, MissionHarness, planSource, review, finalReview, writeFile } from "./fixtures/mission-harness.js";
 import { applyAnswer, parkedNotice } from "../src/checkpoint.js";
 import { shownLookReason } from "../src/checked-by.js";
 import { clearReadCache } from "../src/dashboard/read.js";
@@ -158,7 +158,7 @@ const REWRITE = "# guide\n\nThe guide says how to start the app.\n\nThe guide sa
 describe("a mixed mission whose repair is sent back", () => {
   it("is shown again for the same reason in the look, the report, the phone notice and the dashboard's card", async () => {
     const blockingOnce: AgentHandler = (job, call) => {
-      if (call.label === "gate-c" && call.n === 1) return { structured: review([finding("major", "The guide contradicts itself in step two", "docs/guide.md")]) };
+      if (call.label === "gate-c" && call.n === 1) return { structured: finalReview([finding("major", "The guide contradicts itself in step two", "docs/guide.md")]) };
       return call.label.startsWith("review-") ? checkerBehavior(job) : hh.defaults.reviewer(job, call);
     };
     const repairing: AgentHandler = async (job, call) => {

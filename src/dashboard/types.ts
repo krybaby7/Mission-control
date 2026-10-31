@@ -1,3 +1,4 @@
+import type { MissionEvidenceView } from "../mission-evidence.js";
 // The data contract of `mc dashboard`: the JSON served at GET /api/snapshot (schemaVersion 1).
 //
 // The page is dumb. The server builds a snapshot that is already in plain words, from one vocabulary module
@@ -257,7 +258,7 @@ export type MissionStateId = (typeof MISSION_STATES)[number];
 export const FEATURE_STATES = ["waiting_turn", "being_built", "being_reviewed", "done", "stuck", "left_out", "paused", "unknown"] as const;
 export type FeatureStateId = (typeof FEATURE_STATES)[number];
 
-export const PAUSED_WHY = ["deadline", "stop_requested", "disk", "ai_failing", "unexpected", "checkpoint", "unknown"] as const;
+export const PAUSED_WHY = ["deadline", "stop_requested", "disk", "ai_failing", "unexpected", "checkpoint", "allowance_unknown", "unknown"] as const;
 /**
  * Why a paused mission paused. Derived: the last `mission.stopped` event's data.reason through the stop table; "unexpected" for a
  * mission saved as running or waiting with no live run; "checkpoint" for a mission saved as stopped with a `checkpoint` (the owner
@@ -280,6 +281,7 @@ export interface ProgressStep {
 }
 
 export interface MissionView {
+  reviewRecord?: Pick<MissionEvidenceView,"plan"|"application">;
   /** mission.json `id` (the folder name). For an unreadable mission: the folder name, cleaned. */
   id: string;
   /** mission.json `title` (the owner's `--name` or the request's first sentence). The folder name when unreadable. */
@@ -361,6 +363,7 @@ export interface WaitInfo {
 }
 
 export interface FeatureView {
+  reviewRecord?: Omit<MissionEvidenceView["features"][number],"id">;
   /** mission.json features[].id */
   id: string;
   /** mission.json features[].title (written by the architect AI; shown as a name, capped). */
@@ -481,6 +484,8 @@ export const PILL_STATES = ["plenty", "getting_low", "nearly_out", "waiting_rese
 export type PillStateId = (typeof PILL_STATES)[number];
 
 export interface Allowance {
+  /** Effective configuration policy; absent in older snapshots. */
+  policyText?: string;
   /** Claude and Codex always (from the config's families), plus any other provider found in quota.json. */
   providers: ProviderAllowance[];
   /** Set while a mission is asleep (state waiting: status waiting and no run started since its latest limit.wait). The sanitised reason, never the raw one. */
@@ -492,6 +497,8 @@ export interface Allowance {
 }
 
 export interface ProviderAllowance {
+  /** Explanation of unusable aggregate evidence, independent of retained numeric limit constraints. */
+  uncertainty?: string;
   /** quota.json `utilization[].provider` / `limits` key: claude | codex | mock | any other key found. */
   id: string;
   /** "Claude" | "Codex" | "Test AI" | the id. Vocabulary. */
@@ -606,6 +613,7 @@ export interface Tick {
 }
 
 export interface DebriefFeature {
+  reviewRecord?: Omit<MissionEvidenceView["features"][number],"id">;
   featureId: string;
   title: string;
   /** For left-out features: the reason. For built ones: the feature's one-line story (features[].story, AI-written). null when absent. */
@@ -621,6 +629,7 @@ export interface DebriefFeature {
 }
 
 export interface MissionDebrief {
+  reviewRecord?: Pick<MissionEvidenceView,"plan"|"application">;
   missionId: string;
   title: string;
   verdict: Verdict;

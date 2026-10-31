@@ -22,6 +22,7 @@ import type {
   Role,
   RunEvent,
   RunResult,
+  RunOutcome,
   Tier,
 } from "./types.js";
 
@@ -41,6 +42,13 @@ const MAX_FAILED_RUNS = 16;
 const FAMILIES: readonly Family[] = ["claude", "codex"];
 
 /** Every candidate provider for a run needs a human to log in again. */
+export class AllowanceUnknownError extends Error {
+  constructor(readonly providers: Provider[], readonly reason: string) {
+    super("Stopped before starting another AI job: allowance could not be confirmed (" + reason + "). No model call was made for this attempt.");
+    this.name = "AllowanceUnknownError";
+  }
+}
+
 export class AuthUnavailableError extends Error {
   constructor(
     message = "every candidate provider needs a new login",
@@ -54,7 +62,7 @@ export class AuthUnavailableError extends Error {
 /**
  * The agent CLIs keep failing for reasons that have nothing to do with the job: a CLI crashes or cannot start, hangs
  * without output, or the provider keeps refusing (limits or overload that never clear). Nothing an agent did caused
- * it, so the work must pause, not count as a failed attempt. `detail` is the last error, for the person who fixes it.
+ * it, so the work must pause without a failed feature attempt. Each invocation still consumes the mission cap. `detail` is the last error, for the person who fixes it.
  */
 export class ProvidersFailingError extends Error {
   constructor(
@@ -87,6 +95,15 @@ export class StopRequestedError extends Error {
 }
 
 export interface ExecRequest {
+  /** Controller-owned durable lifecycle; production dispatch always supplies it. */
+  lifecycle?: {
+    /** Checks the cap before metadata or waiting, without reserving a slot. */
+    canStart?(): boolean;
+    usedJobId(id: string): boolean;
+    reserve(job: AgentJob, family: Family): Promise<boolean>;
+    observe(job: AgentJob, family: Family, outcome: RunOutcome | "thrown"): Promise<void>;
+    clean(job: AgentJob): Promise<void>;
+  };
   missionId: string;
   role: Role;
   /** Names the job and its log file: "<label>-<n>". */
@@ -111,6 +128,8 @@ export interface ExecRequest {
 }
 
 export interface ExecResult {
+  /** Final actual invocation; earlier retry observations remain in the durable journal. */
+  jobId?: string;
   skipped: boolean;
   result: RunResult | null;
   provider: Provider | null;
@@ -153,7 +172,10 @@ export class RoleExecutor {
   /** Last job number used per mission and label, so job ids (and log files) stay unique. */
   private readonly jobNumbers = new Map<string, number>();
 
-  constructor(private readonly deps: RoleExecutorDeps) {}
+  readonly allowancePolicy: "stop" | "warn";
+  constructor(private readonly deps: RoleExecutorDeps) {
+    this.allowancePolicy = deps.config.pacing.unknownAllowance ?? "warn";
+  }
 
   async exec(req: ExecRequest): Promise<ExecResult> {
     const candidates = this.runnable(this.candidates(req));
@@ -166,14 +188,35 @@ export class RoleExecutor {
     for (;;) {
       this.checkStop();
       this.checkDeadline();
-      const pick = candidates.find((c) => this.deps.quota.isAvailable(c.provider, c.model));
+      if (req.lifecycle?.canStart && !req.lifecycle.canStart()) return SKIPPED;
+      const eligible = await this.admissionCandidates(candidates);
+      this.checkStop();
+      this.checkDeadline();
+      const pick = eligible.find(c => this.deps.quota.isAvailable(c.provider, c.model) &&
+        (this.allowancePolicy === "warn" || this.deps.quota.allowance(c.provider).usable));
       if (!pick) {
         if (req.optional) return SKIPPED;
-        await this.waitForCandidate(candidates);
-        continue;
+        if (this.allowancePolicy === "warn") { await this.waitForCandidate(candidates); continue; }
+        const { quota, clock } = this.deps;
+        if (candidates.every(c => quota.state(c.provider).status === "auth")) {
+          throw new AuthUnavailableError(undefined, providerList(candidates));
+        }
+        const waiting = eligible.filter(c => {
+          const at = quota.availableAt(c.provider, c.model);
+          return quota.allowance(c.provider).usable && quota.state(c.provider).status !== "auth" &&
+            at !== null && Number.isFinite(at) && at > clock.now();
+        });
+        if (waiting.length > 0) { await this.waitForCandidate(waiting); continue; }
+        const unknown = candidates.filter(c => quota.state(c.provider).status !== "auth" && !quota.allowance(c.provider).usable);
+        throw new AllowanceUnknownError(providerList(unknown), this.allowanceReason(unknown));
       }
-      const { result, progressed } = await this.run(req, pick);
-      const done: ExecResult = { skipped: false, result, provider: pick.provider, model: pick.model, family: pick.family };
+      if (this.allowancePolicy === "warn" && !this.deps.quota.allowance(pick.provider).usable) {
+        this.deps.logger.warn("Allowance could not be confirmed; the reserve is not assured.", { provider: pick.provider, policy: this.allowancePolicy });
+      }
+      const ran = await this.run(req, pick);
+      if (!ran) return SKIPPED;
+      const { result, progressed, jobId } = ran;
+      const done: ExecResult = { skipped: false, result, provider: pick.provider, model: pick.model, family: pick.family, jobId };
       if (result.outcome === "auth") continue; // that login is blocked now: another model, or AuthUnavailableError
       if (result.outcome === "aborted") throw new StopRequestedError();
       if (result.outcome === "limited") {
@@ -198,6 +241,38 @@ export class RoleExecutor {
       if (result.outcome === "ok") this.deps.quota.recordSuccess(pick.provider);
       return done;
     }
+  }
+
+  /** One metadata attempt per provider per decision; no model slot or usage is recorded. */
+  private async admissionCandidates(candidates: Runnable[]): Promise<Runnable[]> {
+    if (this.allowancePolicy === "warn") return candidates;
+    const attempted = new Set<Provider>();
+    const { quota, signal, clock, deadline } = this.deps;
+    for (const candidate of candidates) {
+      this.checkStop(); this.checkDeadline();
+      if (quota.isAvailable(candidate.provider, candidate.model) && quota.allowance(candidate.provider).usable) break;
+      if (attempted.has(candidate.provider) || quota.allowance(candidate.provider).usable ||
+          quota.state(candidate.provider).status === "auth" || !candidate.runner.readAllowance) continue;
+      attempted.add(candidate.provider);
+      let reading;
+      try {
+        reading = await candidate.runner.readAllowance({ ...(signal && { signal }), ...(deadline !== undefined && { timeoutMs: Math.max(1, deadline - clock.now()) }) });
+      } catch { /* unavailable metadata is not a model failure or a fresh observation */ }
+      this.checkStop(); this.checkDeadline();
+      if (reading?.status === "aborted") throw new StopRequestedError();
+      if (reading?.status === "auth") quota.recordAuthFailure(candidate.provider, reading.error);
+      else if (reading?.status === "observed" && Array.isArray(reading.observations)) quota.recordAllowanceBatch(candidate.provider, reading.observations);
+      // Assess again after every await: metadata for one provider can age another provider's observations.
+      if (candidates.some(c => quota.isAvailable(c.provider, c.model) && quota.allowance(c.provider).usable)) break;
+    }
+    return candidates.filter(c => quota.allowance(c.provider).usable && quota.state(c.provider).status !== "auth");
+  }
+
+  private allowanceReason(candidates: Candidate[]): string {
+    return [...new Set(candidates.map(c => c.provider))].map(provider => {
+      const windows = this.deps.quota.allowance(provider).windows.filter(w => !w.usable);
+      return provider + ": " + windows.map(w => w.window + " " + w.reasons.join(", ")).join("; ");
+    }).join("; ");
   }
 
   // ───────────── Candidates ─────────────
@@ -306,7 +381,7 @@ export class RoleExecutor {
   private checkDeadline(): void {
     const { deadline, clock } = this.deps;
     const now = clock.now();
-    if (deadline !== undefined && now > deadline) {
+    if (deadline !== undefined && now >= deadline) {
       throw new DeadlineError(now, `the deadline ${new Date(deadline).toISOString()} has passed`);
     }
   }
@@ -314,31 +389,44 @@ export class RoleExecutor {
   // ───────────── Running ─────────────
 
   /** One run; `progressed` tells whether the agent showed any sign of working (a progress event). */
-  private async run(req: ExecRequest, candidate: Runnable): Promise<{ result: RunResult; progressed: boolean }> {
+  private async run(req: ExecRequest, candidate: Runnable): Promise<{ result: RunResult; progressed: boolean; jobId: string } | null> {
     const { store, clock, logger, signal } = this.deps;
     const job = this.buildJob(req, candidate);
+    if (req.lifecycle && !(await req.lifecycle.reserve(job, candidate.family))) {
+      if (req.optional) return null;
+      throw new Error("a required invocation reservation was refused");
+    }
     const reported: LimitInfo[] = [];
     let progressed = false;
     const runInfo = { label: req.label, jobId: job.id, role: req.role, provider: job.provider, model: job.model };
     logger.info(`run ${job.id}: ${job.role} on ${job.provider}/${job.model} (${job.effort})`, runInfo);
     store.appendEvent(req.missionId, "run.start", { ...runInfo, effort: job.effort }, clock.now());
 
-    const result = await candidate.runner.run(job, {
-      signal,
-      onEvent: (event) => {
-        if (event.type === "progress") progressed = true;
-        this.onRunEvent(event, job, reported);
-      },
-    });
+    let result: RunResult;
+    try {
+      result = await candidate.runner.run(job, {
+        signal,
+        onEvent: (event) => {
+          if (event.type === "progress") progressed = true;
+          this.onRunEvent(event, job, reported);
+        },
+      });
+    } catch (error) {
+      await req.lifecycle?.observe(job, candidate.family, "thrown");
+      await req.lifecycle?.clean(job);
+      throw error;
+    }
+    await req.lifecycle?.observe(job, candidate.family, result.outcome);
+    await req.lifecycle?.clean(job);
 
     this.recordRun(req, job, result);
     if (result.outcome === "limited") this.recordRunLimit(job, result, reported);
     if (result.outcome === "auth") this.deps.quota.recordAuthFailure(job.provider, result.error || result.text || "login required");
-    return { result, progressed };
+    return { result, progressed, jobId: job.id };
   }
 
   private buildJob(req: ExecRequest, candidate: Candidate): AgentJob {
-    const { id, logFile } = this.nextJob(req.missionId, req.label);
+    const { id, logFile } = this.nextJob(req.missionId, req.label, req.lifecycle?.usedJobId);
     const job: AgentJob = {
       id,
       role: req.role,
@@ -359,12 +447,12 @@ export class RoleExecutor {
   }
 
   /** "<label>-<n>" with n past every earlier job of this executor and every log file already on disk. */
-  private nextJob(missionId: string, label: string): { id: string; logFile: string } {
+  private nextJob(missionId: string, label: string, used?: (id: string) => boolean): { id: string; logFile: string } {
     const base = label.replace(/[^A-Za-z0-9._-]+/g, "-") || "run";
     const dir = this.deps.store.logsDir(missionId);
     const key = `${missionId}/${base}`;
     let n = (this.jobNumbers.get(key) ?? 0) + 1;
-    while (existsSync(join(dir, `${base}-${n}.ndjson`))) n++;
+    while (used?.(`${base}-${n}`) || existsSync(join(dir, `${base}-${n}.ndjson`))) n++;
     this.jobNumbers.set(key, n);
     return { id: `${base}-${n}`, logFile: join(dir, `${base}-${n}.ndjson`) };
   }
@@ -377,6 +465,9 @@ export class RoleExecutor {
         this.deps.quota.recordLimit(info);
         break;
       }
+      case "allowance":
+        this.deps.quota.recordAllowanceBatch(job.provider, event.observations);
+        break;
       case "utilization":
         this.deps.quota.recordUtilization({ ...event.info, provider: job.provider });
         break;

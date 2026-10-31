@@ -60,9 +60,13 @@ describe("a plan whose checks the plan reviewer changed (real run R4)", () => {
     return hh;
   }
 
-  it("says near the top how many checks were removed and added, and lists each one, in the look and in the report", async () => {
+  it("after an explicit owner send-back, lists every changed check in the look and report", async () => {
     const hh = reviewed();
     const id = hh.createMission("greenfield", { plan: planSource(TWO), checkpoints: ["plan"] }).id;
+    const first = await hh.run(id);
+    expect(first.plan?.review?.latestRevision).toBe("not_applied");
+    expect(first.features.map((f) => f.acceptance)).toEqual(planSource(TWO).spec.features.map((f) => f.acceptance));
+    answer(hh, id, "send_back", "Remove farewell and replace the greeting check with Revised check.");
     const parked = await hh.run(id);
     const lines = parked.checkpoint?.look.lines ?? [];
     const said = "Compared with the plan the leader wrote, 3 checks were removed and 1 check was added. Every one is listed below the plan.";

@@ -150,6 +150,7 @@ describe("createMission", () => {
       profile: "mixed",
       roleOverrides: [],
       status: "queued",
+      helpers: { contextPack: true, failureDigest: true, reportProse: true },
       stage: "spec",
       createdAt: at,
       updatedAt: at,

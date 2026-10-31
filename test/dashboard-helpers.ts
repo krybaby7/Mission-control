@@ -276,6 +276,8 @@ const lampReason = obj({ code: lit(LAMP_REASON_CODES), severity: lit(LAMP_SEVERI
 const lamp = obj({ state: lit(LAMP_STATES), word: text, sentence: text, reasons: arr(lampReason) });
 const waitInfo = obj({ until: num, untilText: str, cause: lit(["limits", "trouble", "login", "unknown"]), text: text });
 const progressStep = obj({ id: lit(PROGRESS_STEPS), word: text, state: lit(["done", "current", "todo"]) });
+const featureEvidence = obj({review:arr(text),tests:arr(text)});
+const missionEvidence = obj({plan:arr(text),application:arr(text)});
 const feature = obj(
   {
     id: text,
@@ -292,7 +294,7 @@ const feature = obj(
     tellLeader: text,
   },
   // Only for a feature checked by a second AI (docs/modes-spec.md, 11.5): the checks on its list, and, once done, how it was checked.
-  { modeChecks: count, checkedBy: text },
+  { modeChecks: count, checkedBy: text, reviewRecord:featureEvidence },
 );
 const mission = obj({
   id: text,
@@ -316,7 +318,7 @@ const mission = obj({
   features: arr(feature),
   updatedAt: count,
   tellLeader: text,
-});
+}, {reviewRecord:missionEvidence});
 const card = obj({
   id: text,
   kind: lit(CARD_KINDS),
@@ -357,7 +359,7 @@ const providerAllowance = obj({
   note: nullable(text),
   limitedUntil: nullable(num),
   limitedText: nullable(text),
-});
+}, { uncertainty: text });
 const timelineItem = obj({
   at: num,
   time: text,
@@ -372,7 +374,7 @@ const timelineItem = obj({
 });
 const tick = obj({ id: lit(TICK_IDS), label: text, state: lit(TICK_STATES), why: text, caveat: nullable(text) });
 const verdict = obj({ id: lit(VERDICT_IDS), word: text, sentence: text });
-const debriefFeature = obj({ featureId: text, title: text, note: nullable(said), attempts: count }, { checkedBy: text });
+const debriefFeature = obj({ featureId: text, title: text, note: nullable(said), attempts: count }, { checkedBy: text,reviewRecord:featureEvidence });
 const missionDebrief = obj({
   missionId: text,
   title: text,
@@ -385,7 +387,7 @@ const missionDebrief = obj({
   agentTimeText: nullable(text),
   agentRuns: nullable(count),
   tellLeader: text,
-});
+}, {reviewRecord:missionEvidence});
 
 const snapshotShape = obj({
   schemaVersion: lit([SCHEMA_VERSION]),
@@ -414,7 +416,7 @@ const snapshotShape = obj({
   now: nullable(obj({ kind: lit(NOW_KINDS), text: text, missionId: nullable(text), featureId: nullable(text), since: nullable(num), sinceText: nullable(text), exact: bool })),
   missions: arr(mission),
   needsYou: arr(card),
-  allowance: obj({ providers: arr(providerAllowance), waiting: nullable(waitInfo), fileChangedAt: nullable(num), fileChangedText: nullable(text) }),
+  allowance: obj({ providers: arr(providerAllowance), waiting: nullable(waitInfo), fileChangedAt: nullable(num), fileChangedText: nullable(text) }, { policyText: text }),
   timeline: obj({ items: arr(timelineItem), earlierNotShown: count }),
   debrief: nullable(obj({ verdict, missions: arr(missionDebrief), allowanceNote: text, honestyNote: text })),
   counts: obj({

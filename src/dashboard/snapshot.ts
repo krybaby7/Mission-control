@@ -56,7 +56,7 @@ export interface DashboardSettings {
    * them (docs/modes-spec.md, 5.2). Absent in a hand-written settings object: one each, as the built-in ladders have.
    */
   diagnoseSteps?: { standard: number; mechanical: number };
-  pacing: { maxFiveHourUtilization: number; maxWeeklyUtilization: number };
+  pacing: { maxFiveHourUtilization: number; maxWeeklyUtilization: number; unknownAllowance?: "stop" | "warn" };
   /** Unique providers of config.families and config.light. */
   providers: string[];
   /** built_in when the config could not be read. */
@@ -88,7 +88,7 @@ export function settingsFromConfig(c: Pick<Config, "ladders" | "pacing" | "famil
       standard: c.ladders.standard.filter((r) => r.action === "diagnose").length,
       mechanical: c.ladders.mechanical.filter((r) => r.action === "diagnose").length,
     },
-    pacing: { maxFiveHourUtilization: c.pacing.maxFiveHourUtilization, maxWeeklyUtilization: c.pacing.maxWeeklyUtilization },
+    pacing: { maxFiveHourUtilization: c.pacing.maxFiveHourUtilization, maxWeeklyUtilization: c.pacing.maxWeeklyUtilization, ...(c.pacing.unknownAllowance && { unknownAllowance: c.pacing.unknownAllowance }) },
     providers,
     source: "saved",
   };

@@ -80,17 +80,17 @@ describe("R6-1: the briefs of a feature checked by tests, in a mission that has 
     expect(text).not.toContain("The features that come after this one");
   });
 
-  it("only a feature checked by tests gets it: the brief of the maker of a document does not", () => {
+  it("also scopes the maker of a document in the same multi-feature mission", () => {
     const { m, notes } = r6();
-    expect(makePrompt(m, notes, { rung: 0, fileList: [] })).not.toContain(HEADING);
+    expect(makePrompt(m, notes, { rung: 0, fileList: [] })).toContain(HEADING);
   });
 
-  it("a mission with no feature checked by reading gets neither the section nor any change: its briefs are the ones they always were", () => {
+  it("also scopes a mission where every feature is checked by tests", () => {
     const plain = mission({ spec: SPEC, features: [feature(), feature({ ...SPEC.features[1]!, frozenTests: [], status: "pending" })] });
     const f = plain.features[0]!;
-    expect(testAuthorPrompt(plain, f, { fileList: [] })).not.toContain(HEADING);
-    expect(buildPrompt(plain, f, { rung: 0, fileList: [] })).not.toContain(HEADING);
-    expect(testAuthorPrompt(plain, f, { fileList: [] })).not.toMatch(/other feature/);
+    expect(testAuthorPrompt(plain, f, { fileList: [] })).toContain(HEADING);
+    expect(buildPrompt(plain, f, { rung: 0, fileList: [] })).toContain(HEADING);
+    expect(testAuthorPrompt(plain, f, { fileList: [] })).toMatch(/other feature/);
     // and the golden texts of the end of wave 1 still stand for every prompt of such a mission
     for (const name of ["testAuthor", "testAuthor-amend", "build", "build-second-rung", "build-no-tests", "build-fix", "build-broken-baseline"]) {
       expect(oldWayPrompts()[name], name).not.toContain(HEADING);

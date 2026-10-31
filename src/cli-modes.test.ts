@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type CliIO, describeEvent, main } from "./cli.js";
 import { MissionStore } from "./state.js";
 import type { CheckedResult, CheckpointRecord, Feature, FeatureChecked, Mission, MissionEvent } from "./types.js";
+import { controllerGitEnv } from "./util/launch-env.js";
 import { runProcess } from "./util/process.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", "plans");
@@ -52,7 +53,7 @@ async function mc(args: string[], stdin?: string, io: Partial<CliIO> = {}): Prom
 const store = (): MissionStore => new MissionStore(home);
 
 async function git(cwd: string, ...args: string[]): Promise<void> {
-  const r = await runProcess({ command: "git", args, cwd, timeoutMs: 30_000 });
+  const r = await runProcess({ env: controllerGitEnv({ isolatedConfig: true }), command: "git", args, cwd, timeoutMs: 30_000 });
   if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
 }
 
@@ -93,6 +94,8 @@ function next(out: string): string[] {
 describe("a mission queued without any of the new keys", () => {
   // Made with the code of the end of wave 1 (test/fixtures/plans/golden/mission-keys.json).
   const before = JSON.parse(readFileSync(join(FIXTURES, "golden", "mission-keys.json"), "utf8")) as Record<string, { keys: string[]; planKeys?: string[]; specKeys?: string[]; featureKeys?: string[] }>;
+  // H02 adds only this resolved snapshot. Keep the historical fixture and exact key comparisons.
+  for (const entry of Object.values(before)) entry.keys = [...entry.keys, "helpers"].sort();
   const keysOf = (m: Mission): Record<string, string[]> => {
     const file = JSON.parse(readFileSync(join(home, "missions", m.id, "mission.json"), "utf8")) as Record<string, any>;
     return { keys: Object.keys(file).sort(), planKeys: Object.keys(file.plan ?? {}).sort(), specKeys: Object.keys(file.plan?.spec ?? {}).sort(), featureKeys: Object.keys(file.plan?.spec?.features?.[0] ?? {}).sort() };
@@ -467,7 +470,7 @@ describe("mc plan show: how each feature was checked", () => {
     ...extra,
   });
 
-  const section = (): string[] => out.slice(out.indexOf("How each feature was checked:")).split("\n");
+  const section = (): string[] => out.slice(out.indexOf("How each feature was checked:"), out.indexOf("\nRecorded AI reviews:")).split("\n");
 
   it("prints nothing extra for a plan with no mode feature", async () => {
     await mc(["plan", "queue", "-"], DARK_MODE);

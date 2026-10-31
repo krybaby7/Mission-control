@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "./config.js";
+import { nativeToolPath } from "./util/launch-env.js";
 import { type DoctorCheck, isSupportedNode, runDoctor } from "./doctor.js";
 import { type MockBehavior, MockRunner } from "./runners/mock.js";
 import type { AgentJob, Config } from "./types.js";
@@ -356,23 +357,23 @@ describe("runDoctor: tools and settings", () => {
     // The default settings run "claude" and "codex" from PATH: make sure those are the fakes.
     writeFakeCli("claude", CLAUDE_OK);
     writeFakeCli("codex", CODEX_OK);
-    vi.stubEnv("PATH", `${bin}:${process.env.PATH ?? ""}`);
-    let settings = check(await runDoctor(), "Settings");
-    expect(check(await runDoctor(), "Claude Code")).toMatchObject({ ok: true, detail: "version 2.1.295" });
+    const path = [bin, ...nativeToolPath()];
+    let settings = check(await runDoctor({ path }), "Settings");
+    expect(check(await runDoctor({ path }), "Claude Code")).toMatchObject({ ok: true, detail: "version 2.1.295" });
     expect(settings).toMatchObject({ ok: false, severity: "warn" });
     expect(settings.fix).toContain("mc init");
 
     const home = join(root, "home");
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "config.yaml"), "git:\n  push: true\n");
-    const checks = await runDoctor();
+    const checks = await runDoctor({ path });
     settings = check(checks, "Settings");
     expect(settings).toMatchObject({ ok: true });
     expect(settings.detail).toContain(join(home, "config.yaml"));
     expect(check(checks, "Apps folder").detail).toContain(join(root, "user-home", "mc-apps")); // the default, in the test's home
 
     writeFileSync(join(home, "config.yaml"), "git: [unclosed\n");
-    const broken = await runDoctor();
+    const broken = await runDoctor({ path });
     expect(check(broken, "Settings")).toMatchObject({ ok: false, severity: "error" });
     expect(check(broken, "Settings").detail).toContain("not valid YAML");
     expect(check(broken, "Mission Control folder").detail).toContain(home);

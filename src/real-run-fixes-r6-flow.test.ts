@@ -110,8 +110,8 @@ describe("R6-1: the plan of R6, run on a team that does what the real team did",
     const engineer = hh.jobsFor("engineer").find((j) => j.prompt.includes("Implement feature `greet`"));
     expect(engineer?.prompt).toContain("## The contract and the other features");
     expect(engineer?.prompt).toContain("Never create a file that only another feature's checks name, even when a line of the contract describes it.");
-    // the feature checked by reading gets the brief of the maker, which does not have the section
-    for (const job of hh.jobsFor("engineer").filter((j) => j.prompt.includes("Make the deliverable for feature"))) expect(job.prompt).not.toContain("## The contract and the other features");
+    // Makers receive the same scope boundary under P6.
+    for (const job of hh.jobsFor("engineer").filter((j) => j.prompt.includes("Make the deliverable for feature"))) expect(job.prompt).toContain("## The contract and the other features");
   });
 
   it("records the notes file on the first feature, and says so in the look, in the report and in the facts", async () => {
@@ -168,15 +168,16 @@ describe("R6-1: the plan of R6, run on a team that does what the real team did",
     expect(reportOf(hh, id)).not.toContain("It also made");
   });
 
-  it("records nothing and adds no word for a mission with no feature checked by reading, even when the same file is made too early", async () => {
+  it("records and discloses the same overlap when every feature is checked by tests", async () => {
     const hh = eagerTeam();
     const plain = PLAN(NOTES_CONTRACT).replace("mode: owner\n", "").replace("heading: Purpose\n", "").replace("heading: Limits\n", "").replace("check: The notes read as friendly (the CEO decides).\n", "check: answer in src/notes.mjs returns notes\n");
     const id = hh.createMission("greenfield", { plan: planSource(plain) }).id;
     const done = await hh.run(id);
     expect(done.features.every((f) => f.mode === undefined)).toBe(true);
-    for (const f of done.features) expect(f).not.toHaveProperty("alsoMade");
-    expect(reportOf(hh, id)).not.toContain("It also made");
-    // and the briefs are the ones such a mission always had
-    for (const job of [...hh.jobsFor("test_author"), ...hh.jobsFor("engineer")]) expect(job.prompt).not.toContain("## The contract and the other features");
+    expect(done.features[0]?.alsoMade).toEqual([{ file: NOTES_FILE, belongsTo: "notes" }]);
+    expect(reportOf(hh, id)).toContain(SENTENCE);
+    for (const job of [...hh.jobsFor("test_author"), ...hh.jobsFor("engineer")].filter((j) => !j.prompt.includes("Scaffold"))) {
+      if (job.prompt.includes("feature `")) expect(job.prompt).toContain("## The contract and the other features");
+    }
   });
 });

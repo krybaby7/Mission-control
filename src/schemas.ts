@@ -110,6 +110,15 @@ export const SCHEMAS = {
     verdict: enumOf(["approve", "changes"]),
     findings: arrayOf(finding),
   }),
+  finalReview: obj({
+    verdict: enumOf(["approve", "changes"]),
+    findings: arrayOf(finding),
+    resolutions: arrayOf(obj({
+      id: str("Exact outstanding finding ID from the brief"),
+      outcome: enumOf(["resolved", "open", "cannot_judge"]),
+      evidence: str("Specific current-file evidence; no omission or empty evidence closes a concern"),
+    })),
+  }),
   diagnosis: obj({
     action: enumOf(["retry_with_hint", "amend_tests", "block"]),
     hint: str("Root cause and concrete guidance for the next engineer"),
@@ -283,58 +292,7 @@ export function normalizeVerifyConfig(v: VerifyConfigOutput): VerifyConfig {
   return vc;
 }
 
-// ───────────────────────────── Escape text in the planner's strings ─────────────────────────────
-
-/** How many times `needle` is written in `text`. */
-function occurrences(text: string, needle: string): number {
-  return text.split(needle).length - 1;
-}
-
-/**
- * A string of the planner's answer with the escape text of a double-escaped answer made real: the two characters `\` and `n` become a line
- * break, and `\` and `"` become a quotation mark. It happens, now and then, that a list comes back as one line with `\n` between its
- * items. Only a string that shows it is changed:
- * - it has no real line break and at least two `\n` (a list on one line), and `lines` is true (the string is a text of several lines by
- *   nature: the summary, an assumption, the contract; a title or a check is one line, and may talk about `\n` on purpose), or
- * - it has no plain quotation mark and at least two `\"` (every mark is written with a backslash).
- * One `\n` in a sentence is left alone, as a person may write it on purpose (`splits the text on \n`).
- */
-function plainEscapes(text: string, lines: boolean): string {
-  if (!text.includes("\\")) return text;
-  const breaks = occurrences(text, "\\n");
-  const quotes = occurrences(text, '\\"');
-  const oneLine = !/[\r\n]/u.test(text);
-  const plainQuote = /(^|[^\\])"/u.test(text);
-  const makeBreaks = lines && oneLine && breaks >= 2;
-  const makeQuotes = (makeBreaks && quotes >= 1) || (quotes >= 2 && !plainQuote);
-  if (!makeBreaks && !makeQuotes) return text;
-  let out = text;
-  if (makeBreaks) out = out.replaceAll("\\n", "\n");
-  if (makeQuotes) out = out.replaceAll('\\"', '"');
-  return out;
-}
-
-/**
- * The plan the planner wrote, with the escape text of its strings made real (`plainEscapes`): the name, the summary, the assumptions, the
- * UI contract, and the title, story and checks of each feature. Only the summary, the assumptions and the contract can become several
- * lines. Everything else is as it was. Returns the same object when nothing changed.
- */
+/** Compatibility entry point: JSON was already parsed; never decode its strings a second time. */
 export function normalizeSpecText(spec: SpecOutput): SpecOutput {
-  let changed = false;
-  const make = (lines: boolean) => (text: string): string => {
-    const out = plainEscapes(text, lines);
-    if (out !== text) changed = true;
-    return out;
-  };
-  const line = make(false);
-  const several = make(true);
-  const next: SpecOutput = {
-    ...spec,
-    appName: line(spec.appName),
-    summary: several(spec.summary),
-    features: spec.features.map((f) => ({ ...f, title: line(f.title), story: line(f.story), acceptance: f.acceptance.map(line) })),
-    assumptions: spec.assumptions.map(several),
-    uiContract: several(spec.uiContract),
-  };
-  return changed ? next : spec;
+  return spec;
 }

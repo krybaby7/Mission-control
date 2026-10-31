@@ -367,7 +367,7 @@ describe("Dispatcher: a run cut short by Mission Control itself dying", () => {
    * Runs the mission until its review run is under way, stops there, then makes it look like Mission Control died
    * during that run: the run's marker is left behind and the mission still says "running".
    */
-  async function crashDuringReview(hh: MissionHarness, interruptionsBefore = 0): Promise<string> {
+  async function crashDuringReview(hh: MissionHarness, interruptionsBefore = 0, legacy = true): Promise<string> {
     const stop = new AbortController();
     hh.agents.reviewer = (job, call) => {
       if (call.label !== "review-greet" || call.n !== 1) return byDefault("reviewer")(job, call);
@@ -382,6 +382,11 @@ describe("Dispatcher: a run cut short by Mission Control itself dying", () => {
     if (interruptionsBefore > 0) scratch.interruptions = { "review-greet": interruptionsBefore };
     writeFileSync(scratchFile(hh, id), JSON.stringify(scratch));
     const m = hh.load(id);
+    // A scratch-only legacy mission predates the whole evidence bundle, not only its journal.
+    // Retaining modern tracking while removing its journal is damaged modern state, covered separately.
+    delete m.invocations;
+    if (legacy) for (const key of ["workEvidenceVersion","workTracking","applicationLedger","provenance","provenanceUncertain","workRestore","workRestack"] as const) delete m[key];
+    if (legacy) for (const f of m.features) { delete f.provenance; delete f.provenanceUncertain; }
     m.status = "running";
     hh.store.save(m);
     return id;
@@ -400,6 +405,17 @@ describe("Dispatcher: a run cut short by Mission Control itself dying", () => {
     expect(events(hh, id, "run.interrupted")).toEqual([expect.objectContaining({ data: expect.objectContaining({ label: "review-greet", count: 1 }) })]);
     expect(m.agentRuns).toBe(runsBefore + 1 + (hh.jobs.length - jobsBefore)); // the interrupted run counts too
     expect(JSON.parse(read(scratchFile(hh, id))).inflight).toBeUndefined();
+  });
+
+  it("stops and preserves modern tracking when its referenced journal has been lost", async () => {
+    const hh=harness({features:[feature("greet")]});
+    const id=await crashDuringReview(hh,0,false),before=hh.load(id);
+    const tracking=structuredClone(before.workTracking),provenance=structuredClone(before.features[0]?.provenance);
+    const jobs=hh.jobs.length,result=await hh.run(id);
+    expect(result.status).toBe("stopped");
+    expect(result.workTracking).toEqual(tracking);expect(result.features[0]?.provenance).toEqual(provenance);
+    expect(result.workRestore).toBeDefined();expect(result.features[0]?.status).toBe("reviewing");
+    expect(hh.jobs).toHaveLength(jobs);
   });
 
   it("sets a feature aside when runs on it took Mission Control down three times", async () => {

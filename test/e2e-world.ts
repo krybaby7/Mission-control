@@ -342,6 +342,7 @@ export class World {
       },
       reviewer: (_job, call) => {
         if (call.label === "gate-a") return { structured: { verdict: "approve", issues: [] } satisfies GateOutput };
+        if (call.label === "gate-c") return { structured: { ...verdict(), resolutions: [] } };
         return { structured: verdict() };
       },
       test_author: (_job, call) => {

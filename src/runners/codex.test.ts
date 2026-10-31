@@ -12,11 +12,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { detectLimitText, parseResetTime } from "../limits.js";
 import type { AgentJob, JsonSchema, RunEvent } from "../types.js";
+import * as worktreeGuard from "./worktree-guard.js";
 import { CodexRunner, PROMPT_SEPARATOR, type CodexRunnerOptions } from "./codex.js";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/fake-codex.mjs", import.meta.url));
@@ -54,9 +55,17 @@ beforeAll(() => {
   chmodSync(fakeCodex, 0o755);
 });
 
+afterEach(() => { vi.unstubAllEnvs(); });
+
 afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
+
+function fixtureOptions(values: NodeJS.ProcessEnv) {
+  const configHome = mkdtempSync(join(root, "provider-config-"));
+  writeFileSync(join(configHome, "mc-fixture.json"), JSON.stringify(Object.fromEntries(Object.entries(values).filter(([key]) => key.startsWith("FAKE_")))));
+  return { configHome, path: [dirname(process.execPath), "/usr/bin", "/bin"] };
+}
 
 function makeJob(overrides: Partial<AgentJob> = {}): AgentJob {
   return {
@@ -87,11 +96,12 @@ async function runScenario(scenario: string, opts: ScenarioOptions = {}) {
   const dir = mkdtempSync(join(root, "run-"));
   const recordFile = join(dir, "record.json");
   const tmp = join(dir, "tmp");
+  const envRecord = join(dir, "env-record.ndjson");
   const runner = new CodexRunner({
     command: fakeCodex,
     writeSandbox: "danger-full-access",
     tmpDir: tmp,
-    env: { ...process.env, FAKE_CODEX_SCENARIO: scenario, FAKE_CODEX_RECORD: recordFile, ...opts.env },
+    ...fixtureOptions({ FAKE_CODEX_SCENARIO: scenario, FAKE_CODEX_RECORD: recordFile, FAKE_CODEX_ENV_RECORD: envRecord, ...opts.env }),
     ...opts.runner,
   });
   const events: RunEvent[] = [];
@@ -103,7 +113,7 @@ async function runScenario(scenario: string, opts: ScenarioOptions = {}) {
     ...(opts.signal !== undefined && { signal: opts.signal }),
   });
   const record = existsSync(recordFile) ? (JSON.parse(readFileSync(recordFile, "utf8")) as FakeRecord) : undefined;
-  return { result, events, record, dir, tmp };
+  return { result, events, record, dir, tmp, envRecord };
 }
 
 function progressTexts(events: RunEvent[]): string[] {
@@ -224,7 +234,7 @@ describe("CodexRunner.buildArgs", () => {
 describe("fake codex fixture", () => {
   it("blocks until stdin is closed, like the real CLI", async () => {
     const child = spawn(process.execPath, [FIXTURE, "exec", "--json", "-"], {
-      env: { ...process.env, FAKE_CODEX_SCENARIO: SUCCESS },
+      env: { CODEX_HOME: fixtureOptions({ FAKE_CODEX_SCENARIO: SUCCESS }).configHome },
       stdio: "pipe",
     });
     try {
@@ -280,15 +290,16 @@ describe("CodexRunner.run", () => {
     expect(record!.stdin).toBe("Just this.");
   });
 
-  it("scrubs API keys from the environment and runs in the job's cwd", async () => {
+  it("omits API keys and unrelated values and runs in the job's cwd", async () => {
+    for (const [name, value] of Object.entries({ OPENAI_API_KEY: "sk-test", CODEX_API_KEY: "ck-test", ANTHROPIC_API_KEY: "ak-test", KEEP_ME: "yes" })) vi.stubEnv(name, value);
     const { record, dir } = await runScenario(SUCCESS, {
       env: { OPENAI_API_KEY: "sk-test", CODEX_API_KEY: "ck-test", ANTHROPIC_API_KEY: "ak-test", KEEP_ME: "yes" },
     });
     expect(record!.env.OPENAI_API_KEY).toBeUndefined();
     expect(record!.env.CODEX_API_KEY).toBeUndefined();
     expect(record!.env.ANTHROPIC_API_KEY).toBeUndefined();
-    expect(record!.env.KEEP_ME).toBe("yes");
-    expect(record!.env.PATH).toBe(process.env.PATH);
+    expect(record!.env.KEEP_ME).toBeUndefined();
+    expect(record!.env.PATH).toBe([dirname(process.execPath), "/usr/bin", "/bin"].join(":"));
     expect(realpathSync(record!.cwd)).toBe(realpathSync(dir));
     expect(record!.argv.slice(3, 5)).toEqual(["-C", dir]);
   });
@@ -709,7 +720,7 @@ describe("CodexRunner: read-only jobs where codex's sandbox cannot start (the Do
       command: fakeCodex,
       writeSandbox: "danger-full-access",
       tmpDir: join(dir, "tmp"),
-      env: { ...process.env, FAKE_CODEX_RECORD: record, FAKE_CODEX_CALLS: calls, ...env },
+      ...fixtureOptions({ FAKE_CODEX_RECORD: record, FAKE_CODEX_CALLS: calls, ...env }),
       ...opts,
     });
     return {
@@ -736,6 +747,7 @@ describe("CodexRunner: read-only jobs where codex's sandbox cannot start (the Do
     expect(record().stdin).toContain("do not create, change or delete any file");
     expect(readFileSync(join(repo, "app.ts"), "utf8")).toBe("export const app = 1;\n");
     expect(progressTexts(events)).toContain("read-only run changed files, put back: app.ts");
+    expect(result.readonlyMutation).toBe("restored");
     expect(logger.warn).toHaveBeenCalledWith(
       "codex's read-only sandbox does not work here; read-only jobs run without it, and changes they make are undone",
       { detail: expect.stringContaining("bwrap: No permissions to create a new namespace") },
@@ -745,9 +757,25 @@ describe("CodexRunner: read-only jobs where codex's sandbox cannot start (the Do
   it("probes the sandbox once per runner", async () => {
     const repo = gitRepo();
     const { runner, calls } = runnerFor({ FAKE_CODEX_SCENARIO: SUCCESS, FAKE_CODEX_SANDBOX: "broken" });
-    await runner.run(readOnlyJob(repo));
-    await runner.run(readOnlyJob(repo));
+    expect((await runner.run(readOnlyJob(repo))).readonlyMutation).toBeUndefined();
+    expect((await runner.run(readOnlyJob(repo))).readonlyMutation).toBeUndefined();
     expect(calls().filter((c) => c.startsWith("sandbox"))).toEqual(['sandbox -c sandbox_mode="read-only" -- true']);
+  });
+
+  it("marks an unsandboxed read-only run unknown without a worktree guard", async () => {
+    const plain = mkdtempSync(join(root, "unguarded-"));
+    const { runner } = runnerFor({ FAKE_CODEX_SCENARIO: SUCCESS, FAKE_CODEX_SANDBOX: "broken" });
+    const result = await runner.run(readOnlyJob(plain));
+    expect(result).toMatchObject({ outcome: "ok", readonlyMutation: "unknown" });
+  });
+
+  it("marks restoration failure unknown without changing the existing run outcome", async () => {
+    const repo = gitRepo();
+    const spy = vi.spyOn(worktreeGuard, "restoreWorktree").mockRejectedValueOnce(new Error("synthetic restore failure"));
+    try {
+      const { runner } = runnerFor({ FAKE_CODEX_SCENARIO: SUCCESS, FAKE_CODEX_SANDBOX: "broken" });
+      expect(await runner.run(readOnlyJob(repo))).toMatchObject({ outcome: "ok", readonlyMutation: "unknown" });
+    } finally { spy.mockRestore(); }
   });
 
   it("keeps codex's read-only sandbox where it works", async () => {
@@ -787,8 +815,8 @@ describe("CodexRunner: login and usage windows from codex's app server", () => {
     secondary: { usedPercent: 17.5, windowDurationMins: 10080, resetsAt: 1792000000 },
   };
   const WINDOWS = [
-    { provider: "codex", window: "five_hour", utilization: 0.42, resetsAt: 1791600000000 },
-    { provider: "codex", window: "seven_day", utilization: 0.175, resetsAt: 1792000000000 },
+    { window: "five_hour", utilization: 0.42, reset: { kind: "supplied", value: 1791600000000 } },
+    { window: "seven_day", utilization: 0.175, reset: { kind: "supplied", value: 1792000000000 } },
   ];
 
   function runnerFor(env: Record<string, string>, opts: Partial<CodexRunnerOptions> = {}) {
@@ -799,13 +827,13 @@ describe("CodexRunner: login and usage windows from codex's app server", () => {
       command: fakeCodex,
       writeSandbox: "workspace-write",
       tmpDir: join(dir, "tmp"),
-      env: { ...process.env, FAKE_CODEX_SCENARIO: SUCCESS, FAKE_CODEX_RECORD: record, FAKE_CODEX_CALLS: calls, ...env },
+      ...fixtureOptions({ FAKE_CODEX_SCENARIO: SUCCESS, FAKE_CODEX_RECORD: record, FAKE_CODEX_CALLS: calls, ...env }),
       ...opts,
     });
     const run = async (signal?: AbortSignal) => {
       const events: RunEvent[] = [];
       const result = await runner.run(makeJob({ cwd: dir }), { onEvent: (e) => events.push(e), ...(signal && { signal }) });
-      return { result, events, utilization: events.flatMap((e) => (e.type === "utilization" ? [e.info] : [])) };
+      return { result, events, allowance: events.flatMap((e) => (e.type === "allowance" ? e.observations : [])) };
     };
     return {
       run,
@@ -817,6 +845,7 @@ describe("CodexRunner: login and usage windows from codex's app server", () => {
   it.each([
     ["an API key", "apiKey", "logged in with an API key"],
     ["Amazon Bedrock", "amazonBedrock", "Amazon Bedrock"],
+    ["no login", "none", "not logged in"],
   ])("refuses to run on %s, which bills outside the ChatGPT plan, as a login problem", async (_, account, text) => {
     const { run, started, calls } = runnerFor({ FAKE_CODEX_ACCOUNT: account });
     const first = await run();
@@ -830,7 +859,6 @@ describe("CodexRunner: login and usage windows from codex's app server", () => {
 
   it.each([
     ["a ChatGPT login", { FAKE_CODEX_ACCOUNT: "chatgpt" }],
-    ["no login yet (the run reports that itself)", { FAKE_CODEX_ACCOUNT: "none" }],
     ["a codex without the app server", { FAKE_CODEX_APP_SERVER: "missing" }],
   ])("runs on %s", async (_, env) => {
     const { run, started } = runnerFor(env);
@@ -849,16 +877,18 @@ describe("CodexRunner: login and usage windows from codex's app server", () => {
   it("reports the usage windows before the first run and after each run, so pacing covers codex", async () => {
     const { run, calls } = runnerFor({ FAKE_CODEX_RATE_LIMITS: JSON.stringify(RATE_LIMITS) }, { usagePollIntervalMs: 0 });
     const first = await run();
-    expect(first.utilization).toEqual([...WINDOWS, ...WINDOWS]); // before the run (with the login check), and after it
-    expect((await run()).utilization).toEqual(WINDOWS);
+    expect(first.events.filter((e) => e.type === "allowance")).toHaveLength(2);
+    expect(first.events.filter((e) => e.type === "utilization")).toEqual([]);
+    expect(first.allowance).toEqual([...WINDOWS, ...WINDOWS]); // before the run (with the login check), and after it
+    expect((await run()).allowance).toEqual(WINDOWS);
     expect(calls().filter((c) => c === "app-server account/rateLimits/read")).toHaveLength(3);
     expect(calls().filter((c) => c === "app-server account/read")).toHaveLength(1);
   });
 
   it("reads the usage windows after a run at most once per poll interval", async () => {
     const { run } = runnerFor({ FAKE_CODEX_RATE_LIMITS: JSON.stringify(RATE_LIMITS) });
-    expect((await run()).utilization).toEqual(WINDOWS); // the reading taken with the login check is fresh enough
-    expect((await run()).utilization).toEqual([]);
+    expect((await run()).allowance).toEqual(WINDOWS); // the reading taken with the login check is fresh enough
+    expect((await run()).allowance).toEqual([]);
   });
 
   it("names windows by their length and skips readings it cannot place", async () => {
@@ -867,7 +897,7 @@ describe("CodexRunner: login and usage windows from codex's app server", () => {
       secondary: { usedPercent: 5, windowDurationMins: null, resetsAt: 1792000000 },
     };
     const { run } = runnerFor({ FAKE_CODEX_RATE_LIMITS: JSON.stringify(limits) });
-    expect((await run()).utilization).toEqual([{ provider: "codex", window: "seven_day", utilization: 0.99 }]);
+    expect((await run()).allowance).toEqual([{ window: "seven_day", utilization: 0.99, reset: { kind: "supplied", value: null } }]);
   });
 
   it("asks nothing when the run is aborted before it starts", async () => {
@@ -876,5 +906,204 @@ describe("CodexRunner: login and usage windows from codex's app server", () => {
     const { run, calls } = runnerFor({ FAKE_CODEX_RATE_LIMITS: JSON.stringify(RATE_LIMITS) }, { usagePollIntervalMs: 0 });
     expect((await run(controller.signal)).result.outcome).toBe("aborted");
     expect(calls()).toEqual([]);
+  });
+});
+
+describe("Codex positive launch policy", () => {
+  it("omits unrelated parent values from the actual worker", async () => {
+    vi.stubEnv("MC_UNRELATED_SECRET", "synthetic-secret");
+    const { record } = await runScenario(SUCCESS, { env: { MC_UNRELATED_SECRET: "synthetic-secret" } });
+    expect(record!.env).not.toHaveProperty("MC_UNRELATED_SECRET");
+    expect(record!.env).not.toHaveProperty("FAKE_CODEX_SCENARIO");
+  });
+});
+
+describe("Codex launch lifecycle", () => {
+  it("keeps metadata home until the app server has actually closed", async () => {
+    const { result, envRecord } = await runScenario(SUCCESS, { env: { FAKE_CODEX_APP_SERVER: "delayed-eof" } });
+    expect(result.outcome).toBe("ok");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const records = readFileSync(envRecord, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(records.filter((entry) => entry.phase === "after-eof")).toHaveLength(1);
+    expect(records.find((entry) => entry.phase === "after-eof")).toMatchObject({ homeExists: true, tmpExists: true });
+  });
+
+  it("gives worker, probe and metadata separate private homes and omits parent credentials", async () => {
+    for (const name of ["MC_UNRELATED_SECRET", "NODE_OPTIONS", "OPENAI_API_KEY", "GH_TOKEN", "SSH_AUTH_SOCK", "BASH_ENV"]) vi.stubEnv(name, "synthetic-secret");
+    vi.stubEnv("CLAUDE_CONFIG_DIR", "/tmp/synthetic-other-provider");
+    const { result, envRecord, tmp } = await runScenario(SUCCESS);
+    expect(result.outcome).toBe("ok");
+    const records = readFileSync(envRecord, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(records.some((entry) => entry.command === "app-server")).toBe(true);
+    expect(records.some((entry) => entry.command === "sandbox")).toBe(true);
+    expect(records.some((entry) => entry.command === "exec")).toBe(true);
+    const homes = records.map((entry) => entry.env.HOME);
+    expect(new Set(homes).size).toBe(records.length);
+    for (const entry of records) {
+      expect(entry).toMatchObject({ homeExists: true, tmpExists: true });
+      for (const name of ["MC_UNRELATED_SECRET", "NODE_OPTIONS", "OPENAI_API_KEY", "GH_TOKEN", "SSH_AUTH_SOCK", "BASH_ENV", "CLAUDE_CONFIG_DIR"]) expect(entry.env).not.toHaveProperty(name);
+      expect(entry.env.CODEX_HOME).toBeDefined();
+      expect(existsSync(entry.env.HOME)).toBe(false);
+      expect(existsSync(entry.env.TMPDIR)).toBe(false);
+    }
+    expect(readdirSync(tmp)).toEqual([]);
+  });
+
+  it("returns a local structured failure and launches nothing for invalid launch settings", async () => {
+    const { result, record, envRecord, tmp } = await runScenario(SUCCESS, { runner: { path: ["/mnt/c/synthetic-private-value"] } });
+    expect(result.outcome).toBe("crashed");
+    expect(result.error).toContain("path[0]");
+    expect(result.error).not.toContain("synthetic-private-value");
+    expect(record).toBeUndefined();
+    expect(existsSync(envRecord)).toBe(false);
+    expect(readdirSync(tmp)).toEqual([]);
+  });
+});
+
+describe("Codex metadata-only allowance", () => {
+  function metadataRunner(values: Record<string, string> = {}, options: Partial<CodexRunnerOptions> = {}) {
+    const dir = mkdtempSync(join(root, "allowance-"));
+    const calls = join(dir, "calls.log");
+    const record = join(dir, "worker.json");
+    const environmentRecord = join(dir, "env.ndjson");
+    const fixture = fixtureOptions({ FAKE_CODEX_RECORD: record, FAKE_CODEX_CALLS: calls, FAKE_CODEX_ENV_RECORD: environmentRecord, FAKE_CODEX_RATE_LIMITS: JSON.stringify({
+      primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1793440000 },
+      secondary: { usedPercent: 30, windowDurationMins: 10080, resetsAt: 1794000000 },
+    }), ...values });
+    const runner = new CodexRunner({ command: fakeCodex, writeSandbox: "workspace-write", tmpDir: join(dir, "tmp"), ...fixture, ...options });
+    return { runner, dir, calls, record, fixture, environmentRecord, lines: () => existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n") : [] };
+  }
+  it("queries fresh on each metadata call, never launches a model or replays cached receipt", async () => {
+    const h = metadataRunner();
+    const first = await h.runner.readAllowance();
+    expect(first.status).toBe("observed");
+    expect(existsSync(h.record)).toBe(false);
+    const second = await h.runner.readAllowance();
+    expect(second.status).toBe("observed");
+    expect(h.lines().filter((line) => line === "app-server account/rateLimits/read")).toHaveLength(2);
+    const events: RunEvent[] = [];
+    const result = await h.runner.run(makeJob({ cwd: h.dir }), { onEvent: (event) => events.push(event) });
+    expect(result.outcome).toBe("ok");
+    expect(events.filter((event) => event.type === "allowance" || event.type === "utilization")).toEqual([]);
+    expect(h.lines().filter((line) => line === "app-server account/read")).toHaveLength(2);
+    expect(readdirSync(join(h.dir, "tmp"))).toEqual([]);
+  });
+  it("preserves duplicate aggregates as one batch and discards malformed raw values", async () => {
+    const h = metadataRunner({ FAKE_CODEX_RATE_LIMITS: JSON.stringify({
+      primary: { usedPercent: 99, windowDurationMins: 300, resetsAt: 1793440000 },
+      secondary: { usedPercent: "synthetic-private-usage", windowDurationMins: 300, resetsAt: "synthetic-private-reset" },
+    }) });
+    const result = await h.runner.readAllowance();
+    expect(result.status).toBe("observed");
+    if (result.status !== "observed") return;
+    expect(result.observations).toHaveLength(2);
+    expect(result.observations.map((row) => row.window)).toEqual(["five_hour", "five_hour"]);
+    expect(result.observations[1]).toEqual({ window: "five_hour", utilization: null, reset: { kind: "supplied", value: null } });
+    expect(JSON.stringify(result)).not.toContain("synthetic-private");
+  });
+  it.each(["apiKey", "amazonBedrock", "none"])("reports known %s account auth without a model call", async (account) => {
+    const h = metadataRunner({ FAKE_CODEX_ACCOUNT: account });
+    expect((await h.runner.readAllowance()).status).toBe("auth");
+    expect(existsSync(h.record)).toBe(false);
+  });
+  it("aborts before query without creating a provider child", async () => {
+    const h = metadataRunner();
+    const controller = new AbortController();
+    controller.abort();
+    expect(await h.runner.readAllowance({ signal: controller.signal })).toEqual({ status: "aborted" });
+    expect(h.lines()).toEqual([]);
+  });
+  it("kills an active metadata query on abort and cleans its private home", async () => {
+    const h = metadataRunner({ FAKE_CODEX_APP_SERVER: "hang" });
+    const controller = new AbortController();
+    const pending = h.runner.readAllowance({ signal: controller.signal });
+    setTimeout(() => controller.abort(), 100);
+    expect(await pending).toEqual({ status: "aborted" });
+    expect(readdirSync(join(h.dir, "tmp"))).toEqual([]);
+    expect(existsSync(h.record)).toBe(false);
+  });
+  it.each([0, -1, Number.NaN, Infinity])("rejects invalid metadata timeout %s without a child", async (timeoutMs) => {
+    const h = metadataRunner();
+    expect(await h.runner.readAllowance({ timeoutMs })).toEqual({ status: "unavailable" });
+    expect(h.lines()).toEqual([]);
+  });
+  it("does not let a missing later account answer forget a forbidden billing identity", async () => {
+    const h = metadataRunner({ FAKE_CODEX_ACCOUNT: "apiKey" });
+    expect(await h.runner.readAllowance()).toMatchObject({ status: "auth" });
+    const fixture = JSON.parse(readFileSync(join(h.fixture.configHome, "mc-fixture.json"), "utf8"));
+    writeFileSync(join(h.fixture.configHome, "mc-fixture.json"), JSON.stringify({ ...fixture, FAKE_CODEX_ACCOUNT: "missing" }));
+    expect(await h.runner.readAllowance()).toMatchObject({ status: "auth" });
+    expect((await h.runner.run(makeJob({ cwd: h.dir }))).outcome).toBe("auth");
+    expect(existsSync(h.record)).toBe(false);
+  });
+  it("does not let an unknown account type forget a forbidden billing identity", async () => {
+    const h = metadataRunner({ FAKE_CODEX_ACCOUNT: "apiKey" });
+    expect(await h.runner.readAllowance()).toMatchObject({ status: "auth" });
+    const fixture = JSON.parse(readFileSync(join(h.fixture.configHome, "mc-fixture.json"), "utf8"));
+    writeFileSync(join(h.fixture.configHome, "mc-fixture.json"), JSON.stringify({ ...fixture, FAKE_CODEX_ACCOUNT: "future-login-shape" }));
+    expect(await h.runner.readAllowance()).toMatchObject({ status: "auth" });
+    expect((await h.runner.run(makeJob({ cwd: h.dir }))).outcome).toBe("auth");
+    expect(existsSync(h.record)).toBe(false);
+  });
+  it("keeps an unknown account type unavailable despite valid windows", async () => {
+    const h = metadataRunner({ FAKE_CODEX_ACCOUNT: "future-login-shape" });
+    expect(await h.runner.readAllowance()).toEqual({ status: "unavailable" });
+  });
+  it("uses a genuinely fresh known ChatGPT identity after an earlier forbidden reading", async () => {
+    const h = metadataRunner({ FAKE_CODEX_ACCOUNT: "apiKey" });
+    expect(await h.runner.readAllowance()).toMatchObject({ status: "auth" });
+    const fixture = JSON.parse(readFileSync(join(h.fixture.configHome, "mc-fixture.json"), "utf8"));
+    writeFileSync(join(h.fixture.configHome, "mc-fixture.json"), JSON.stringify({ ...fixture, FAKE_CODEX_ACCOUNT: "chatgpt" }));
+    expect(await h.runner.readAllowance()).toMatchObject({ status: "observed" });
+    expect((await h.runner.run(makeJob({ cwd: h.dir }))).outcome).toBe("ok");
+  });
+  it("keeps missing account truth unavailable even when windows answered", async () => {
+    const h = metadataRunner({ FAKE_CODEX_ACCOUNT: "missing" });
+    expect(await h.runner.readAllowance()).toEqual({ status: "unavailable" });
+  });
+  it("preserves a known billing refusal from a partial timed-out metadata response", async () => {
+    const h = metadataRunner({ FAKE_CODEX_APP_SERVER: "account-only", FAKE_CODEX_ACCOUNT: "apiKey" },
+      { appServerTimeoutMs: 250 });
+    expect(await h.runner.readAllowance()).toMatchObject({ status: "auth" });
+    expect((await h.runner.run(makeJob({ cwd: h.dir }))).outcome).toBe("auth");
+    expect(existsSync(h.record)).toBe(false);
+    expect(readdirSync(join(h.dir, "tmp"))).toEqual([]);
+  });
+  it("shortens the transport deadline and includes an EOF-ignoring shutdown", async () => {
+    const h = metadataRunner({ FAKE_CODEX_APP_SERVER: "ignore-eof" }, { appServerTimeoutMs: 1500 });
+    const start = Date.now();
+    expect(await h.runner.readAllowance({ timeoutMs: 250 })).toEqual({ status: "unavailable" });
+    expect(Date.now() - start).toBeLessThan(900);
+    expect(readdirSync(join(h.dir, "tmp"))).toEqual([]);
+  });
+  it("does not extend the configured transport deadline", async () => {
+    const h = metadataRunner({ FAKE_CODEX_APP_SERVER: "hang" }, { appServerTimeoutMs: 250 });
+    const start = Date.now();
+    expect(await h.runner.readAllowance({ timeoutMs: 10000 })).toEqual({ status: "unavailable" });
+    expect(Date.now() - start).toBeLessThan(900);
+  });
+
+  it("aborts runtime first-login metadata without starting the worker", async () => {
+    const h = metadataRunner({ FAKE_CODEX_APP_SERVER: "hang" }, { appServerTimeoutMs: 1500 });
+    const controller = new AbortController();
+    const start = Date.now();
+    const pending = h.runner.run(makeJob({ cwd: h.dir }), { signal: controller.signal });
+    setTimeout(() => controller.abort(), 100);
+    expect((await pending).outcome).toBe("aborted");
+    expect(Date.now() - start).toBeLessThan(900);
+    expect(existsSync(h.record)).toBe(false);
+    expect(readdirSync(join(h.dir, "tmp"))).toEqual([]);
+  });
+
+  it("does not duplicate a failed preflight inside the first warn-mode worker run", async () => {
+    const h = metadataRunner({ FAKE_CODEX_APP_SERVER: "missing" });
+    expect(await h.runner.readAllowance()).toEqual({ status: "unavailable" });
+    const result = await h.runner.run(makeJob({ cwd: h.dir }));
+    expect(result.outcome).toBe("ok");
+    expect(h.lines().filter((line) => line === "app-server initialize")).toEqual([]);
+    expect(h.lines().filter((line) => line.includes("app-server"))).toEqual([]);
+    expect(existsSync(h.record)).toBe(true);
+    const starts = readFileSync(h.environmentRecord, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(starts.filter((entry) => entry.command === "app-server")).toHaveLength(1);
   });
 });

@@ -5,7 +5,9 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { Logger } from "./types.js";
 import { nullLogger } from "./util/logger.js";
+import { controllerGitEnv, type ControllerGitOptions } from "./util/launch-env.js";
 import { runProcess, type SpawnResult } from "./util/process.js";
+
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
@@ -18,24 +20,14 @@ const FALLBACK_IDENTITY: ReadonlyArray<readonly [key: string, value: string]> = 
  * Prepended to every command: raw (unquoted) non-ASCII paths, and no color codes in output we parse. No fsmonitor
  * either: `core.fsmonitor` names a command git runs on status, add and commit, and agents can write the repo's config.
  */
-const BASE_ARGS = ["-c", "core.quotepath=off", "-c", "color.ui=false", "-c", "core.fsmonitor=false"];
+// Exact objects are shared by ancestry, merge operations and the independent committed source capture.
+const BASE_ARGS = ["--no-replace-objects", "-c", "core.quotepath=off", "-c", "color.ui=false", "-c", "core.fsmonitor=false"];
 /**
  * Also prepended (except to read where the hooks are): no command runs a hook. `--no-verify` leaves post-checkout,
  * post-commit, post-merge and reference-transaction hooks running, and one that fails or hangs would fail an operation
  * that already happened; and agents can write the hooks, and the config naming their folder.
  */
 const NO_HOOKS = ["-c", "core.hooksPath=/dev/null"];
-/** Variables that pin git to one repository (they are set inside git hooks, for example); every call names its cwd instead. */
-const REPO_LOCATION_VARS = [
-  "GIT_DIR",
-  "GIT_WORK_TREE",
-  "GIT_INDEX_FILE",
-  "GIT_OBJECT_DIRECTORY",
-  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-  "GIT_COMMON_DIR",
-  "GIT_NAMESPACE",
-  "GIT_PREFIX",
-];
 /** Stdout kept in memory, for error messages, while a diff streams to a file. */
 const DIFF_CAPTURE_BYTES = 256 * 1024;
 /** Paths passed as arguments per command, in bytes: well below Linux's 2 MiB limit on arguments plus environment. */
@@ -57,7 +49,7 @@ export class GitError extends Error {
 
 export type MergeResult = { ok: true; sha: string } | { ok: false; conflict: boolean; error: string };
 
-export interface GitOptions {
+export interface GitOptions extends Pick<ControllerGitOptions, "path" | "home" | "globalConfig" | "isolatedConfig"> {
   logger?: Logger;
   /** Per-command timeout. Default 10 minutes. */
   timeoutMs?: number;
@@ -94,10 +86,12 @@ interface Worktree {
  */
 export class Git {
   private readonly logger: Logger;
+  private readonly launch: ControllerGitOptions;
   private readonly timeoutMs: number;
   private readonly maxOutputBytes: number;
 
   constructor(opts: GitOptions = {}) {
+    this.launch = { path: opts.path, home: opts.home, globalConfig: opts.globalConfig, isolatedConfig: opts.isolatedConfig };
     this.logger = opts.logger ?? nullLogger;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxOutputBytes = opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
@@ -332,6 +326,24 @@ export class Git {
    * Merges `source` into the checked-out branch with a merge commit. A conflicted merge is aborted, and so is a merge
    * left in progress beforehand (e.g. by a crash), which would otherwise pass for a conflict of this one.
    */
+  /** Observational confirmation of this controller's --no-ff merge form; never ancestry-only gap recovery. */
+  async confirmMergeReceipt(cwd: string, before: string, source: string, returned: string): Promise<boolean> {
+    const exact = (v: unknown): v is string => typeof v === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(v);
+    if (![before, source, returned].every(exact) || before.length !== source.length || before.length !== returned.length) return false;
+    try {
+      const head = async () => (await this.git(cwd, ["rev-parse", "--verify", "HEAD^{commit}"], { rootOnly: true })).trim();
+      if (await head() !== returned) return false;
+      if (returned === before) {
+        const ancestry = await this.run(cwd, ["merge-base", "--is-ancestor", source, before], { allow: [0, 1], rootOnly: true });
+        if (ancestry.exitCode !== 0) return false;
+      } else {
+        const parents = (await this.git(cwd, ["show", "-s", "--format=%P", returned, "--"], { rootOnly: true })).trim();
+        if (parents !== before + " " + source || source === before) return false;
+      }
+      return await head() === returned;
+    } catch { return false; } // A failed observation cannot confer operation credit.
+  }
+
   async merge(cwd: string, source: string, message: string): Promise<MergeResult> {
     if ((await this.resolveCommit(cwd, "MERGE_HEAD")) !== undefined) {
       this.logger.warn("aborting a merge that was left in progress", { cwd });
@@ -428,7 +440,7 @@ export class Git {
       command: "git",
       args: [...BASE_ARGS, ...(opts.repoHooksPath ? [] : NO_HOOKS), ...args],
       cwd,
-      env: gitEnv(opts.rootOnly ? cwd : undefined),
+      env: gitEnv(opts.rootOnly ? cwd : undefined, this.launch),
       stdin: opts.stdin,
       timeoutMs: this.timeoutMs,
       onStdoutLine: opts.onStdoutLine,
@@ -550,20 +562,11 @@ export class Git {
 }
 
 /**
- * The caller's environment, minus repository pinning, with prompts and editors disabled and messages in English.
+ * Explicit controller environment, with prompts/editors disabled and messages in English.
  * With `root`, git looks for the repository in `root` only, not in the directories above it.
  */
-function gitEnv(root?: string): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    GIT_TERMINAL_PROMPT: "0",
-    GIT_EDITOR: "true",
-    GIT_MERGE_AUTOEDIT: "no",
-    LC_ALL: "C", // isRepo matches an error message
-  };
-  for (const key of REPO_LOCATION_VARS) delete env[key];
-  if (root !== undefined) env.GIT_CEILING_DIRECTORIES = dirname(canonicalPath(root));
-  return env;
+function gitEnv(root: string | undefined, launch: ControllerGitOptions): NodeJS.ProcessEnv {
+  return controllerGitEnv({ ...launch, ...(root !== undefined && { ceilingDirectory: dirname(canonicalPath(root)) }) });
 }
 
 /** Refuses revisions git would read as options: branch names and refs may come from model output. */

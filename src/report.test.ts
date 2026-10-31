@@ -1,3 +1,4 @@
+import { missionEvidenceView } from "./mission-evidence.js";
 import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -869,11 +870,25 @@ describe("a mission with no feature that a test does not check", () => {
   const prose: ReportProseOutput = { narrative: "Your habit tracker is up and running. You can add habits and tick them off.", whatYouCanDo: ["Add a habit by typing its name", "Tick off a habit when you've done it today"] };
   // The local time of the report differs with the time zone; the one change on purpose since the golden files were made is the singular.
   const normal = (text: string): string => text.replace(/report written \d{4}-\d\d-\d\d \d\d:\d\d/g, "report written <time>").replaceAll("1 of 1 features done", "1 of 1 feature done");
-  const golden = (name: string): string => normal(readFileSync(join(FIXTURES, name), "utf8"));
+  // H06 adds the effective legacy helper settings. Preserve the historical files and
+  // compare every other byte, adding only the required exact disclosure at its location.
+  const golden = (name: string): string => {
+    const text = normal(readFileSync(join(FIXTURES, name), "utf8"));
+    const helpers = "Optional helpers: context suggestions on; failure summaries on; report prose on.";
+    return name.endsWith(".report.md")
+      ? text.replace("## Technical details\n\n", `## Technical details\n\n${helpers}\n\n`)
+      : text.replace(/(Request: [^\n]*\n)/u, `$1${helpers}\n`);
+  };
 
   it.each(Object.keys(variants))("%s: the report is the same text as the one the end of wave 1 wrote, word for word", (name) => {
     const text = renderReport(variants[name]!, { prose, usage: [], screenshots: [], generatedAt: "2026-10-10T05:00:00.000Z", inContainer: false });
-    expect(normal(text)).toBe(golden(`legacy-${name}.report.md`));
+    const expected=missionEvidenceView(variants[name]!);
+    const start=text.indexOf("## Recorded AI reviews\n\n"),next=text.indexOf("\n## ",start+3);
+    const block=start<0?undefined:text.slice(start,next<0?text.length:next+1);
+    expect(block).toBeDefined();
+    for(const line of [...expected.plan,...expected.application,...expected.features.flatMap(f=>[...f.review,...f.tests])])expect(block).toContain(line);
+    // Preserve the historical fixture and every old report byte; only the specified new section is projected out.
+    expect(normal(text.replace(block!,""))).toBe(golden(`legacy-${name}.report.md`));
   });
 
   it.each(Object.keys(variants))("%s: the facts for the summary writer are the same text", (name) => {
@@ -1328,7 +1343,45 @@ describe("a report for a mission that has a feature no test checks", () => {
     expect(holdsNeverSay("Checked by a second AI, not by a browser test, but it was tested twice.")).toBe(true);
   });
 
-  it("leaves out the AI-written summary and list when they talk about tests, and says so in the technical details", () => {
+  it("reconstructs useful mixed prose around checking claims and inserts recorded facts once", () => {
+    const prose = { narrative: "The guide explains setup. Every feature was tested. The page has a useful contents list.", whatYouCanDo: ["Open the guide. Everything is guaranteed. Read the examples.", "Browse the page."] };
+    const report = render(mixed(), { prose });
+    expect(report).toContain("The guide explains setup. The page has a useful contents list.");
+    expect(report).toContain("Open the guide. Read the examples.");
+    expect(report).toContain("Browse the page.");
+    expect(report).not.toContain("Every feature was tested.");
+    expect(report).not.toContain("Everything is guaranteed.");
+    expect(report.split("## Recorded checking facts")).toHaveLength(2);
+    const facts = sectionText(report, "Recorded checking facts");
+    expect(facts).toContain("Setup guide"); expect(facts).toContain("Landing page");
+    expect(sectionText(report, "Technical details")).toContain("Checking claims in the AI-written summary were replaced with recorded facts.");
+  });
+  it("drops only an affected field with ambiguous sentence boundaries", () => {
+    const prose = { narrative: 'The guide quotes "Everything was tested. Useful instructions follow.', whatYouCanDo: ["Read the examples."] };
+    const report = render(mixed(), { prose });
+    expect(report).not.toContain("Useful instructions follow.");
+    expect(report).toContain("Read the examples.");
+    expect(report).toContain("All 3 features are built.");
+  });
+  it.each(['The guide says "Everything was tested. Useful instructions follow."', '``Everything was tested. Useful instructions follow.``', '````Everything was tested. Useful instructions follow.````', '`Everything was tested. Useful instructions follow.`', 'The guide says (Everything was tested. Useful instructions follow.)'])("does not keep an unbalanced remainder after sentence removal: %s", text => {
+    const report = render(mixed(), { prose: { narrative: text, whatYouCanDo: ["Read the examples."] } });
+    expect(report).not.toContain("Useful instructions follow.");
+    expect(report).toContain("Read the examples.");
+    expect(report).toContain("All 3 features are built.");
+  });
+  it("keeps useful sentences while removing a false no-record sentence", () => {
+    const report = render(mixed(), { prose: { narrative: "The guide has examples. There is no record of how it was checked. The page explains the commands.", whatYouCanDo: ["Read the guide."] } });
+    expect(report).toContain("The guide has examples. The page explains the commands.");
+    expect(report).not.toContain("There is no record of how it was checked.");
+    expect(report).toContain("## Recorded checking facts");
+  });
+  it("retains decimal and file-name prose while replacing a later claim", () => {
+    const report = render(mixed(), { prose: { narrative: "Version 1.2 uses README.md for setup. It was verified. Open the examples.", whatYouCanDo: [] } });
+    expect(report).toContain("Version 1.2 uses README.md for setup. Open the examples.");
+    expect(report).not.toContain("It was verified.");
+  });
+
+  it("replaces checking claims in each field and says what changed in technical details", () => {
     const talks: ReportProseOutput[] = [
       { narrative: "All the features were tested and pass.", whatYouCanDo: ["Read the guide"] },
       { narrative: "The guide and the page are ready.", whatYouCanDo: ["Read the guide", "Everything is tested"] },
@@ -1338,10 +1391,13 @@ describe("a report for a mission that has a feature no test checks", () => {
     ];
     for (const prose of talks) {
       const report = render(mixed(), { prose });
-      expect(report).not.toContain(prose.narrative);
-      expect(report).toContain("All 3 features are built. The “Checked” line");
-      expect(sectionText(report, "What you can do now")).toContain("**Setup guide**: You can setup guide.");
-      expect(sectionText(report, "Technical details")).toContain("The AI-written summary was left out, because it described how the work was checked in words that Mission Control could not confirm from its own records.");
+      if (holdsNeverSay(prose.narrative)) {
+        expect(report).not.toContain(prose.narrative);
+        expect(report).toContain("All 3 features are built. The “Checked” line");
+      } else expect(report).toContain(prose.narrative);
+      if (prose.whatYouCanDo.includes("Read the guide")) expect(sectionText(report, "What you can do now")).toContain("Read the guide");
+      else expect(sectionText(report, "What you can do now")).toContain("**Setup guide**: You can setup guide.");
+      expect(sectionText(report, "Technical details")).toContain("Checking claims in the AI-written summary were replaced with recorded facts.");
       expect(sectionText(report, "What you can do now")).not.toContain("Everything is tested");
     }
     // a summary that says nothing about tests is kept
@@ -1373,12 +1429,14 @@ describe("a report for a mission that has a feature no test checks", () => {
     ["the engine", "The engine wrote the guide."],
   ];
 
-  it.each(NEVER_SAY_TEXTS)("leaves out an AI-written summary that says %s, and says so in the technical details", (_label, text) => {
+  it.each(NEVER_SAY_TEXTS)("replaces the checking claim %s while keeping the other field", (_label, text) => {
     for (const prose of [{ narrative: text, whatYouCanDo: ["Read the guide"] }, { narrative: "The guide and the page are ready.", whatYouCanDo: ["Read the guide", text] }]) {
       const report = render(mixed(), { prose });
       expect(report).not.toContain(text);
-      expect(report).toContain("All 3 features are built. The “Checked” line");
-      expect(sectionText(report, "Technical details")).toContain("The AI-written summary was left out, because it described how the work was checked in words that Mission Control could not confirm from its own records.");
+      if (prose.narrative === text) expect(report).toContain("All 3 features are built. The “Checked” line");
+      else expect(report).toContain(prose.narrative);
+      expect(sectionText(report, "What you can do now")).toContain("Read the guide");
+      expect(sectionText(report, "Technical details")).toContain("Checking claims in the AI-written summary were replaced with recorded facts.");
     }
   });
 
@@ -1478,13 +1536,13 @@ describe("a report for a mission that has a feature no test checks", () => {
     expect(holdsNeverSay(text)).toBe(true);
     const report = render(mixed(), { prose: { narrative: text, whatYouCanDo: ["Read the guide"] } });
     expect(report).not.toContain(text);
-    expect(sectionText(report, "Technical details")).toContain("The AI-written summary was left out");
+    expect(sectionText(report, "Technical details")).toContain("Checking claims in the AI-written summary were replaced");
   });
 
-  it("the footnote for a summary that was left out never says that its words do not match the records", () => {
+  it("the footnote describes claim replacement without judging the entire summary", () => {
     for (const text of CLAIMS_STILL_CAUGHT) {
       const tech = sectionText(render(mixed(), { prose: { narrative: text, whatYouCanDo: [] } }), "Technical details");
-      expect(tech).toContain("The AI-written summary was left out, because it described how the work was checked in words that Mission Control could not confirm from its own records. The summary at the top was written by Mission Control.");
+      expect(tech).toContain("Checking claims in the AI-written summary were replaced with recorded facts. Unaffected summary text was kept.");
       expect(tech).not.toContain("do not match");
     }
   });

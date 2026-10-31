@@ -11,7 +11,7 @@
 // Plan text is untrusted: it has no key that is run, opened or followed, no curly bracket and no backtick, and each value
 // is plain words (no hidden characters). Free text can still say "run this"; the owner's check and the leader's rules
 // are the defence for that, not this file.
-import { isDerivedFeature, oneLine, planReviewSentence } from "./checkpoint.js";
+import { isDerivedFeature, oneLine, planReviewSentence, shown } from "./checkpoint.js";
 // The one import cycle in the engine: the dispatcher shows plans through `describePlan`, and a plan is checked with the
 // dispatcher's own `validateSpec`. Neither module uses the other while it loads, only inside functions.
 import { validateSpec } from "./dispatcher.js";
@@ -710,6 +710,10 @@ export function wrapFact(lead: string, body: string, max = WRAP_AT): string[] {
  */
 export function reviewLines(review: PlanReview | undefined, sendBacks: number, wrap = true): string[] {
   const lines = review ? (wrap ? wrapLine(planReviewSentence(review)) : [planReviewSentence(review)]) : [];
+  for (const rejected of review?.rejectedChanges ?? []) {
+    const line = `Rejected change: ${shown(rejected, 1200)}`;
+    lines.push(...(wrap ? wrapLine(line) : [line]));
+  }
   if (sendBacks > 0) {
     const times = sendBacks === 1 ? "once" : sendBacks === 2 ? "twice" : `${sendBacks} times`;
     lines.push(`You sent the plan back ${times}. This is the plan as it stands now.`);

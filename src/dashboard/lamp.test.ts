@@ -432,7 +432,7 @@ describe("T-LAMP-L16 and L17: waits", () => {
     expect(s.missions[0]?.features.find((f) => f.id === "b")?.reason?.text).toBe("On hold until Wed 10:58, waiting for allowance.");
     expect(s.lamp.reasons[0]?.text).toBe("waiting for allowance until Wed 10:58");
     // The allowance rows name the same moment, and the file time says which day the figures changed.
-    expect(s.allowance.providers.map((p) => p.limitedText)).toEqual(["Waiting for the weekly limit to reset. Work resumes Wed 10:58.", "Waiting for the weekly limit to reset. Work resumes Wed 10:58."]);
+    expect(s.allowance.providers.map((p) => p.limitedText)).toEqual(["Waiting for the weekly limit to reset. A new allowance check can be made Wed 10:58.", "Waiting for the weekly limit to reset. A new allowance check can be made Wed 10:58."]);
     expect(s.allowance.fileChangedText).toBe("Usage figures last changed at Fri 09:58");
     expect(JSON.stringify(s)).not.toMatch(/until 10:58|at 10:58/);
   });
@@ -466,7 +466,7 @@ describe("T-LAMP-L16 and L17: waits", () => {
     expect(s.timeline.items.map((i) => i.text)).toContain(wait);
     expect(s.missions[0]?.features.find((f) => f.id === "b")?.reason?.text).toBe(`On hold until ${untilText}, waiting for allowance.`);
     expect(s.lamp.reasons[0]?.text).toBe(`waiting for allowance until ${untilText}`);
-    expect(s.allowance.providers.find((p) => p.id === "claude")?.limitedText).toBe(`Waiting for the weekly limit to reset. Work resumes ${untilText}.`);
+    expect(s.allowance.providers.find((p) => p.id === "claude")?.limitedText).toBe(`Waiting for the weekly limit to reset. A new allowance check can be made ${untilText}.`);
     expect(s.allowance.fileChangedText).toBe(`Usage figures last changed at ${changedAt}`);
   });
 

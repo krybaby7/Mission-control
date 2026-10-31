@@ -1,3 +1,4 @@
+import { recordedEvidence } from "./read.js";
 // Scope, mission and feature views, the open agent run and the now line (docs/dashboard-spec.md, 1.4, 4, 6.1, 12).
 // Pure: it gets the data read by read.ts, the run facts and the clock. It never touches the disk.
 import type { CheckpointKind, Feature, Mission, MissionEvent } from "../types.js";
@@ -239,6 +240,7 @@ function stateOf(x: StateInput): { state: MissionStateId; pausedWhy: PausedWhy |
   if (x.savedBusy) return { state: "paused", pausedWhy: "unexpected" };
   if (checkpointOf(m) !== null) return { state: "paused", pausedWhy: "checkpoint" };
   if (m.status === "stopped") {
+    if (m.pause?.kind === "allowance_unknown") return { state: "paused", pausedWhy: "allowance_unknown" };
     const stopped = lastOfType(x.events, "mission.stopped");
     return { state: "paused", pausedWhy: stopped === null ? "unknown" : MAP_STOP[stopReasonKind(stopped.data.reason)] };
   }
@@ -473,9 +475,15 @@ function factsFor(data: MissionData, scope: Scope, cx: Context): MissionFacts {
 
   const checkpoint = checkpointOf(m);
   const { progress, progressWord } = progressOf(m.stage, state);
-  const features = pickFeatures(m.features, cx.featureCap).map((f) => featureView(f, featureState(f.status, state), { state, wait: waitingNow, checkpoint }, cx.settings, m));
+  const evidence=recordedEvidence(m);
+  const features = pickFeatures(m.features, cx.featureCap).map((f) => {
+    const fact=evidence.features.find(row=>row.id===f.id);
+    return {...featureView(f, featureState(f.status, state), { state, wait: waitingNow, checkpoint }, cx.settings, m),
+      ...(fact&&{reviewRecord:{review:fact.review,tests:fact.tests}})};
+  });
   const view: MissionView = {
     id: m.id,
+    reviewRecord:{plan:evidence.plan,application:evidence.application},
     title: m.title,
     readable: true,
     kind: m.kind === "greenfield" ? "new_app" : "change",
@@ -484,7 +492,8 @@ function factsFor(data: MissionData, scope: Scope, cx: Context): MissionFacts {
     openFromEarlier: scope === "earlier",
     state,
     word: MISSION_WORDS[state],
-    sentence: missionSentence({ state, stage: m.stage, pausedWhy, staleBusy, waitText: waitingNow?.text ?? null, n, k, u: unbuilt, d: done, stuck, leftOut, checkpoint, ...(hasModeFeature(m) && { modes: true }) }),
+    sentence: missionSentence({ state, stage: m.stage, pausedWhy, staleBusy, waitText: waitingNow?.text ?? null, n, k, u: unbuilt, d: done, stuck, leftOut, checkpoint, ...(hasModeFeature(m) && { modes: true }) }) +
+      (m.allowancePolicy ? ` Last run allowance policy: ${m.allowancePolicy}.` : ""),
     pausedWhy,
     progress,
     progressWord,

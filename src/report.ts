@@ -1,3 +1,5 @@
+import { missionEvidenceView } from "./mission-evidence.js";
+import { retainFindings } from "./finding-resolution.js";
 // The report: a warm, plain-language markdown summary of one mission for a non-programmer, the plain-text
 // fact sheet the scout turns into prose, and collection of the app's Playwright screenshots.
 import { createHash } from "node:crypto";
@@ -10,6 +12,7 @@ import { plainName } from "./checks.js";
 import { endState, isCheckpointShape, isWaitingForCheck, localClock, MAX_SEND_BACKS, planReviewShort, sendBacks, shown, subjectOf, waitingWhat, whyStopped } from "./checkpoint.js";
 import { inContainer } from "./config.js";
 import { alsoMadeSentences } from "./later-files.js";
+import { helperSettingsLine } from "./helpers.js";
 import { planOf } from "./state.js";
 import type { Attempt, Feature, Finding, Mission, MissionStatus, PendingCheckpoint, Provider, ReportProseOutput, UsageRecord } from "./types.js";
 import { cleanAiText } from "./util/ai-text.js";
@@ -270,6 +273,7 @@ export function buildReportFacts(m: Mission, usage: UsageRecord[]): string {
     `Mission: ${oneLine(m.title)}`,
     `Kind: ${m.kind === "greenfield" ? "a brand-new app" : `a change to an existing app (${m.repoPath})`}`,
     `Request: ${m.request.trim()}`,
+    helperSettingsLine(m),
     `Status: ${statusLabel(m.status)} (${m.status}). ${featuresDone(counts.done, counts.total)}, ` +
       `${counts.blocked} blocked, ${counts.skipped} skipped, ${counts.unfinished} unfinished.`,
   ];
@@ -327,10 +331,10 @@ function featureFact(m: Mission, f: Feature): string {
   switch (f.status) {
     case "done": {
       // A feature no test checked says how it was checked, so the writer of the summary cannot call it tested (docs/modes-spec.md 8.5).
-      if (isModeFeature(f)) return `${head}: ${sentence(f.story)} ${checkedByFact(m, f)}${picturesFact(f)}`;
+      if (isModeFeature(f)) return [`${head}: ${sentence(f.story)} ${checkedByFact(m, f)}${picturesFact(f)}`, ...alsoMadeSentences(m, f)].join(" ");
       // In a mission that also has such a feature, a feature that tests check says so too: with no word about it the writer said that
       // it "has no record of how it was checked" (real run R6). A mission with no such feature gets the line it always had.
-      if (!hasModeFeature(m.features)) return `${head}: ${f.story}`;
+      if (!hasModeFeature(m.features)) return [`${head}: ${f.story}`, ...alsoMadeSentences(m, f)].join(" ");
       return [`${head}: ${sentence(f.story)}`, testsCheckedByFact(m, f), ...alsoMadeSentences(m, f)].join(" ");
     }
     case "blocked": {
@@ -439,9 +443,11 @@ export function renderReport(m: Mission, opts: RenderReportOptions): string {
     headerSection(m, opts.generatedAt),
     narrative(m, guarded.prose, container),
     whatYouCanDoSection(m, guarded.prose),
+    guarded.left ? recordedCheckingSection(m) : "",
     howToTrySection(m, container),
     decisionsSection(m, container),
     featuresSection(m),
+    recordedEvidenceSection(m),
     yourChecksSection(m),
     screenshotsSection(opts.screenshots, opts.reportDir),
     choicesSection(m),
@@ -451,6 +457,16 @@ export function renderReport(m: Mission, opts: RenderReportOptions): string {
   ];
   // Agents wrote much of this (prose, findings, summaries): no control characters reach a terminal that shows it.
   return stripControlChars(sections.filter((s) => s !== "").join("\n\n") + "\n");
+}
+
+function recordedEvidenceSection(m:Mission):string {
+  const evidence=missionEvidenceView(m);
+  const lines=["### Plan",...evidence.plan,"","### Whole application",...evidence.application];
+  for(const f of evidence.features){
+    const title=m.features.find(row=>row.id===f.id)?.title??f.id;
+    lines.push("","### "+oneLine(title),...f.review,...f.tests);
+  }
+  return section("Recorded AI reviews",lines.filter(Boolean).join("\n\n"));
 }
 
 function headerSection(m: Mission, generatedAt: string): string {
@@ -520,17 +536,35 @@ export function holdsNeverSay(text: string): boolean {
   return NEVER_SAY.some((re) => re.test(rest));
 }
 
-/**
- * The AI-written narrative and "what you can do" lines, unless the mission has a feature that no test checked and the AI
- * uses a word of the never-say list (tests, verified, guaranteed, ...): then both are left out (the plain narrative and the
- * feature list stand in) and `left` is true, so the technical details can say so. A rule in the prompt asks the AI not to;
- * this is the check that does not depend on it.
- */
+/** Keep useful prose; checking claims are supplied once from recorded feature facts. */
 function guardProse(m: Mission, prose: ReportProseOutput | null | undefined): { prose: ReportProseOutput | null | undefined; left: boolean } {
   if (!prose || !hasModeFeature(m.features)) return { prose, left: false };
-  prose = withoutNoRecordSentences(m, prose);
-  const texts = [prose.narrative, ...(Array.isArray(prose.whatYouCanDo) ? prose.whatYouCanDo : [])];
-  return texts.some((t) => typeof t === "string" && holdsNeverSay(t)) ? { prose: null, left: true } : { prose, left: false };
+  const hasFacts = checkedLine(m) !== undefined;
+  const claim = (text: string) => holdsNeverSay(text) || (hasFacts && NO_RECORD.some(re => re.test(text)));
+  const clean = (text: string): string => {
+    if (!claim(text)) return text;
+    // Ambiguous punctuation loses only this field, never another capability or the whole report.
+    if (text.includes("``") || !balancedProseDelimiters(text) || /\b(?:Mr|Mrs|Ms|Dr|e\.g|i\.e|etc)\./iu.test(text)) return "";
+    const pieces = text.match(/[^]*?(?:[.!?]+(?:\s+|$)|$)/gu)?.filter(p => p !== "") ?? [];
+    const kept = pieces.filter(p => !claim(p)).join("").trim();
+    return balancedProseDelimiters(kept) ? kept : "";
+  };
+  const narrative = clean(prose.narrative);
+  const whatYouCanDo = prose.whatYouCanDo.map(clean).filter(item => item.trim() !== "");
+  const left = narrative !== prose.narrative || JSON.stringify(whatYouCanDo) !== JSON.stringify(prose.whatYouCanDo);
+  return { prose: { ...prose, narrative, whatYouCanDo }, left };
+}
+
+function balancedProseDelimiters(text: string): boolean {
+  const count = (char: string) => text.split(char).length - 1;
+  return count('"') % 2 === 0 && count("\`") % 2 === 0 && count("“") === count("”") &&
+    count("(") === count(")") && count("[") === count("]");
+}
+
+function recordedCheckingSection(m: Mission): string {
+  const facts = m.features.filter(f => f.status === "done").map(f =>
+    `${oneLine(f.title)}: ${isModeFeature(f) ? checkedByFact(m, f) + picturesFact(f) : testsCheckedByFact(m, f)}`);
+  return ["## Recorded checking facts", bulletList(facts, "No completed feature has a recorded checking result yet.")].join("\n\n");
 }
 
 /**
@@ -547,21 +581,6 @@ const NO_RECORD: readonly RegExp[] = [
   /\bnothing\s+(?:records|says|shows|tells\s+(?:me|us|you))\s+(?:how|whether|if)\b[^.!?]{0,80}\b(?:checked|tested|verified|reviewed)\b/iu,
 ];
 
-/** `text` without the sentences that say nobody recorded how a feature was checked. The text itself when none does. */
-function withoutNoRecord(text: string): string {
-  // Each sentence with the space after it, so the rest keeps its spacing and its paragraph breaks.
-  const pieces = text.match(/[^]*?(?:[.!?]+(?:\s+|$)|$)/gu)?.filter((p) => p !== "") ?? [];
-  const kept = pieces.filter((p) => !NO_RECORD.some((re) => re.test(p)));
-  return kept.length === pieces.length ? text : kept.join("").trim();
-}
-
-/** The prose of the report with the sentences of `NO_RECORD` taken out, when the `Checked:` line is there to say how each finished feature was checked. */
-function withoutNoRecordSentences(m: Mission, prose: ReportProseOutput): ReportProseOutput {
-  if (checkedLine(m) === undefined) return prose;
-  const narrative = typeof prose.narrative === "string" ? withoutNoRecord(prose.narrative) : prose.narrative;
-  const items = Array.isArray(prose.whatYouCanDo) ? prose.whatYouCanDo.map((t) => (typeof t === "string" ? withoutNoRecord(t) : t)).filter((t) => t !== "") : prose.whatYouCanDo;
-  return JSON.stringify([narrative, items]) === JSON.stringify([prose.narrative, prose.whatYouCanDo]) ? prose : { ...prose, narrative, whatYouCanDo: items };
-}
 
 /**
  * For a plan from outside: who wrote it, which one it is (the code `mc plan show` prints), and what the team's plan
@@ -580,6 +599,7 @@ function planLine(m: Mission): string {
  */
 function statusLabel(status: MissionStatus, m?: Mission): string {
   if (m && isWaitingForCheck(m)) return "Waiting for your check";
+  if (m?.pause?.kind === "allowance_unknown" && status === "stopped") return "Paused: allowance could not be confirmed";
   switch (status) {
     case "done":
       return "Done";
@@ -1040,7 +1060,18 @@ function reviewNotesSection(m: Mission): string {
     const check = finding.suggestedTest ? ` Suggested check: ${oneLine(finding.suggestedTest)}` : "";
     return `**${oneLine(feature.title)}** · ${SEVERITY_WORD[finding.severity]}: ${findingText(feature, finding)}${where}${check}`;
   });
-  return section("Review notes", bulletList(items, "No open review notes."));
+  const audit: string[] = [];
+  for (const feature of m.features) {
+    if (audit.length >= 100) break;
+    const history = retainFindings(feature.findingHistory, feature.id, []);
+    if (!history) continue;
+    records: for (const row of history.records.toReversed()) for (const assessment of row.assessments.toReversed()) {
+      if (audit.length >= 100) break records;
+      if (assessment.outcome !== "resolved") continue;
+      audit.push(`**${oneLine(feature.title)}**: a reviewer reported this concern resolved at ${code(assessment.reviewedCommit.slice(0, 10))}: ${oneLine(row.finding.description)}. Evidence: ${oneLine(assessment.evidence)}. This is an AI assessment; later changes or renewed concerns can reopen it.`);
+    }
+  }
+  return section("Review notes", [bulletList(items, "No open review notes."), ...(audit.length ? ["Recorded resolution history (not independent executable proof):", bulletList(audit, "")] : [])].join("\n\n"));
 }
 
 const SEVERITY_WORD: Record<Finding["severity"], string> = { blocker: "Serious", major: "Important", minor: "Small" };
@@ -1108,7 +1139,10 @@ function technicalSection(m: Mission, generatedAt: string, proseLeftOut = false)
       `home folder; ${code(`mc logs ${m.id}`)} prints the event log`,
     `Report generated: ${generatedAt}`,
   );
-  const parts = ["## Technical details", bulletList(facts, "")];
+  const parts = ["## Technical details", helperSettingsLine(m),
+    ...(m.allowancePolicy ? [`Allowance policy for the last run: ${m.allowancePolicy}.`,
+      ...(m.allowancePolicy === "warn" ? ["Allowance may be unconfirmed; the reserve is not assured. Existing usage limits still apply."] : [])] : []),
+    ...(m.pause?.kind === "allowance_unknown" ? [oneLine(m.pause.reason)] : []), bulletList(facts, "")];
   if (m.features.length > 0) parts.push(featureCommitsTable(m.features));
   for (const f of m.features.filter((f) => f.status !== "done" && f.attempts.length > 0)) {
     parts.push(`### What was tried for ${code(f.id)}`, bulletList(f.attempts.map(attemptLine), ""));
@@ -1120,7 +1154,7 @@ function technicalSection(m: Mission, generatedAt: string, proseLeftOut = false)
   if (notes.length > 0) parts.push("### Run notes", bulletList(notes, ""));
   if (proseLeftOut) {
     parts.push(
-      "The AI-written summary was left out, because it described how the work was checked in words that Mission Control could not confirm from its own records. The summary at the top was written by Mission Control.",
+      "Checking claims in the AI-written summary were replaced with recorded facts. Unaffected summary text was kept.",
     );
   }
   return parts.join("\n\n");

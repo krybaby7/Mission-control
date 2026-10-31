@@ -96,7 +96,7 @@ function missionDebrief(facts: MissionFacts, id: VerdictId, cards: NeedsYouCard[
     const source = byId.get(x.id);
     return modes && mission !== null && source !== undefined ? { checkedBy: checkedByWords(checkedFacts(mission, source)) } : {};
   };
-  const feature = (x: FeatureView, note: Said | null): DebriefFeature => ({ featureId: x.id, title: x.title, note, attempts: x.steps.used });
+  const feature = (x: FeatureView, note: Said | null): DebriefFeature => ({ featureId: x.id, title: x.title, note, attempts: x.steps.used, ...(x.reviewRecord&&{reviewRecord:x.reviewRecord}) });
   const storyOf = (x: FeatureView): Said | null => {
     const story = stories.get(x.id);
     const text = typeof story === "string" ? clean(story, REASON_MAX_CHARS) : "";
@@ -116,6 +116,7 @@ function missionDebrief(facts: MissionFacts, id: VerdictId, cards: NeedsYouCard[
 
   return {
     missionId: view.id,
+    ...(view.reviewRecord&&{reviewRecord:view.reviewRecord}),
     title: view.title,
     verdict: verdict(id, verdictSentence(id, facts4)),
     plannedLine: plannedLine(total),

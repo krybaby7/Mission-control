@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { missionEvidenceView } from "./mission-evidence.js";
 // `mc`: the Mission Control command line. Every command prints plain language; the exit code is 0 when it worked
 // and 1 when it didn't.
 import { closeSync, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -16,15 +17,18 @@ import { builtInSettings, settingsFromConfig } from "./dashboard/snapshot.js";
 import { ConfigProblemsError, configPath, configTemplateYaml, defaultConfig, inContainer, loadConfig, parseRoleOverride } from "./config.js";
 import { type DoctorCheck, runDoctor, unkeptFolderProblems } from "./doctor.js";
 import { Git } from "./git.js";
+import { resolveHelpers } from "./helpers.js";
 import { createNotifier, type Notifier } from "./notify.js";
 import { checkChangeLines, checkChanges, describePlan, PLAN_MAX_CHARS, PLAN_PROBLEMS_SHOWN, parsePlan, reviewLines } from "./plan.js";
 import { packageRoot } from "./prompts.js";
 import { renderReport } from "./report.js";
 import { findMission, missionOutcome, runNight } from "./run.js";
 import { MissionStore, planOf } from "./state.js";
+import { alsoMadeSentences } from "./later-files.js";
 import type { CheckpointKind, Config, Feature, Mission, MissionEvent, MissionStatus, PictureWhy, RoleOverride, SpecFeature } from "./types.js";
 import { cleanAiText } from "./util/ai-text.js";
 import { ensureDir, expandHome } from "./util/fs.js";
+import { controllerGitEnv } from "./util/launch-env.js";
 import { runProcess } from "./util/process.js";
 import { stripControlChars } from "./util/terminal.js";
 
@@ -529,12 +533,12 @@ async function featureCommand(io: CliIO, folder: string, requestText: string, op
   );
 }
 
-function missionChoices(config: Config, opts: MissionOptions): { profile: string; roleOverrides: RoleOverride[] } {
+function missionChoices(config: Config, opts: MissionOptions): { profile: string; roleOverrides: RoleOverride[]; helpers: import("./types.js").HelperSettings } {
   const profile = opts.profile ?? config.defaultProfile;
   if (!Object.hasOwn(config.profiles, profile)) {
     throw new Error(`There is no profile called "${profile}". Choose one of: ${Object.keys(config.profiles).join(", ")}.`);
   }
-  return { profile, roleOverrides: opts.role.map(parseRoleOverride) };
+  return { profile, roleOverrides: opts.role.map(parseRoleOverride), helpers: resolveHelpers(config.helpers) };
 }
 
 /** The kinds asked for with --checkpoint, each once, in the order the owner meets them. */
@@ -584,7 +588,7 @@ async function checkRepo(dir: string, asker: Asker = "command"): Promise<string>
   const notRepo = `${dir} is not a git repository. Mission Control needs the app's git history to change it safely. ` +
     `Inside that folder, run "git init", then commit your files.`;
   if (!(await git.isRepo(dir))) throw new Error(notRepo);
-  const top = await runProcess({ command: "git", args: ["rev-parse", "--show-toplevel"], cwd: dir, timeoutMs: 30_000 });
+  const top = await runProcess({ env: controllerGitEnv(), command: "git", args: ["rev-parse", "--show-toplevel"], cwd: dir, timeoutMs: 30_000 });
   const root = top.stdout.trim();
   if (top.exitCode !== 0 || root === "") throw new Error(notRepo);
   if (realpathSync(root) !== realpathSync(dir)) {
@@ -945,6 +949,7 @@ function planShowCommand(io: CliIO, id: string): number {
   // A mission file can be damaged (by hand, or by a program that crashed): the plan is shown as far as it can be, as it always was,
   // and what cannot be shown is said in a plain sentence, never as the text of a program error.
   const planned = Array.isArray(spec.features) ? spec.features.filter((f): f is SpecFeature => typeof f === "object" && f !== null) : [];
+  const evidence=missionEvidenceView(m);
   let lines: string[];
   try {
     lines = [
@@ -956,6 +961,10 @@ function planShowCommand(io: CliIO, id: string): number {
       "",
       ...describePlan(spec, { request: m.request, style: "text", newApp: m.kind === "greenfield" && m.repoPath === "", ...(noOwnerLookIn(m) && { ownerStops: false as const }) }),
       ...howEachWasChecked(m, planned, store),
+      "", "Recorded AI reviews:",
+      ...evidence.plan,
+      ...evidence.application,
+      ...evidence.features.flatMap(f=>["", "“"+shown(m.features.find(row=>row.id===f.id)?.title??f.id)+"”", ...f.review, ...f.tests]),
     ];
   } catch {
     say(io.stderr, `The plan of “${shown(m.title)}” (mission ${m.id}) cannot be shown, because its file is damaged. Fix the file, or remove the mission's folder.`);
@@ -988,7 +997,7 @@ const SHOW_PROBLEMS = 3;
  * how it was checked and what was found, check by check (docs/modes-spec.md 9.4). Evidence is AI-written text and goes through `cleanAiText`.
  */
 function howEachWasChecked(m: Mission, planned: readonly SpecFeature[], store: MissionStore): string[] {
-  if (!hasModeFeature(planned)) return [];
+  if (!hasModeFeature(planned) && !m.features.some((f) => alsoMadeSentences(m, f).length > 0)) return [];
   let events: MissionEvent[] = [];
   try {
     events = store.readEvents(m.id);
@@ -997,7 +1006,7 @@ function howEachWasChecked(m: Mission, planned: readonly SpecFeature[], store: M
   }
   // In the order of the plan. A feature the team has not taken up yet (a mission that was only queued) is one that nothing has checked.
   const features = planned.map((sf): Feature => m.features.find((f) => f.id === sf.id) ?? { ...sf, status: "pending", rung: 0, attempts: [], frozenTests: [], reviewRounds: 0, openFindings: [] });
-  return ["", "How each feature was checked:", ...features.flatMap((f) => featureCheckLines(m, f, events))];
+  return ["", "How each feature was checked:", ...features.flatMap((f) => [...featureCheckLines(m, f, events), ...alsoMadeSentences(m, f).map((line) => `  ${line}`)])];
 }
 
 function featureCheckLines(m: Mission, f: Feature, events: MissionEvent[]): string[] {

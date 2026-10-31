@@ -24,6 +24,7 @@ import type {
   Config,
   DiagnosisOutput,
   Finding,
+  FinalReviewOutput,
   GateOutput,
   InitOutput,
   Mission,
@@ -142,6 +143,10 @@ export function buildOutput(summary = "implemented", testDispute: BuildOutput["t
 
 export function review(findings: Finding[] = []): ReviewOutput {
   return { verdict: findings.some((f) => f.severity !== "minor") ? "changes" : "approve", findings };
+}
+
+export function finalReview(findings: Finding[] = [], resolutions: FinalReviewOutput["resolutions"] = []): FinalReviewOutput {
+  return { ...review(findings), resolutions };
 }
 
 export function finding(severity: Finding["severity"], description: string, file: string | null = null): Finding {
@@ -337,6 +342,7 @@ export function defaultAgents(features: SpecFeature[]): Required<AgentScript> {
     reviewer: (job, call) => {
       if (call.label === "gate-a") return { structured: { verdict: "approve", issues: [] } satisfies GateOutput };
       if (isChecker(job)) return checkerBehavior(job);
+      if (call.label === "gate-c") return { structured: { ...review(), resolutions: [] } };
       return { structured: review() };
     },
     test_author: (_job, call) => ({

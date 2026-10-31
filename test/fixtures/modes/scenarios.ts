@@ -4,7 +4,7 @@
 // scratchpad) and stored in events-wave1.json. `src/dispatcher-modes.test.ts` runs the same scenarios again and the
 // recording must come out identical: a mission with no mode feature behaves and logs exactly as it did.
 //
-// This file uses only what the harness of wave 1 already had, so it runs unchanged against both trees. To make the recording
+// Historical recordings stay unchanged. Current Gate-C stand-ins explicitly include the new resolutions array. To make the recording
 // again (only if wave 1's behaviour is meant to change): copy a clean checkout of the end of wave 1, copy this file into it
 // at the same place, and in that checkout write the result of `runScenario(name)` for every name in SCENARIOS to a JSON file
 // with a throwaway test. The recording was also made with the code of the base commit (8aae86f) and came out identical.
@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { applyAnswer } from "../../../src/checkpoint.js";
 import type { CheckpointKind, Mission, SpecFeature } from "../../../src/types.js";
-import { createFixtureRepo, feature, finding, implementFeature, labelOf, MissionHarness, planSource, review } from "../mission-harness.js";
+import { createFixtureRepo, feature, finding, implementFeature, labelOf, MissionHarness, planSource, review, finalReview } from "../mission-harness.js";
 
 /** What one scenario leaves behind. Time stamps and ids are not part of it. */
 export interface Recording {
@@ -134,7 +134,7 @@ export const SCENARIOS: Record<string, { features?: SpecFeature[]; run: Scenario
       h.agents.reviewer = (_job, call) => {
         if (call.label === "gate-a") return { structured: { verdict: "approve", issues: [] } };
         if (call.label === "review-greet" && call.n === 1) return { structured: review([finding("major", "greet is not clear", "src/greet.mjs")]) };
-        return { structured: review() };
+        return { structured: call.label === "gate-c" ? finalReview() : review() };
       };
       const id = h.createMission("greenfield", { checkpoints: ["feature"] }).id;
       let sent = false;
@@ -175,8 +175,8 @@ export const SCENARIOS: Record<string, { features?: SpecFeature[]; run: Scenario
     run: async (h) => {
       h.agents.reviewer = (_job, call) => {
         if (call.label === "gate-a") return { structured: { verdict: "approve", issues: [] } };
-        if (call.label === "gate-c" && call.n === 1) return { structured: review([finding("major", "the whole does not hold together", "src/greet.mjs")]) };
-        return { structured: review() };
+        if (call.label === "gate-c" && call.n === 1) return { structured: finalReview([finding("major", "the whole does not hold together", "src/greet.mjs")]) };
+        return { structured: call.label === "gate-c" ? finalReview() : review() };
       };
       const id = h.createMission("greenfield").id;
       await h.run(id);

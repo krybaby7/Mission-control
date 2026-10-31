@@ -11,16 +11,16 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { detectLimitText } from "../limits.js";
 import { SCHEMAS } from "../schemas.js";
 import type { AgentJob, Logger, RunEvent, RunOptions, RunResult } from "../types.js";
-import { ClaudeRunner, type ClaudeRunnerOptions } from "./claude.js";
+import { claudeAllowanceInput, ClaudeRunner, type ClaudeRunnerOptions } from "./claude.js";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
-const NODE_PATH = `${dirname(process.execPath)}:${process.env.PATH ?? ""}`;
+const NODE_PATH = `${dirname(process.execPath)}:/usr/bin:/bin`;
 const HOUR_MS = 3_600_000;
 const WRITE_TOOLS =
   "Bash,Edit,Write,Read,Glob,Grep,NotebookEdit,WebFetch,WebSearch,Task,TaskCreate,TaskGet,TaskList,TaskUpdate,TaskStop,Monitor,Skill,ToolSearch";
@@ -79,6 +79,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   if (existsSync(recordPath)) killQuietly(recorded().pid);
   rmSync(dir, { recursive: true, force: true });
 });
@@ -111,13 +112,20 @@ function scenarioEnv(scenario: string, extra: Record<string, string> = {}): Node
   return { PATH: NODE_PATH, FAKE_CLAUDE_SCENARIO: scenario, FAKE_CLAUDE_RECORD: recordPath, ...extra };
 }
 
-function makeRunner(scenario: string, opts: Partial<ClaudeRunnerOptions> = {}): ClaudeRunner {
+function fixtureOptions(values: NodeJS.ProcessEnv) {
+  const configHome = mkdtempSync(join(dir, "provider-config-"));
+  writeFileSync(join(configHome, "mc-fixture.json"), JSON.stringify(Object.fromEntries(Object.entries(values).filter(([key]) => key.startsWith("FAKE_")))));
+  return { configHome, path: [dirname(process.execPath), "/usr/bin", "/bin"] };
+}
+
+function makeRunner(scenario: string, opts: Partial<ClaudeRunnerOptions> & { env?: NodeJS.ProcessEnv } = {}): ClaudeRunner {
+  const { env, ...options } = opts;
   return new ClaudeRunner({
     command: fakeClaude,
     writeMode: "bypassPermissions",
     tmpDir: promptTmp,
-    env: scenarioEnv(scenario),
-    ...opts,
+    ...fixtureOptions(env ?? scenarioEnv(scenario)),
+    ...options,
   });
 }
 
@@ -321,7 +329,7 @@ describe("ClaudeRunner.run: process handling", () => {
     expect(readdirSync(nested)).toEqual([]);
   });
 
-  it("scrubs API keys from the environment and keeps the rest", async () => {
+  it("omits API keys and unrelated values from the child environment", async () => {
     const env = {
       PATH: NODE_PATH,
       FAKE_CLAUDE_SCENARIO: "success",
@@ -331,32 +339,28 @@ describe("ClaudeRunner.run: process handling", () => {
       OPENAI_API_KEY: "sk-test",
       MC_MARKER: "kept",
     };
+    for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
     const result = await makeRunner("success", { env }).run(makeJob());
     const rec = recorded();
     expect(result.outcome).toBe("ok");
-    expect(rec.env.MC_MARKER).toBe("kept");
+    expect(rec.env.MC_MARKER).toBeUndefined();
     expect(rec.env).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(rec.env).not.toHaveProperty("CLAUDECODE");
     expect(rec.env).not.toHaveProperty("OPENAI_API_KEY");
     expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-test");
   });
 
-  it("defaults to process.env as it is at run time, scrubbed", async () => {
+  it("selects only the provider config from controller settings at run time", async () => {
     const runner = new ClaudeRunner({ command: fakeClaude, writeMode: "auto", tmpDir: promptTmp });
-    const vars = { PATH: NODE_PATH, FAKE_CLAUDE_SCENARIO: "success", FAKE_CLAUDE_RECORD: recordPath, ANTHROPIC_API_KEY: "sk-ant-test" };
-    const saved = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]));
-    Object.assign(process.env, vars);
-    try {
-      const result = await runner.run(makeJob());
-      expect(result.outcome).toBe("ok");
-    } finally {
-      for (const [key, value] of Object.entries(saved)) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-    }
+    const fixture = fixtureOptions(scenarioEnv("success"));
+    vi.stubEnv("CLAUDE_CONFIG_DIR", fixture.configHome);
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+    vi.stubEnv("MC_UNRELATED_SECRET", "synthetic-secret");
+    const result = await runner.run(makeJob());
+    expect(result.outcome).toBe("ok");
     const rec = recorded();
     expect(rec.env).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(rec.env).not.toHaveProperty("MC_UNRELATED_SECRET");
     expect(rec.argv).toContain("auto");
   });
 
@@ -500,7 +504,7 @@ describe("ClaudeRunner.run: the files a run opened", () => {
     streamCli = join(suiteDir, "claude-stream");
     writeFileSync(
       streamCli,
-      '#!/usr/bin/env node\nprocess.stdin.resume();\nprocess.stdin.on("end", () => {\n  for (const e of JSON.parse(process.env.FAKE_STREAM ?? "[]")) process.stdout.write(JSON.stringify(e) + "\\n");\n});\n',
+      '#!/usr/bin/env node\nprocess.stdin.resume();\nprocess.stdin.on("end", () => {\n  for (const e of JSON.parse(JSON.parse(require("node:fs").readFileSync(process.env.CLAUDE_CONFIG_DIR + "/mc-fixture.json", "utf8")).FAKE_STREAM)) process.stdout.write(JSON.stringify(e) + "\\n");\n});\n',
     );
     chmodSync(streamCli, 0o755);
   });
@@ -511,9 +515,50 @@ describe("ClaudeRunner.run: the files a run opened", () => {
   const read = (file_path: unknown) => ({ type: "tool_use", id: "t", name: "Read", input: { file_path } });
 
   async function opened(events: unknown[]): Promise<RunResult> {
-    const runner = new ClaudeRunner({ command: streamCli, writeMode: "bypassPermissions", tmpDir: promptTmp, env: { PATH: NODE_PATH, FAKE_STREAM: JSON.stringify([init, ...events, done]) } });
+    const runner = new ClaudeRunner({ command: streamCli, writeMode: "bypassPermissions", tmpDir: promptTmp, ...fixtureOptions({ FAKE_STREAM: JSON.stringify([init, ...events, done]) }) });
     return runner.run(makeJob({ access: "read-only" }));
   }
+
+  it.each([{ payload: null }, { payload: "private-window-payload" }, { payload: [] }])(
+    "replaces prior fresh known-window truth with a malformed payload marker: %j", async ({ payload }) => {
+      const frames = [
+        { type: "rate_limit_event", rate_limit_info: { status: "allowed", unifiedWindows: {
+          five_hour: { utilization: 0.4, resetsAt: 1793440000 },
+        } } },
+        { type: "rate_limit_event", rate_limit_info: { status: "allowed", unifiedWindows: { five_hour: payload } } },
+      ];
+      const runner = new ClaudeRunner({ command: streamCli, writeMode: "bypassPermissions", tmpDir: promptTmp,
+        ...fixtureOptions({ FAKE_STREAM: JSON.stringify([init, ...frames, done]) }) });
+      const { result, events } = await playOn(runner);
+      expect(result.outcome).toBe("ok");
+      const allowanceEvents = events.filter((event) => event.type === "utilization" || event.type === "allowance");
+      expect(allowanceEvents).toEqual([
+        { type: "utilization", info: { provider: "claude", window: "five_hour", utilization: 0.4, resetsAt: 1793440000000 } },
+        { type: "allowance", observations: [{ window: "five_hour", utilization: null, reset: { kind: "omitted" } }] },
+      ]);
+      expect(JSON.stringify(allowanceEvents)).not.toContain("private-window-payload");
+    },
+  );
+
+  it.each([
+    { utilization: "private-usage", resetsAt: 1793440000 },
+    { utilization: -1, resetsAt: 1793440000 },
+    { utilization: 0.4, resetsAt: "private-reset" },
+    { utilization: 0.4, resetsAt: null },
+  ])("preserves malformed allowance without a normal utilization event: %j", async (sample) => {
+    const runner = new ClaudeRunner({ command: streamCli, writeMode: "bypassPermissions", tmpDir: promptTmp,
+      ...fixtureOptions({ FAKE_STREAM: JSON.stringify([init, { type: "rate_limit_event", rate_limit_info: {
+        status: "allowed", rateLimitType: "five_hour", ...sample,
+      } }, done]) }) });
+    const { result, events } = await playOn(runner);
+    expect(result.outcome).toBe("ok");
+    expect(ofType(events, "utilization")).toEqual([]);
+    expect(ofType(events, "allowance")).toEqual([{ type: "allowance", observations: [{
+      window: "five_hour", utilization: typeof sample.utilization === "number" && sample.utilization >= 0 ? sample.utilization : null,
+      reset: { kind: "supplied", value: typeof sample.resetsAt === "number" ? sample.resetsAt * 1000 : null },
+    }] }]);
+    expect(JSON.stringify(ofType(events, "allowance"))).not.toContain("private-");
+  });
 
   it("keeps the file_path of each Read call, and nothing from Bash, Grep, Glob, Edit or a text block", async () => {
     const result = await opened([
@@ -853,5 +898,60 @@ describe("ClaudeRunner.run: a CLI that stays alive after its result", () => {
     const { result } = await playOn(runner, { limits: LINGER }, { signal: controller.signal, onEvent });
     expect(result.outcome).toBe("ok");
     expect(isAlive(recorded().pid)).toBe(false);
+  });
+});
+
+describe("Claude positive launch policy", () => {
+  it("omits unrelated parent values from the actual worker", async () => {
+    vi.stubEnv("MC_UNRELATED_SECRET", "synthetic-secret");
+    await makeRunner("success", { env: scenarioEnv("success", { MC_UNRELATED_SECRET: "synthetic-secret" }) }).run(makeJob());
+    expect(recorded().env).not.toHaveProperty("MC_UNRELATED_SECRET");
+    expect(recorded().env).not.toHaveProperty("FAKE_CLAUDE_SCENARIO");
+  });
+});
+
+describe("Claude environment preparation failure", () => {
+  it("returns a local structured failure without launching or echoing the invalid value", async () => {
+    const result = await makeRunner("success", { path: ["/mnt/c/synthetic-private-value"] }).run(makeJob());
+    expect(result.outcome).toBe("crashed");
+    expect(result.error).toContain("path[0]");
+    expect(result.error).not.toContain("synthetic-private-value");
+    expect(existsSync(recordPath)).toBe(false);
+    expect(readdirSync(promptTmp)).toEqual([]);
+  });
+});
+
+describe("Claude temporary-root validation", () => {
+  it("rejects traversal in controller temp settings before normalization", async () => {
+    const result = await makeRunner("success", { tmpDir: promptTmp + "/../" + basename(promptTmp) }).run(makeJob());
+    expect(result.outcome).toBe("crashed");
+    expect(result.error).toContain("tmpDir");
+    expect(existsSync(recordPath)).toBe(false);
+  });
+});
+
+describe("Claude allowance field normalization", () => {
+  it.each([{ value: undefined }, { value: null }, { value: "private-payload" }, { value: [] }, { value: 3 }])(
+    "keeps an exact known window with non-record payload unknown: %j", ({ value }) => {
+      expect(claudeAllowanceInput("five_hour", value)).toEqual({
+        window: "five_hour", utilization: null, reset: { kind: "omitted" },
+      });
+    },
+  );
+  it.each([undefined, null, "private-reset", Number.NaN, Infinity])("keeps an own malformed reset %s supplied", (resetsAt) => {
+    expect(claudeAllowanceInput("five_hour", { utilization: 0.4, resetsAt })).toEqual({
+      window: "five_hour", utilization: 0.4, reset: { kind: "supplied", value: null },
+    });
+  });
+  it("keeps reset omission distinct and finite implausible values numeric", () => {
+    expect(claudeAllowanceInput("five_hour", { utilization: 0.4 })).toEqual({
+      window: "five_hour", utilization: 0.4, reset: { kind: "omitted" },
+    });
+    expect(claudeAllowanceInput("five_hour", { utilization: 0.4, resetsAt: 1 })).toEqual({
+      window: "five_hour", utilization: 0.4, reset: { kind: "supplied", value: 1000 },
+    });
+  });
+  it.each(["Five_hour", "five/hour", " five_hour", "five_hour\u0000"])("rejects the raw window identity %j", (window) => {
+    expect(claudeAllowanceInput(window, { utilization: 0.4 })).toBeUndefined();
   });
 });
